@@ -618,7 +618,45 @@ def _inputs_table(gate: str) -> dict[str, tuple[str, ...]]:
     raise KeyError(f"unknown gate {gate!r}")
 
 
+# Swift 6.4.2 x86_64 (local swift64 branch, runtime rebuilt from 6.4.2 sources, Xcode 27 SDK
+# interfaces). Measured with llvm-otool -L on build/swiftui-guest-x86_64/package: libOpenUIKit no
+# longer records the errno bind against libswiftDarwin (6.4.2 builds no swiftDarwin overlay target)
+# and gains libswift_StringProcessing; libOpenCoreGraphics gains libswiftObjectiveC. Every other
+# packaged dylib matched the 6.2.4-derived x86_64 list unchanged.
+SWIFT64_X86_LOADS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("widget", "openuikit"): (
+        "@rpath/libOpenUIKit.dylib",
+        "@rpath/libFoundationEssentials.dylib",
+        "@rpath/libOpenCoreGraphics.dylib",
+        "/usr/lib/swift/libswiftCore.dylib",
+        "/usr/lib/libswiftcompat.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/usr/lib/libobjc.A.dylib",
+        "/usr/lib/libquartz.dylib",
+        "/usr/lib/swift/libswift_Concurrency.dylib",
+        "/usr/lib/swift/libswiftObjectiveC.dylib",
+        "/usr/lib/swift/libswift_StringProcessing.dylib",
+    ),
+    ("widget", "opencoregraphics"): (
+        "@rpath/libOpenCoreGraphics.dylib",
+        "/usr/lib/swift/libswiftCore.dylib",
+        "/usr/lib/libswiftcompat.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/usr/lib/libquartz.dylib",
+        "/usr/lib/swift/libswiftObjectiveC.dylib",
+        "/usr/lib/libobjc.A.dylib",
+    ),
+}
+
+
+def _swift64() -> bool:
+    import os
+    return os.environ.get("OPENUIKIT_SWIFT_VERSION", "").startswith("6.4")
+
+
 def loads(gate: str, name: str, arch: str) -> tuple[str, ...]:
+    if arch == "x86_64" and _swift64() and (gate, name) in SWIFT64_X86_LOADS:
+        return SWIFT64_X86_LOADS[(gate, name)]
     return macos_overlay_autolink_loads(_loads_table(gate)[name], arch)
 
 
