@@ -705,6 +705,12 @@ def inputs(gate: str, name: str, arch: str) -> tuple[str, ...]:
                     "{SYS}/usr/lib/swift/libswift_StringProcessing.tbd" if item == X86_OVERLAY_AUTOLINK_TBD else item
                     for item in items
                 )
+            elif name == "foundation":
+                # Measured onboarding-gate libFoundation.link-map: the umbrella libSystem.B.dylib
+                # follows the .tbd inputs at 6.4.2.
+                umbrella = "{MRROOT}/darwin/usr/lib/libSystem.B.dylib"
+                if umbrella not in items:
+                    items = items + (umbrella,)
             elif name == "opencoregraphics":
                 objc = "{SYS}/usr/lib/libobjc.tbd"
                 swift_objc = "{SYS}/usr/lib/swift/libswiftObjectiveC.tbd"
