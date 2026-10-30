@@ -166,9 +166,10 @@ open class UIGestureRecognizer: NSObject {
     ///                                action: #selector(handleTap(_:))))
     /// `Any?`/`Selector?`, as UIKit spells it — a caller that forwards an
     /// optional target and selector straight through (pocket-casts'
-    /// SettingsTableHeader does) needs exactly this signature.
-    public convenience init(target: Any?, action: Selector?) {
-        self.init(handler: nil)
+    /// SettingsTableHeader does) needs exactly this signature. Designated, as in UIKit, so a
+    /// subclass's initializer can chain to `super.init(target:action:)`.
+    public init(target: Any?, action: Selector?) {
+        super.init()
         if let action { addTarget(target, action: action) }
     }
 
