@@ -1,96 +1,175 @@
 // swift-interface-format-version: 1.0
-// swift-compiler-version: Swift version 6.2.4 (swift-6.2.4-RELEASE)
-// swift-module-flags: -target x86_64-apple-macosx13.0 -enable-objc-interop -enable-library-evolution -module-link-name swiftObservation -swift-version 5 -O -library-level api -enforce-exclusivity=unchecked -target-min-inlining-version min -enable-experimental-feature NoncopyableGenerics2 -enable-experimental-feature SuppressedAssociatedTypes -enable-experimental-feature SE427NoInferenceOnExtension -enable-experimental-feature NonescapableTypes -enable-experimental-feature LifetimeDependence -enable-experimental-feature InoutLifetimeDependence -enable-experimental-feature LifetimeDependenceMutableAccessors -enable-upcoming-feature MemberImportVisibility -enable-experimental-feature Macros -enable-experimental-feature ExtensionMacros -module-name Observation
-// swift-module-flags-ignorable: -enable-lexical-lifetimes=false -enable-ossa-modules -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.4
+// swift-compiler-version: Swift version 6.4.2 (swift-6.4.2-RELEASE)
+// swift-module-flags: -target x86_64-apple-macosx13.0 -enable-objc-interop -enable-library-evolution -module-link-name swiftObservation -language-mode 5 -O -library-level api -enforce-exclusivity=unchecked -target-min-inlining-version min -enable-experimental-feature SuppressedAssociatedTypesWithDefaults -enable-experimental-feature NonescapableTypes -enable-experimental-feature LifetimeDependence -enable-experimental-feature InoutLifetimeDependence -enable-experimental-feature LifetimeDependenceMutableAccessors -enable-experimental-feature Lifetimes -enable-upcoming-feature MemberImportVisibility -enable-experimental-feature Macros -enable-experimental-feature ExtensionMacros -module-name Observation
+// swift-module-flags-ignorable: -enable-lexical-lifetimes=false -formal-cxx-interoperability-mode=off -interface-compiler-version 6.4.2
+import Darwin
 import Swift
 import _Concurrency
+import Darwin.os.lock
+@available(anyAppleOS 27.0, *)
+public func withContinuousObservation(options: Observation::ObservationTracking.Observation::Options, @_inheritActorContext apply: @escaping @isolated(any) @Sendable (borrowing Observation::ObservationTracking.Observation::Event) -> Swift::Void) -> Observation::ObservationTracking.Observation::Token
+@available(anyAppleOS 27.0, *)
+extension Observation::ObservationTracking {
+  @available(anyAppleOS 27.0, *)
+  public struct Token : ~Swift::Copyable {
+    @available(anyAppleOS 27.0, *)
+    public consuming func cancel()
+    deinit
+  }
+}
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 public protocol Observable {
 }
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-@attached(member, names: named(_$observationRegistrar), named(access), named(withMutation), named(shouldNotifyObservers)) @attached(memberAttribute) @attached(extension, conformances: Observation.Observable) public macro Observable() = #externalMacro(module: "ObservationMacros", type: "ObservableMacro")
+@attached(member, names: named(_$observationRegistrar), named(access), named(withMutation), named(shouldNotifyObservers)) @attached(memberAttribute) @attached(extension, conformances: Observation::Observable) public macro Observable() = #externalMacro(module: "ObservationMacros", type: "ObservableMacro")
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 @attached(accessor, names: named(init), named(get), named(set), named(_modify)) @attached(peer, names: prefixed(`_`)) public macro ObservationTracked() = #externalMacro(module: "ObservationMacros", type: "ObservationTrackedMacro")
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 @attached(accessor) public macro ObservationIgnored() = #externalMacro(module: "ObservationMacros", type: "ObservationIgnoredMacro")
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-public struct ObservationRegistrar : Swift.Sendable {
+public struct ObservationRegistrar : Swift::Sendable {
   public init()
-  public func access<Subject, Member>(_ subject: Subject, keyPath: Swift.KeyPath<Subject, Member>) where Subject : Observation.Observable
-  public func willSet<Subject, Member>(_ subject: Subject, keyPath: Swift.KeyPath<Subject, Member>) where Subject : Observation.Observable
-  public func didSet<Subject, Member>(_ subject: Subject, keyPath: Swift.KeyPath<Subject, Member>) where Subject : Observation.Observable
-  public func withMutation<Subject, Member, T>(of subject: Subject, keyPath: Swift.KeyPath<Subject, Member>, _ mutation: () throws -> T) rethrows -> T where Subject : Observation.Observable
+  public func access<Subject, Member>(_ subject: Subject, keyPath: Swift::KeyPath<Subject, Member>) where Subject : Observation::Observable
+  public func willSet<Subject, Member>(_ subject: Subject, keyPath: Swift::KeyPath<Subject, Member>) where Subject : Observation::Observable
+  public func didSet<Subject, Member>(_ subject: Subject, keyPath: Swift::KeyPath<Subject, Member>) where Subject : Observation::Observable
+  public func withMutation<Subject, Member, T>(of subject: Subject, keyPath: Swift::KeyPath<Subject, Member>, _ mutation: () throws -> T) rethrows -> T where Subject : Observation::Observable
 }
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-extension Observation.ObservationRegistrar : Swift.Codable {
-  public init(from decoder: any Swift.Decoder) throws
-  public func encode(to encoder: any Swift.Encoder)
+extension Observation::ObservationRegistrar : Swift::Codable {
+  public init(from decoder: any Swift::Decoder) throws
+  public func encode(to encoder: any Swift::Encoder)
 }
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-extension Observation.ObservationRegistrar : Swift.Hashable {
-  public static func == (lhs: Observation.ObservationRegistrar, rhs: Observation.ObservationRegistrar) -> Swift.Bool
-  public func hash(into hasher: inout Swift.Hasher)
-  public var hashValue: Swift.Int {
+extension Observation::ObservationRegistrar : Swift::Hashable {
+  public static func == (lhs: Observation::ObservationRegistrar, rhs: Observation::ObservationRegistrar) -> Swift::Bool
+  public func hash(into hasher: inout Swift::Hasher)
+  public var hashValue: Swift::Int {
     get
   }
 }
-@_spi(SwiftUI) @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-public struct ObservationTracking : Swift.Sendable {
-  @_spi(SwiftUI) public struct _AccessList : Swift.Sendable {
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+public struct ObservationTracking : Swift::Sendable {
+  @_spi(SwiftUI) public struct _AccessList : Swift::Sendable {
   }
-  #if compiler(>=5.3) && $NonescapableTypes
-  @_spi(SwiftUI) public static func _installTracking(_ tracking: Observation.ObservationTracking, willSet: (@Sendable (Observation.ObservationTracking) -> Swift.Void)? = nil, didSet: (@Sendable (Observation.ObservationTracking) -> Swift.Void)? = nil)
-  #endif
-  @_spi(SwiftUI) public static func _installTracking(_ list: Observation.ObservationTracking._AccessList, onChange: @escaping @Sendable () -> Swift.Void)
-  #if compiler(>=5.3) && $NonescapableTypes
-  @_spi(SwiftUI) public init(_ list: Observation.ObservationTracking._AccessList?)
-  #endif
+  @_spi(SwiftUI) public static func _installTracking(_ tracking: Observation::ObservationTracking, willSet: (@Sendable (Observation::ObservationTracking) -> Swift::Void)? = nil, didSet: (@Sendable (Observation::ObservationTracking) -> Swift::Void)? = nil)
+  @_spi(SwiftUI) public static func _installTracking(_ list: Observation::ObservationTracking.Observation::_AccessList, onChange: @escaping @Sendable () -> Swift::Void)
+  @_spi(SwiftUI) public init(_ list: Observation::ObservationTracking.Observation::_AccessList?)
   @_spi(SwiftUI) public func cancel()
-  #if compiler(>=5.3) && $NonescapableTypes
   @_spi(SwiftUI) @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
-  public var changed: Swift.AnyKeyPath? {
+  public var changed: Swift::AnyKeyPath? {
     @_spi(SwiftUI) get
   }
-  #endif
+  @available(anyAppleOS 27.0, *)
+  public struct Options {
+    @available(anyAppleOS 27.0, *)
+    public init()
+    @available(anyAppleOS 27.0, *)
+    public static var willSet: Observation::ObservationTracking.Observation::Options {
+      get
+    }
+    @available(anyAppleOS 27.0, *)
+    public static var didSet: Observation::ObservationTracking.Observation::Options {
+      get
+    }
+    @available(anyAppleOS 27.0, *)
+    public static var `deinit`: Observation::ObservationTracking.Observation::Options {
+      get
+    }
+  }
+  @available(anyAppleOS 27.0, *)
+  public struct Event : ~Swift::Copyable {
+    @available(anyAppleOS 27.0, *)
+    public struct Kind : Swift::Equatable, Swift::Sendable {
+      @available(anyAppleOS 27.0, *)
+      public static var initial: Observation::ObservationTracking.Observation::Event.Observation::Kind {
+        get
+      }
+      @available(anyAppleOS 27.0, *)
+      public static var willSet: Observation::ObservationTracking.Observation::Event.Observation::Kind {
+        get
+      }
+      @available(anyAppleOS 27.0, *)
+      public static var didSet: Observation::ObservationTracking.Observation::Event.Observation::Kind {
+        get
+      }
+      @available(anyAppleOS 27.0, *)
+      public static var `deinit`: Observation::ObservationTracking.Observation::Event.Observation::Kind {
+        get
+      }
+      public static func == (a: Observation::ObservationTracking.Observation::Event.Observation::Kind, b: Observation::ObservationTracking.Observation::Event.Observation::Kind) -> Swift::Bool
+    }
+    @available(anyAppleOS 27.0, *)
+    public var kind: Observation::ObservationTracking.Observation::Event.Observation::Kind {
+      get
+    }
+    @available(anyAppleOS 27.0, *)
+    public func matches(_ keyPath: Swift::PartialKeyPath<some Observable>) -> Swift::Bool
+    @available(anyAppleOS 27.0, *)
+    public func cancel()
+  }
 }
+@available(anyAppleOS 27.0, *)
+extension Observation::ObservationTracking.Observation::Options : Swift::SetAlgebra {
+  @available(anyAppleOS 27.0, *)
+  public init(arrayLiteral elements: Observation::ObservationTracking.Observation::Options...)
+  @available(anyAppleOS 27.0, *)
+  public func union(_ other: Observation::ObservationTracking.Observation::Options) -> Observation::ObservationTracking.Observation::Options
+  @available(anyAppleOS 27.0, *)
+  public func intersection(_ other: Observation::ObservationTracking.Observation::Options) -> Observation::ObservationTracking.Observation::Options
+  @available(anyAppleOS 27.0, *)
+  public func symmetricDifference(_ other: Observation::ObservationTracking.Observation::Options) -> Observation::ObservationTracking.Observation::Options
+  @available(anyAppleOS 27.0, *)
+  public mutating func formUnion(_ other: Observation::ObservationTracking.Observation::Options)
+  @available(anyAppleOS 27.0, *)
+  public mutating func formIntersection(_ other: Observation::ObservationTracking.Observation::Options)
+  @available(anyAppleOS 27.0, *)
+  public mutating func formSymmetricDifference(_ other: Observation::ObservationTracking.Observation::Options)
+  @available(anyAppleOS 27.0, *)
+  public func contains(_ member: Observation::ObservationTracking.Observation::Options) -> Swift::Bool
+  @available(anyAppleOS 27.0, *)
+  @discardableResult
+  public mutating func insert(_ newMember: Observation::ObservationTracking.Observation::Options) -> (inserted: Swift::Bool, memberAfterInsert: Observation::ObservationTracking.Observation::Options)
+  @available(anyAppleOS 27.0, *)
+  @discardableResult
+  public mutating func remove(_ member: Observation::ObservationTracking.Observation::Options) -> Observation::ObservationTracking.Observation::Options?
+  @available(anyAppleOS 27.0, *)
+  @discardableResult
+  public mutating func update(with newMember: Observation::ObservationTracking.Observation::Options) -> Observation::ObservationTracking.Observation::Options?
+  public static func == (a: Observation::ObservationTracking.Observation::Options, b: Observation::ObservationTracking.Observation::Options) -> Swift::Bool
+  @available(anyAppleOS 27.0, *)
+  public typealias ArrayLiteralElement = Observation::ObservationTracking.Observation::Options
+  @available(anyAppleOS 27.0, *)
+  public typealias Element = Observation::ObservationTracking.Observation::Options
+}
+@available(anyAppleOS 27.0, *)
+extension Observation::ObservationTracking.Observation::Options : Swift::Sendable {
+}
+@available(anyAppleOS 27.0, *)
+public func withObservationTracking<Result, Failure>(options: Observation::ObservationTracking.Observation::Options, _ apply: () throws(Failure) -> Result, onChange: @escaping @Sendable (borrowing Observation::ObservationTracking.Observation::Event) -> Swift::Void) throws(Failure) -> Result where Failure : Swift::Error, Result : ~Copyable
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-public func withObservationTracking<T>(_ apply: () -> T, onChange: @autoclosure () -> @Sendable () -> Swift.Void) -> T
+public func withObservationTracking<T>(_ apply: () -> T, onChange: @autoclosure () -> @Sendable () -> Swift::Void) -> T
 @_spi(SwiftUI) @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-public func withObservationTracking<T>(_ apply: () -> T, willSet: @escaping @Sendable (Observation.ObservationTracking) -> Swift.Void, didSet: @escaping @Sendable (Observation.ObservationTracking) -> Swift.Void) -> T
+public func withObservationTracking<T>(_ apply: () -> T, willSet: @escaping @Sendable (Observation::ObservationTracking) -> Swift::Void, didSet: @escaping @Sendable (Observation::ObservationTracking) -> Swift::Void) -> T
 @_spi(SwiftUI) @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-public func withObservationTracking<T>(_ apply: () -> T, willSet: @escaping @Sendable (Observation.ObservationTracking) -> Swift.Void) -> T
+public func withObservationTracking<T>(_ apply: () -> T, willSet: @escaping @Sendable (Observation::ObservationTracking) -> Swift::Void) -> T
 @_spi(SwiftUI) @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-public func withObservationTracking<T>(_ apply: () -> T, didSet: @escaping @Sendable (Observation.ObservationTracking) -> Swift.Void) -> T
-@available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
-@usableFromInline
-@_silgen_name("swift_task_addCancellationHandler")
-internal func _taskAddCancellationHandler(handler: () -> Swift.Void) -> Swift.UnsafeRawPointer
-@available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
-@usableFromInline
-@_silgen_name("swift_task_removeCancellationHandler")
-internal func _taskRemoveCancellationHandler(record: Swift.UnsafeRawPointer)
-@available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
-public struct Observations<Element, Failure> : _Concurrency.AsyncSequence, Swift.Sendable where Element : Swift.Sendable, Failure : Swift.Error {
-  public enum Iteration : Swift.Sendable {
+public func withObservationTracking<T>(_ apply: () -> T, didSet: @escaping @Sendable (Observation::ObservationTracking) -> Swift::Void) -> T
+@available(anyAppleOS 26.0, *)
+public struct Observations<Element, Failure> : _Concurrency::AsyncSequence, Swift::Sendable where Element : Swift::Sendable, Failure : Swift::Error {
+  public enum Iteration : Swift::Sendable {
     case next(Element)
     case finish
   }
-  #if compiler(>=5.3) && $IsolatedAny
   public init(@_inheritActorContext _ emit: @escaping @isolated(any) @Sendable () throws(Failure) -> Element)
-  #endif
-  #if compiler(>=5.3) && $IsolatedAny
-  public static func untilFinished(@_inheritActorContext _ emit: @escaping @isolated(any) @Sendable () throws(Failure) -> Observation.Observations<Element, Failure>.Iteration) -> Observation.Observations<Element, Failure>
-  #endif
-  public struct Iterator : _Concurrency.AsyncIteratorProtocol {
-    #if compiler(>=5.3) && $NonescapableTypes
-    public mutating func next(isolation iterationIsolation: isolated (any _Concurrency.Actor)? = #isolation) async throws(Failure) -> Element?
-    #endif
-    @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
-    @_implements(_Concurrency.AsyncIteratorProtocol, Failure) public typealias __AsyncIteratorProtocol_Failure = Failure
+  public static func untilFinished(@_inheritActorContext _ emit: @escaping @isolated(any) @Sendable () throws(Failure) -> Observation::Observations<Element, Failure>.Observation::Iteration) -> Observation::Observations<Element, Failure>
+  public struct Iterator : _Concurrency::AsyncIteratorProtocol {
+    public mutating func next(isolation iterationIsolation: isolated (any _Concurrency::Actor)? = #isolation) async throws(Failure) -> Element?
+    @available(anyAppleOS 26.0, macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+    @_implements(_Concurrency::AsyncIteratorProtocol, Failure) public typealias __AsyncIteratorProtocol_Failure = Failure
   }
-  public func makeAsyncIterator() -> Observation.Observations<Element, Failure>.Iterator
-  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
-  public typealias AsyncIterator = Observation.Observations<Element, Failure>.Iterator
-  @available(iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, macOS 26.0, *)
-  @_implements(_Concurrency.AsyncSequence, Failure) public typealias __AsyncSequence_Failure = Failure
+  public func makeAsyncIterator() -> Observation::Observations<Element, Failure>.Observation::Iterator
+  @available(anyAppleOS 26.0, *)
+  public typealias AsyncIterator = Observation::Observations<Element, Failure>.Observation::Iterator
+  @available(anyAppleOS 26.0, macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+  @_implements(_Concurrency::AsyncSequence, Failure) public typealias __AsyncSequence_Failure = Failure
 }

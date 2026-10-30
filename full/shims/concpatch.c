@@ -64,6 +64,7 @@ STUB(dispatch_set_context)
 STUB(dispatch_source_create)
 STUB(dispatch_source_set_event_handler_f)
 STUB(dispatch_source_set_timer)
+STUB(dispatch_walltime)  /* Swift 6.4 _Concurrency */
 
 /* dispatch_assert_queue$V2 -- the `$` is not a C identifier character, so the
  * symbol is named with an asm label rather than by spelling the function. */

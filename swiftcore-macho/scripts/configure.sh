@@ -30,6 +30,13 @@ B=${B:-$W/build}
 
 PRINT_FLAGS=0
 CMAKE_EXTRA=()
+# SWIFTCORE_CMAKE_EXTRA: extra CMake args from the environment (build_stdlib.sh passes no argv).
+# Swift 6.4 needs -DSWIFT_STDLIB_EXTRA_SWIFT_COMPILE_FLAGS=-I;<build>/lib/swift/shims here: on a
+# Linux host targeting Darwin it no longer searches the resource dir's shims implicitly.
+if [ -n "${SWIFTCORE_CMAKE_EXTRA:-}" ]; then
+  read -r -a _swiftcore_cmake_extra <<<"$SWIFTCORE_CMAKE_EXTRA"
+  CMAKE_EXTRA+=("${_swiftcore_cmake_extra[@]}")
+fi
 for a in "$@"; do
   case "$a" in
     --print-flags) PRINT_FLAGS=1 ;;

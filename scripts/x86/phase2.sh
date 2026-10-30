@@ -148,9 +148,10 @@ if [ "${#missing_tools[@]}" -ne 0 ]; then
     exit 2
 fi
 swift_ver=$(swiftc --version | sed -n '1p')
+want_swift=${OPENUIKIT_SWIFT_VERSION:-6.2.4}
 case "$swift_ver" in
-    *6.2.4*) note toolchain satisfied ;;
-    *) cannot toolchain SWIFT_VERSION "swiftc is '$swift_ver', need Swift 6.2.4" ; exit 2 ;;
+    *"$want_swift"*) note toolchain satisfied ;;
+    *) cannot toolchain SWIFT_VERSION "swiftc is '$swift_ver', need Swift $want_swift" ; exit 2 ;;
 esac
 # Overlay / stdlib scripts source swiftcore-macho/scripts/guest_arch.inc, which
 # used to look only at /opt/swift624 and /usr/bin. Export the toolchain we

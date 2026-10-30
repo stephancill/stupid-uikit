@@ -214,6 +214,10 @@ phase2_write_sysroot_stamp "$SYS/$PHASE2_SYSROOT_STAMP" \
     "$FE_SYSROOT_MEASUREMENT_HEADERS_FILE"
 echo "  wrote $SYS/$PHASE2_SYSROOT_STAMP (input-keyed; restage when these shas change)"
 
+
+# Swift 6.4 extras: SwiftShims where Clang finds it (the 6.4 driver on a Linux host does not search
+# <resource-dir>/shims for Darwin targets) and SwiftOnoneSupport, absent from the x86_64 artifacts.
+bash "$(dirname "$0")/swift64_sysroot_extras.sh"
 echo "== $SYS"
 echo "  usr/include : $(find "$SYS/usr/include" -type f | wc -l | tr -d ' ') headers"
 echo "  modulemaps  : $(find "$SYS/usr/include" -maxdepth 1 -name '*.modulemap' | wc -l | tr -d ' ')"

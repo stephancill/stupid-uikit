@@ -132,6 +132,8 @@ swiftc_overlay() {
     -sdk "$SDK" \
     -target "$target" \
     -resource-dir "$BUILD_DIR/lib/swift" \
+    `# Swift 6.4 on a Linux host no longer searches <resource-dir>/shims for Darwin targets.` \
+    -I "$BUILD_DIR/lib/swift/shims" \
     -tools-directory "$(dirname "$SWIFTC")" \
     -module-cache-path "$work/modcache" \
     -parse-as-library \

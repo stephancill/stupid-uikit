@@ -23,124 +23,124 @@
       "sha256": "c771da6a13289b73552e960ed030197d5fb2a9c1b8caf20a1bc90873849b1056"
     },
     "swift-macosx/ObjectiveC.swiftmodule/x86_64-apple-macos.abi.json": {
-      "bytes": 58033,
-      "sha256": "597ffd6cd7946426abe9f87976bbb7ae72bc04d36b3a0a431d8652e1ca8e1d23"
+      "bytes": 58075,
+      "sha256": "e1d84ef7a2f1290f42813b6ba3006d96b3775ac16ff6fd54e9215c561bb3e5cb"
     },
     "swift-macosx/ObjectiveC.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 3371,
-      "sha256": "b00ab87c9609f20685895219881ac7a17ef046a5a73c6e0567a45ba5e90892d4"
+      "bytes": 3433,
+      "sha256": "757e905c9e4a5553132e23e5e486aaedf55c6c098ed9df5271828ac92e5c10dd"
     },
     "swift-macosx/ObjectiveC.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 376,
-      "sha256": "dfb7d169a06ab2251f00868b7447f37dce2155cc20cf6bcecc8039ee37da83e9"
+      "sha256": "0918d8f6e3a0bc2929d582fe27f1d30e78655de052c9920fa5b14d0010041a02"
     },
     "swift-macosx/ObjectiveC.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 3371,
-      "sha256": "b00ab87c9609f20685895219881ac7a17ef046a5a73c6e0567a45ba5e90892d4"
+      "bytes": 3433,
+      "sha256": "757e905c9e4a5553132e23e5e486aaedf55c6c098ed9df5271828ac92e5c10dd"
     },
     "swift-macosx/ObjectiveC.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 42852,
-      "sha256": "278d75195dc20ea86a813b861d53d957d99ebf08afd250fe49dc1f48047efdee"
+      "bytes": 43412,
+      "sha256": "753ff08d808d8387fb74a785e0e24e31ee48855bf2e432b56f081bcad80a9eb4"
     },
     "swift-macosx/Observation.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/Observation.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 7343,
-      "sha256": "043adb973510b2cf81de26d923a19184ece1b91881f6a585246ba22535b75ff0"
+      "bytes": 11954,
+      "sha256": "866e79dcb150d568763f548efa59a199688b2cb308956efd272fccdc6ac9066a"
     },
     "swift-macosx/Observation.swiftmodule/x86_64-apple-macos.swiftdoc": {
-      "bytes": 8456,
-      "sha256": "a4215edd740110ba98ab7df8760f902c25afc7a1e5b5bff03b931e8d59bf6ab8"
+      "bytes": 8308,
+      "sha256": "d4d92b57539bd07c04c1720cab263c7be7408807d8818454397335e29483202c"
     },
     "swift-macosx/Observation.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 5576,
-      "sha256": "4a64fd25a1ba990a61e6922ab4bd8d5d3478009431e02364a3a743114bb4887c"
+      "bytes": 10433,
+      "sha256": "82b65d1823b46048fd94fc6c2cd78a178dd30bdf8eca4083b2f5dcae997602be"
     },
     "swift-macosx/Observation.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 64488,
-      "sha256": "12e9818edd45fd88aca9571ed9dff15e62bb47a7ee902072353c5490dc6dded9"
+      "bytes": 99848,
+      "sha256": "44ac66b9cd2d91dd22ef435efd75c91a03b380d0b810a99cf4c1ce827ff76b03"
     },
     "swift-macosx/Swift.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/Swift.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 2252535,
-      "sha256": "6d6a91ebbc336608e724df908bcf347e1cd13df5fb2ada42d97fe7728bd123db"
+      "bytes": 2500774,
+      "sha256": "ca0071c4c4119e9eb3455d3de019c529d660b28fddff1c7348a21d89d73e7562"
     },
     "swift-macosx/Swift.swiftmodule/x86_64-apple-macos.swiftdoc": {
-      "bytes": 4050804,
-      "sha256": "4b76a33eefc7b15a54347cd88dfe6de2c8ec8b0ea7ea991bd301fcbf6e28d5c1"
+      "bytes": 4507664,
+      "sha256": "e4de10732c175a8405d3501ef3517b7b96de1695a056eba69fae02064e4ec379"
     },
     "swift-macosx/Swift.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 2230730,
-      "sha256": "7117bdfa508a73fcb5155cf8aca177bdccf03358fb06d5581f69367341f8e568"
+      "bytes": 2455425,
+      "sha256": "6362391f82e3753ddc66040bdea8496d694613cbcb96b35fa52e7b8306364b3a"
     },
     "swift-macosx/Swift.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 16169376,
-      "sha256": "9ed1d86d3ad0c79256349abf67d69d79047ec13c38240fe7e0d07388ca7af28d"
+      "bytes": 17459468,
+      "sha256": "0d4b1093376957a13b43f4a6cf253760efc5d58bec3eb581e87f04799849477e"
     },
     "swift-macosx/Synchronization.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/Synchronization.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 262603,
-      "sha256": "cba4e79892856db73f21124a50f423be6c623b6e80eeedd19041bdc8e52a1cfd"
+      "bytes": 241756,
+      "sha256": "e7c314765c74ecfd20312a2d7bd43d5ca0fd699ecb6c1a47eb1e3ee906e8fc60"
     },
     "swift-macosx/Synchronization.swiftmodule/x86_64-apple-macos.swiftdoc": {
-      "bytes": 245928,
-      "sha256": "df5a64160a05b487aba8e6bdfaa63d69b2ef8b66f8bab383e9f1b75764393bf7"
+      "bytes": 254184,
+      "sha256": "66d6c623bd41807897a2a513f1ed47b24ba160894981aa1ed07d51185258da06"
     },
     "swift-macosx/Synchronization.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 262603,
-      "sha256": "cba4e79892856db73f21124a50f423be6c623b6e80eeedd19041bdc8e52a1cfd"
+      "bytes": 241756,
+      "sha256": "e7c314765c74ecfd20312a2d7bd43d5ca0fd699ecb6c1a47eb1e3ee906e8fc60"
     },
     "swift-macosx/Synchronization.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 557740,
-      "sha256": "b3c6752affcf83479dc911ae1c3dcdc6e2a5dc02dc22803d24ae82c66c4a0afa"
+      "bytes": 576752,
+      "sha256": "68be4f7fbfaf78aba7d4007d4085c7c7ff378432e6d41a7bbcfd2088324b727e"
     },
     "swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 5736,
-      "sha256": "79120d2a28e5eb6c693443b4c0a6d0985690c7867420bf27318e13281303de1d"
+      "bytes": 5681,
+      "sha256": "a6a47f67e92234f959595b40ca23778d953ea7d62f622905de706f137c9c34d0"
     },
     "swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 380,
-      "sha256": "307b453680c9a784e6902bb077b5b700bc27b8960c8d22ae9ca37d1617ed6f13"
+      "sha256": "490d318c766089d5c002d2a47f50fa2e8016fb74a748147c6404b59e6954ba98"
     },
     "swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 5736,
-      "sha256": "79120d2a28e5eb6c693443b4c0a6d0985690c7867420bf27318e13281303de1d"
+      "bytes": 5681,
+      "sha256": "a6a47f67e92234f959595b40ca23778d953ea7d62f622905de706f137c9c34d0"
     },
     "swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 25220,
-      "sha256": "cdb050df99fa59d709efa855da619dd50bb0ffbf9fee40aa9dc51c14c72851c8"
+      "bytes": 25948,
+      "sha256": "06f0bb77e3156eed9586ff883c60167adfe26ab52e7eed119aa168cb25ab8cf1"
     },
     "swift-macosx/_Concurrency.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/_Concurrency.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 407597,
-      "sha256": "32bdff24aec51a6266acf1ac567f17fa4ff06baa9f3bf539b0a1f1e8085f395d"
+      "bytes": 312428,
+      "sha256": "be215810bf864639064b8470e2f3daf853b51d000a9351bfd13e708c24249545"
     },
     "swift-macosx/_Concurrency.swiftmodule/x86_64-apple-macos.swiftdoc": {
-      "bytes": 403244,
-      "sha256": "c5684c3c725b70f0468ba823a9ee25bb96ba223a4e98fa78ddb1754328856f23"
+      "bytes": 434668,
+      "sha256": "cca8160e174d58f9a11248864f046d0a0621fc3b8de02a05c5d1e7335b3f8c50"
     },
     "swift-macosx/_Concurrency.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 405508,
-      "sha256": "5bd8c8d3f0b56370185f05aaf30eb7cac6f3b0d5228ad6f18a7e72a6cf65c7b9"
+      "bytes": 303688,
+      "sha256": "1c43ad9edffb67075d9fb7a8901eb712f22d3d8cafaeb4451b38e18f91ecb540"
     },
     "swift-macosx/_Concurrency.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 895888,
-      "sha256": "de481b4440e0ba6c7487da059dabc4fb68ddb47dc99f9f5e34c116e37bb078aa"
+      "bytes": 950628,
+      "sha256": "b7c5fa0406059fc5487852af1f2297fa6c0be90c7f2839125b6d32ea816cfaed"
     },
     "swift-macosx/_DarwinFoundation1.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 650,
@@ -148,19 +148,19 @@
     },
     "swift-macosx/_DarwinFoundation1.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
       "bytes": 527,
-      "sha256": "49b37694cb3f598c6a1b8448750d0e8c8b449bd2269b35ed70156ecc91fba165"
+      "sha256": "86255bd3f7b29ae29361ed46a83c3c0998e0e74dcd5b93b0d68ac2f17b489025"
     },
     "swift-macosx/_DarwinFoundation1.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 384,
-      "sha256": "212adf99c86295f07a351fd6a1f435a885c5a06c1a8c84001af7b523a86f8020"
+      "sha256": "a7c86cdee146e72026dbf1484145e7fb35ca240b6cb99a64a8a1883ee30cf66b"
     },
     "swift-macosx/_DarwinFoundation1.swiftmodule/x86_64-apple-macos.swiftinterface": {
       "bytes": 527,
-      "sha256": "49b37694cb3f598c6a1b8448750d0e8c8b449bd2269b35ed70156ecc91fba165"
+      "sha256": "86255bd3f7b29ae29361ed46a83c3c0998e0e74dcd5b93b0d68ac2f17b489025"
     },
     "swift-macosx/_DarwinFoundation1.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 18000,
-      "sha256": "f5aa043de40d560a80243e267ace9e2dcd6c691b584cf5435d32a0872448fba6"
+      "bytes": 18732,
+      "sha256": "ba795e8a25fd28d5b11770a9dc606aa968f4d55bab119bfc129ae2dd93927f4f"
     },
     "swift-macosx/_DarwinFoundation2.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 623,
@@ -168,19 +168,19 @@
     },
     "swift-macosx/_DarwinFoundation2.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
       "bytes": 527,
-      "sha256": "4c84083dc2a153ecfa0bcb8cd8289fdb89d9930d56db8c6d720f4a4e94ad4d79"
+      "sha256": "1f65bc7a1858f87836a745bddc3a5551a55668e2d5e8bfc14d81eef78d0feee2"
     },
     "swift-macosx/_DarwinFoundation2.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 384,
-      "sha256": "fe4e699c7927ce8fcf2c35a61ba5c867909b8db82639f6614e25b2fa03154172"
+      "sha256": "9916feaebc4a117b47c3e1b507e05d3bc358e993b5491a2f84c52571d7d69ec1"
     },
     "swift-macosx/_DarwinFoundation2.swiftmodule/x86_64-apple-macos.swiftinterface": {
       "bytes": 527,
-      "sha256": "4c84083dc2a153ecfa0bcb8cd8289fdb89d9930d56db8c6d720f4a4e94ad4d79"
+      "sha256": "1f65bc7a1858f87836a745bddc3a5551a55668e2d5e8bfc14d81eef78d0feee2"
     },
     "swift-macosx/_DarwinFoundation2.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 18000,
-      "sha256": "546f9ca1b499197d88c5ad0e04e31f338452b15f50acf879d21f63b48a97420b"
+      "bytes": 18732,
+      "sha256": "4f4ccbd2bceb227c07db041e6a26d5f22fa8cfb74a0ede7ae4fd1d66a693be66"
     },
     "swift-macosx/_DarwinFoundation3.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 623,
@@ -188,135 +188,135 @@
     },
     "swift-macosx/_DarwinFoundation3.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
       "bytes": 527,
-      "sha256": "28bd16a252a2d7e4abf28e684093b56666eebf4b688058b93fc7f85d5fa03cfc"
+      "sha256": "9ad75b4c998f46c0e70304a58402a7face51a03bf0db8db45bdcfd57468ed471"
     },
     "swift-macosx/_DarwinFoundation3.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 384,
-      "sha256": "5ceb119060e65d5295b8bab4ad0efa67366b32ca95c1c765c943d6eccb5ffd91"
+      "sha256": "7c1d4fcb8dbd08920b831dc98111dc7a94d3449cdd351a29753fc1b44ad5fd55"
     },
     "swift-macosx/_DarwinFoundation3.swiftmodule/x86_64-apple-macos.swiftinterface": {
       "bytes": 527,
-      "sha256": "28bd16a252a2d7e4abf28e684093b56666eebf4b688058b93fc7f85d5fa03cfc"
+      "sha256": "9ad75b4c998f46c0e70304a58402a7face51a03bf0db8db45bdcfd57468ed471"
     },
     "swift-macosx/_DarwinFoundation3.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 18000,
-      "sha256": "fb909a27310b314100784f5f10d1b11c212de6b6c87c7620370da22ded445d82"
+      "bytes": 18732,
+      "sha256": "239ebea60dea7d8a09aea1ecdd5aa34de34260621105d797a651a3f72f40bb2e"
     },
     "swift-macosx/_RegexParser.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/_RegexParser.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 82052,
-      "sha256": "d857092e977453cde48dca4879bbe369b2e6f11f52125ec4032b52fb12c017b5"
+      "bytes": 90772,
+      "sha256": "20f28f7d3319cc1b0aeb51e8d571befa008182efb432f01d5d17394768ccc601"
     },
     "swift-macosx/_RegexParser.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 104756,
-      "sha256": "3edce7b035459d8a83c2c27bac88dee7514e7b5afe3d7695dc0cd30313c102a5"
+      "sha256": "e764bf5aa5cfd09fbc34eba7e2c496355705e1ead41ee25188ede6054b9220ae"
     },
     "swift-macosx/_RegexParser.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 81045,
-      "sha256": "f86aefe9ba60020e8e23677f3c1bb96cf2e4173cc7ec9c89098cff7f33076c32"
+      "bytes": 89791,
+      "sha256": "1229ed2c344cdec49cd3f228243b5e80eb06cdf8413110105d48f5e9cedf7435"
     },
     "swift-macosx/_RegexParser.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 412340,
-      "sha256": "9b5a4eee0c1bb542a502e37369b2a4b21efa432ebabdecc8c4d25e5cbbc3ba0b"
+      "bytes": 413568,
+      "sha256": "4b1f6b52293f43ea4773d916df1201824cf1269b117bd255944da78250dfc7d7"
     },
     "swift-macosx/_StringProcessing.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 149,
       "sha256": "4277ac6b49f8511196028a5ac20f5b1b1dfa754c24615d34068089f0b1739728"
     },
     "swift-macosx/_StringProcessing.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 36067,
-      "sha256": "484cace84e34191621d30c4345e9c237d682e036f67aa1dfc9f64985602a041f"
+      "bytes": 36712,
+      "sha256": "efc592b53418906ec9a015a2566689ac25ebf2b12d1cf16696ea9afa8e436812"
     },
     "swift-macosx/_StringProcessing.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 56324,
-      "sha256": "9b29cae032941bde27e37dc0e076fb3d0a7003b856805195a921ab96eecb8622"
+      "sha256": "d03e8528bd1f51702f908fc03dfaf2d04ea8e9a9a700562c9c8ee685d2253d28"
     },
     "swift-macosx/_StringProcessing.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 24393,
-      "sha256": "8232dede2863114b70c5c0a148b9e25d1b2da4150fc3ee4516148f5f8ea7fee5"
+      "bytes": 23732,
+      "sha256": "c8a5fd1ef843133b93cb9056833522112ad1bf8d9e639342727f94849224432c"
     },
     "swift-macosx/_StringProcessing.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 474464,
-      "sha256": "84dceebcadca640a4701b715927baf232ceae5631463d9f57327899b9fe17699"
+      "bytes": 486300,
+      "sha256": "9c82e9adcde8669137a4aa06777a7cd4bd788bc1bae05458c92981f83e0385e3"
     },
     "swift-macosx/_errno.swiftmodule/x86_64-apple-macos.abi.json": {
       "bytes": 2964,
       "sha256": "0981db3cfcde1bc6fc457985bdcd9e32a1993a9d6a38aa766212affad5467f2f"
     },
     "swift-macosx/_errno.swiftmodule/x86_64-apple-macos.private.swiftinterface": {
-      "bytes": 617,
-      "sha256": "53595fbb0f65559f97831df24acf713710ce775892edbfce5703b69c1b4590a1"
+      "bytes": 618,
+      "sha256": "269085e67685e68b09747d2e0cc907febd1fcab80089ca176a65335e2febdb7f"
     },
     "swift-macosx/_errno.swiftmodule/x86_64-apple-macos.swiftdoc": {
       "bytes": 372,
-      "sha256": "56e0a13ad156641bbf65c658d654a1c0a7da0830a748cb28bbc29351cf3ec321"
+      "sha256": "c3ba1f914fd1bacab10168e70e4d15e9771ed3201e3bab219321392d44e3e9f3"
     },
     "swift-macosx/_errno.swiftmodule/x86_64-apple-macos.swiftinterface": {
-      "bytes": 617,
-      "sha256": "53595fbb0f65559f97831df24acf713710ce775892edbfce5703b69c1b4590a1"
+      "bytes": 618,
+      "sha256": "269085e67685e68b09747d2e0cc907febd1fcab80089ca176a65335e2febdb7f"
     },
     "swift-macosx/_errno.swiftmodule/x86_64-apple-macos.swiftmodule": {
-      "bytes": 18408,
-      "sha256": "4aa22c60f46d3b545604d1163aa68626e33d6e808243f63008d0acb04d6448f6"
+      "bytes": 19140,
+      "sha256": "709ab90225bbdec39a5a09bd1299c3e8cf47f16b12f37f649189e6f0d3a33197"
     },
     "swift-macosx/x86_64/libswiftCommandLineSupport.a": {
       "bytes": 1504,
       "sha256": "49661771ad903553be90f8ba7c5a3b8b01cda9c36c823f1f9b5450af858dfa21"
     },
     "swift-macosx/x86_64/libswiftCore.dylib": {
-      "bytes": 10123624,
-      "sha256": "e906ba660dbe0d6aae0b7cedfe244b7092546caab3573377f82e1d15afec1085"
+      "bytes": 10254960,
+      "sha256": "47d9228da9710ea62625fcdd819a935d573440501b6caa7541b4b0d68f42c121"
     },
     "swift-macosx/x86_64/libswiftDarwin.dylib": {
       "bytes": 76352,
       "sha256": "0978b970cbc665274b55dfbd918ff6692d6fafa2eda55261db053f3636afae24"
     },
     "swift-macosx/x86_64/libswiftObjectiveC.dylib": {
-      "bytes": 38648,
-      "sha256": "a0d04413cfc5d610b6add6b20b68117c4ea321d11102ce94848b899e2bc06089"
+      "bytes": 38576,
+      "sha256": "4d7cc4822befca387c78dbe17355fffc7a08c293fd9fe3bb6285848e9559eb45"
     },
     "swift-macosx/x86_64/libswiftObservation.dylib": {
-      "bytes": 131024,
-      "sha256": "d08c34d1a2ce98fbe2303ac4380c076478655a99a3fbe25085558889e3ee6572"
+      "bytes": 229440,
+      "sha256": "c2be86972ea452cb176ad64897e87fe512bb20e0512bd3da94bea001dd8bf9b7"
     },
     "swift-macosx/x86_64/libswiftSynchronization.dylib": {
-      "bytes": 91192,
-      "sha256": "4a5a8a84c4649d71c5094d2ad9c6bb4f3f576c184c7c3dba8f37a604c1712159"
+      "bytes": 91680,
+      "sha256": "0df5b649277cee414efd3b1c19fd09eed6f140d72fa632410dc9a5492be1eaef"
     },
     "swift-macosx/x86_64/libswift_Builtin_float.dylib": {
       "bytes": 15120,
-      "sha256": "29f33af5e776d4490c611c18f0fafeea3324b66a55144456faa9fb0abb7573e3"
+      "sha256": "e0703b923f17d726af34a29c4545921ea0a78c95ec1676e1f97ac5ec7824bc6f"
     },
     "swift-macosx/x86_64/libswift_Concurrency.dylib": {
-      "bytes": 913464,
-      "sha256": "7440d8620700fad7d281a175daf93d10322e93d06788e40f50b5b078c4c4887b"
+      "bytes": 928248,
+      "sha256": "78d2476d5a29c2e677edf63fd8b77ba10a0caa7c34f0905a2f228e3a5f708263"
     },
     "swift-macosx/x86_64/libswift_DarwinFoundation1.dylib": {
-      "bytes": 8560,
-      "sha256": "578df5acb3b5cb0a8b9ca042117faf3d059a85640779e4c3b85ee990d2fd9f84"
+      "bytes": 8400,
+      "sha256": "7443fe47f126b83e3df3625eb812608576aa7d983a6b6c527303651e8c5cd5da"
     },
     "swift-macosx/x86_64/libswift_DarwinFoundation2.dylib": {
       "bytes": 8400,
       "sha256": "c1c0f56563c88931f8ee03b815063a5d2138c7e7d0f3835417d819de9e137be3"
     },
     "swift-macosx/x86_64/libswift_DarwinFoundation3.dylib": {
-      "bytes": 8600,
-      "sha256": "fb5342d7a63b480038fd72f9d5b4d9d82582d7452461ee764fadfc5e88db04c9"
+      "bytes": 8400,
+      "sha256": "88e73ec075e46f14c3ee4f9f8e484111a31aaff9a78e4e4c7d852a24490eb7bb"
     },
     "swift-macosx/x86_64/libswift_RegexParser.dylib": {
-      "bytes": 1333320,
-      "sha256": "43d5fa0b18fddf6c05a33412addf259e4b9401beaa3a78be87297743c81a837e"
+      "bytes": 1293016,
+      "sha256": "4d3d593dd6aa73b4c8716a76d28a9365761dd4d79ad2cbe5db1c22ba733381b9"
     },
     "swift-macosx/x86_64/libswift_StringProcessing.dylib": {
-      "bytes": 993328,
-      "sha256": "54339958e847c49fa5444248455a21fe8c427a5b472b2c84a92fd9c6f121a1b9"
+      "bytes": 1005256,
+      "sha256": "79bbb6c2e6d445cbf75e01dffbb139ceb9c8d46188bed7f989e3c3ce67ca8242"
     },
     "swift-macosx/x86_64/libswift_errno.dylib": {
-      "bytes": 17432,
-      "sha256": "6c5720b6a87949042b6fccf3057e5b701a0549928cc9fc71a7c70012c3626593"
+      "bytes": 17112,
+      "sha256": "6351b570e4cdeaccfa1318978020a34945e60f64abc213f53df903835118e28a"
     }
   },
   "flags": {
@@ -332,27 +332,27 @@
     "SWIFT_SDK_OSX_ARCHITECTURES": "x86_64",
     "SWIFT_STDLIB_ENABLE_OBJC_INTEROP": "ON"
   },
-  "generatedAtUtc": "2026-09-03T07:08:48Z",
+  "generatedAtUtc": "2026-10-30T18:07:59Z",
   "host": "x86_64-unknown-linux-gnu",
   "moduleTriple": "x86_64-apple-macos",
   "patches": "scripts/apply_patches.py 1-5+7+8; patch 5 via SWIFTCORE_MACHO_LEGACY_IMAGE_REG=1; patch 6 (isa widen) off; patch 8 Darwin-target skips CMake dispatch link lib",
   "schema": "swiftcore-macho/artifacts/manifest.schema.json",
   "siblings": {
     "swift-corelibs-libdispatch": {
-      "commit": "2df91f94651f2d924d7506c9d14685929386d779",
+      "commit": "2017c8a7ed86a201604cec55cd648b725afadab5",
       "repository": "https://github.com/swiftlang/swift-corelibs-libdispatch.git",
-      "tag": "swift-6.2.4-RELEASE"
+      "tag": "swift-6.4.2-RELEASE"
     },
     "swift-experimental-string-processing": {
-      "commit": "91177e6225c63e885872b83d48e254b1270fa15a",
+      "commit": "7581e7b803d2ccc58409e45e1bfde40146cb8e41",
       "repository": "https://github.com/swiftlang/swift-experimental-string-processing.git",
-      "tag": "swift-6.2.4-RELEASE"
+      "tag": "swift-6.4.2-RELEASE"
     }
   },
   "source": {
-    "commit": "ee343b46aef81c3ac7c5d7960cb35a41a88c5a9b",
+    "commit": "83eb12448e4323abbf81b0153dced2faff02d22f",
     "repository": "https://github.com/swiftlang/swift.git",
-    "tag": "swift-6.2.4-RELEASE"
+    "tag": "swift-6.4.2-RELEASE"
   },
   "toolchain": "Swift version 6.2.4 (swift-6.2.4-RELEASE)"
 }

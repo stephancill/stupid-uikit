@@ -622,6 +622,15 @@
       "size": 198904,
       "system": "Linux",
       "version_sha256": "334b226b04b408c69f0cdddd748b566360c34853bf5edddc7f0c808a4f67d559"
+    },
+    {
+      "id": "ubuntu-noble-poppler-24.02.0-1ubuntu9.11-linux-x86_64",
+      "machine": "x86_64",
+      "path": "/usr/bin/pdftocairo",
+      "sha256": "86c4c602c1474fe9c43df78489dbfb0de2a92922be555fa19856d2a5d3d7cacd",
+      "size": 178656,
+      "system": "Linux",
+      "version_sha256": "334b226b04b408c69f0cdddd748b566360c34853bf5edddc7f0c808a4f67d559"
     }
   ],
   "schema": 1

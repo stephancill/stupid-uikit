@@ -22,6 +22,7 @@ _nan
 _remquo
 _dispatch_activate
 _dispatch_after_f
+_dispatch_walltime
 _dispatch_async_f
 _dispatch_assert_queue$V2
 _dispatch_async_swift_job

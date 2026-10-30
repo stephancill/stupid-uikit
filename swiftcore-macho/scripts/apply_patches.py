@@ -288,7 +288,23 @@ edit("stdlib/public/Concurrency/CMakeLists.txt",
 # re-exports. A Darwin *target* on Linux must do the same; do not stub a
 # dispatch dylib and do not force OSX into DISPATCH_SDKS.
 # ---------------------------------------------------------------------------
-edit("stdlib/public/Concurrency/CMakeLists.txt",
+# Swift 6.4 restructured this block (dispatch include directories moved into
+# SWIFT_RUNTIME_CONCURRENCY_C_FLAGS); the same Darwin-target condition applies.
+_concurrency_cmake = (ROOT / "stdlib/public/Concurrency/CMakeLists.txt").read_text()
+if "set(swift_concurrency_dispatch_include_directories" in _concurrency_cmake:
+    edit("stdlib/public/Concurrency/CMakeLists.txt",
+"""if("${SWIFT_CONCURRENCY_GLOBAL_EXECUTOR}" STREQUAL "dispatch")
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(swift_concurrency_dispatch_include_directories""",
+"""if("${SWIFT_CONCURRENCY_GLOBAL_EXECUTOR}" STREQUAL "dispatch")
+  # Linux host + Darwin *target*: Libdispatch.cmake creates no `dispatch`
+  # target for OSX; the SDK's <dispatch.h> and libSystem re-exports apply.
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND
+     NOT "${SWIFT_PRIMARY_VARIANT_SDK}" IN_LIST SWIFT_DARWIN_PLATFORMS)
+    set(swift_concurrency_dispatch_include_directories""",
+         "Darwin target does not CMake-link a missing dispatch target (6.4)")
+else:
+  edit("stdlib/public/Concurrency/CMakeLists.txt",
 """if("${SWIFT_CONCURRENCY_GLOBAL_EXECUTOR}" STREQUAL "dispatch")
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     include_directories(AFTER
@@ -319,5 +335,20 @@ edit("stdlib/public/Concurrency/CMakeLists.txt",
   endif()
 """,
      "Darwin target does not CMake-link a missing dispatch target")
+
+# ---------------------------------------------------------------------------
+# 9 (Swift 6.4). CFExecutor.cpp defines _swift_concurrency_dlopen_noload /
+#    _swift_concurrency_dlsym, which CFExecutor.swift calls. 6.4 adds it only
+#    for a Darwin *host*; a Darwin target built on Linux needs it too.
+# ---------------------------------------------------------------------------
+if "list(APPEND SWIFT_RUNTIME_CONCURRENCY_NONEMBEDDED_C_SOURCES CFExecutor.cpp)" in \
+        (ROOT / "stdlib/public/Concurrency/CMakeLists.txt").read_text():
+    edit("stdlib/public/Concurrency/CMakeLists.txt",
+"""  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(APPEND SWIFT_RUNTIME_CONCURRENCY_NONEMBEDDED_C_SOURCES CFExecutor.cpp)""",
+"""  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR
+     "${SWIFT_PRIMARY_VARIANT_SDK}" IN_LIST SWIFT_DARWIN_PLATFORMS)
+    list(APPEND SWIFT_RUNTIME_CONCURRENCY_NONEMBEDDED_C_SOURCES CFExecutor.cpp)""",
+         "Darwin target compiles CFExecutor.cpp (6.4)")
 
 print("patches applied")

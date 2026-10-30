@@ -44,6 +44,8 @@ fi
   -target "$SWIFTCORE_SWIFTC_TARGET" \
   -sdk "$SDK" \
   -resource-dir "$RES" \
+  `# Swift 6.4 on a Linux host no longer searches <resource-dir>/shims for Darwin targets.` \
+  -I "$RES/shims" \
   -O \
   "${IMPLICIT[@]}" \
   "$HELLO" -o "${OUT}.o"
