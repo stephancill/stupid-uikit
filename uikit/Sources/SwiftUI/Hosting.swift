@@ -5092,8 +5092,21 @@ private enum _ViewRenderer {
     ) -> CGSize {
         let natural: CGSize
         switch source {
-        case .system:
-            natural = CGSize(width: 18, height: 18)
+        case .system(let name):
+            // Opt-in open-symbol fallback (OpenUIKit OpenSymbols.swift):
+            // mapped names size like SF Symbols, from the resolved font's
+            // point size. Hand-drawn symbols and the default keep 18×18.
+            if OpenUIKitRuntime.openSymbolFallback,
+               !_SystemSymbolView.isHandDrawn(name),
+               let layout = OpenSymbols.layout(
+                   name: name,
+                   pointSize: (environment.font ?? .body)
+                       .resolve(weight: environment.weight).pointSize
+               ) {
+                natural = layout.size
+            } else {
+                natural = CGSize(width: 18, height: 18)
+            }
         case .named(let name, let bundle):
             natural = UIImage(named: name, in: bundle, compatibleWith: nil)?.size
                 ?? CGSize(width: 22, height: 22)
@@ -5347,6 +5360,12 @@ private final class _SystemSymbolView: UIView {
         nil
     }
 
+    /// Symbols this view draws itself; every other name is blank unless
+    /// the opt-in open-symbol fallback maps it.
+    static func isHandDrawn(_ name: String) -> Bool {
+        name == "chevron.right" || name == "magnifyingglass"
+    }
+
     override func drawContent(in canvas: Canvas, bounds: CGRect) {
         if name == "chevron.right" {
             let color = strokeColor.resolvedCGColor(with: traitCollection)
@@ -5359,7 +5378,15 @@ private final class _SystemSymbolView: UIView {
             canvas.stroke(path, color: color, lineWidth: max(1, bounds.width * 0.22))
             return
         }
-        guard name == "magnifyingglass" else { return }
+        guard name == "magnifyingglass" else {
+            // Monochrome: hierarchical/palette/multicolor modes draw in the
+            // one resolved foreground colour.
+            if OpenUIKitRuntime.openSymbolFallback {
+                OpenSymbols.draw(name: name, in: canvas, bounds: bounds,
+                                 color: strokeColor.resolvedCGColor(with: traitCollection))
+            }
+            return
+        }
         let color = strokeColor.resolvedCGColor(with: traitCollection)
         let side = min(bounds.width, bounds.height)
         let lineWidth = max(1, side * 0.11)

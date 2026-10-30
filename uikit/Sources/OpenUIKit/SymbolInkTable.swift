@@ -142,6 +142,22 @@ public enum SymbolInkTable {
         return name + "|" + cfg + "|" + phaseKey(scale: scale)
     }
 
+    /// MEASURED alignment box and ink rect (points, F0 phase) of `name` at
+    /// the default 17|regular|unspecified configuration from the 2x
+    /// harvest, or nil when the name was not harvested or the resource is
+    /// unavailable. Geometry only: the open-symbol fallback sizes its
+    /// glyphs with it and never stamps the mask.
+    static func defaultAlignment(name: String) -> (box: CGSize, ink: CGRect)? {
+        guard let obj = table2x?.entries[name + "|17|regular|unspecified|F0"]?.objectValue,
+              let pw = obj["pw"]?.doubleValue, let ph = obj["ph"]?.doubleValue,
+              let w = obj["w"]?.doubleValue, let h = obj["h"]?.doubleValue,
+              let ox = obj["ox"]?.doubleValue, let oy = obj["oy"]?.doubleValue,
+              pw > 0, ph > 0, w > 0, h > 0 else { return nil }
+        return (CGSize(width: CGFloat(pw) / 2, height: CGFloat(ph) / 2),
+                CGRect(x: CGFloat(ox) / 2, y: CGFloat(oy) / 2,
+                       width: CGFloat(w) / 2, height: CGFloat(h) / 2))
+    }
+
     /// True-coverage template (black RGB, alpha = harvested coverage)
     /// for `name` at a harvested configuration, or nil to keep the
     /// procedural stand-in / fail closed.

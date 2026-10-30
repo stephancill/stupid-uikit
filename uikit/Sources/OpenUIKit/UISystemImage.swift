@@ -4,7 +4,11 @@
 // file supplies project-authored vector fallbacks for the exact six semantic
 // names used by the unchanged Reminder example app.  Unknown names fail just
 // as a missing native system symbol does; there is deliberately no textual,
-// font, resource, or "close enough" lookup fallback.
+// font, resource, or "close enough" lookup fallback by default. The one
+// exception is opt-in: with `OpenUIKitRuntime.openSymbolFallback` (process
+// environment OPENUIKIT_OPEN_SYMBOLS=1), names in the open-symbol mapping
+// table draw an MIT-licensed Phosphor glyph (OpenSymbols/OpenSymbols.swift);
+// unmapped names still fail.
 
 #if canImport(Foundation)
 @_exported import class Foundation.NSCoder
@@ -363,7 +367,13 @@ private enum _UISystemImageRenderer {
             return stamped
         }
 
-        guard let symbolMetrics = metrics[name] else { return nil }
+        guard let symbolMetrics = metrics[name] else {
+            // Opt-in open-licensed glyph for mapped names (OpenSymbols.swift);
+            // off, and for unmapped names, this still fails closed.
+            guard OpenUIKitRuntime.openSymbolFallback else { return nil }
+            return renderOpenSymbol(name: name, configuration: symbolConfiguration,
+                                    scale: scale)
+        }
 
         let logicalSize = configuredSize(
             for: name,
@@ -386,6 +396,48 @@ private enum _UISystemImageRenderer {
              size: CGSize(width: CGFloat(pixelSize.width) / scale,
                           height: CGFloat(pixelSize.height) / scale),
              weight: symbolConfiguration?._weight ?? .regular)
+        return UIImage(bitmap: bitmap, scale: scale)
+    }
+
+    /// SF symbol scale factors relative to `.medium`, approximated from the
+    /// tab-bar measurement (18|medium|large calendar 29×25 vs 17|regular
+    /// 21×17.5 → ≈1.29× after the point-size ratio). Small is SF's
+    /// documented ≈0.78×.
+    static func symbolScaleFactor(_ scale: UIImage.SymbolScale) -> CGFloat {
+        switch scale {
+        case .small: return 0.783
+        case .unspecified, .medium: return 1
+        case .large: return 1.29
+        }
+    }
+
+    static func renderOpenSymbol(name: String,
+                                 configuration: UIImage.SymbolConfiguration?,
+                                 scale: CGFloat) -> UIImage? {
+        let pointSize = (configuration?._pointSize ?? 17)
+            * symbolScaleFactor(configuration?._scale ?? .unspecified)
+        guard let layout = OpenSymbols.layout(name: name, pointSize: pointSize) else {
+            return nil
+        }
+        // UIImage sizes are whole device pixels (pixels / scale), as the
+        // harvested alignment boxes are.
+        let logical = CGSize(width: (layout.size.width * scale).rounded() / scale,
+                             height: (layout.size.height * scale).rounded() / scale)
+        guard let pixelSize = _UIBitmapAllocation.checkedPixelSize(
+            for: CGRect(origin: .zero, size: logical),
+            scale: scale,
+            maximumDimension: CGFloat(maximumDimension),
+            maximumPixels: maximumPixels
+        ) else {
+            return nil
+        }
+        let bitmap = Bitmap(width: pixelSize.width, height: pixelSize.height)
+        let canvas = Canvas(bitmap: bitmap, scale: scale)
+        OpenSymbols.draw(name: name, in: canvas,
+                         bounds: CGRect(x: 0, y: 0,
+                                        width: CGFloat(pixelSize.width) / scale,
+                                        height: CGFloat(pixelSize.height) / scale),
+                         color: CanvasColor.black)
         return UIImage(bitmap: bitmap, scale: scale)
     }
 
