@@ -29,6 +29,11 @@
 // sees the canonical `IndexPath`, rather than OpenUIKit's old fallback value.
 #if canImport(Foundation)
 @_exported import Foundation
+#if !os(Linux)
+// Foundation's NSItemProvider (the guest facade subclasses OpenUIKit's) is the one app code names;
+// without this scoped re-export, `NSItemProvider` is ambiguous for type lookup in app files.
+@_exported import class Foundation.NSItemProvider
+#endif
 #elseif canImport(FoundationEssentials)
 @_exported import FoundationEssentials
 #endif
