@@ -385,7 +385,7 @@ open class UIGestureRecognizer: NSObject {
 // MARK: - Tap
 
 @preconcurrency @MainActor
-public final class UITapGestureRecognizer: UIGestureRecognizer {
+open class UITapGestureRecognizer: UIGestureRecognizer {
     public var numberOfTapsRequired: Int = 1
     public var numberOfTouchesRequired: Int = 1
     /// Movement beyond this many points fails the tap (UIKit's private

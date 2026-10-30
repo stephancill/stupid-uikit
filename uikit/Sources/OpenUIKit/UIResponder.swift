@@ -268,7 +268,9 @@ open class UIResponder: NSObject {
     }
 
     /// Give up first-responder status. Returns true (UIKit's default).
-#if OPENUIKIT_OBJC_SUBCLASSING
+    /// Exposed to Objective-C wherever a runtime exists so `#selector(UIResponder.resignFirstResponder)`
+    /// (UIApplication.sendAction to dismiss the keyboard) compiles.
+#if OPENUIKIT_OBJC_SUBCLASSING || canImport(ObjectiveC)
     @objc
 #endif
     @discardableResult

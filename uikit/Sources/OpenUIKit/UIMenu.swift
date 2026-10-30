@@ -77,7 +77,7 @@ public struct UIKeyModifierFlags: OptionSet, Hashable, Sendable {
 @preconcurrency @MainActor
 open class UIMenuElement: NSObject {
     public internal(set) var title: String
-    public internal(set) var subtitle: String?
+    public var subtitle: String?
     public internal(set) var image: UIImage?
 
     init(title: String, subtitle: String?, image: UIImage?) {
