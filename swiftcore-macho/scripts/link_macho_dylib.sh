@@ -34,7 +34,8 @@ import os, pathlib, sys
 log = pathlib.Path(os.environ["LOG"]); lib = os.environ["LIB"]
 arch = os.environ["NEEDLE_ARCH"]
 needle = f"-o lib/swift/macosx/{arch}/{lib}.so"
-line = next((l for l in log.read_text(errors="replace").splitlines() if needle in l), None)
+# Last match: build.log accumulates across builds and an earlier link line can be stale.
+line = next((l for l in reversed(log.read_text(errors="replace").splitlines()) if needle in l), None)
 if line is None:
     sys.exit(f"no link line for {lib} (needle {needle}) in {log}")
 toks = line.split()
