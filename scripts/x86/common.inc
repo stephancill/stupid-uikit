@@ -622,6 +622,7 @@ phase2_darwin_modulemap_missing_headers() {
         while IFS= read -r rel; do
             [ -n "$rel" ] || continue
             [ -f "$inc/$rel" ] && continue
+            [ -f "$(dirname "$map")/$rel" ] && continue
             case ",$miss," in
                 *",$rel,"*) ;;
                 *) miss="${miss:+$miss,}$rel" ;;
