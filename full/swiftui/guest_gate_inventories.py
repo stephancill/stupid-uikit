@@ -655,8 +655,8 @@ def _swift64() -> bool:
 
 
 def loads(gate: str, name: str, arch: str) -> tuple[str, ...]:
-    if arch == "x86_64" and _swift64() and (gate, name) in SWIFT64_X86_LOADS:
-        return SWIFT64_X86_LOADS[(gate, name)]
+    if arch == "x86_64" and _swift64() and ("widget", name) in SWIFT64_X86_LOADS:
+        return SWIFT64_X86_LOADS[("widget", name)]
     return macos_overlay_autolink_loads(_loads_table(gate)[name], arch)
 
 
@@ -700,12 +700,12 @@ def inputs(gate: str, name: str, arch: str) -> tuple[str, ...]:
         # Swift 6.4.2: the link maps follow SWIFT64_X86_LOADS (measured from
         # build/swiftui-guest-x86_64/audit/*.link-map; all other dylibs match).
         if _swift64():
-            if (gate, name) == ("widget", "openuikit"):
+            if name == "openuikit":
                 items = tuple(
                     "{SYS}/usr/lib/swift/libswift_StringProcessing.tbd" if item == X86_OVERLAY_AUTOLINK_TBD else item
                     for item in items
                 )
-            elif (gate, name) == ("widget", "opencoregraphics"):
+            elif name == "opencoregraphics":
                 objc = "{SYS}/usr/lib/libobjc.tbd"
                 swift_objc = "{SYS}/usr/lib/swift/libswiftObjectiveC.tbd"
                 if swift_objc not in items and objc in items:
