@@ -93,4 +93,23 @@ extension NSAttributedString {
         let h = FontEngine.labelLineHeight(for: font)
         return CGRect(x: 0, y: 0, width: min(size.width, w), height: min(size.height, h))
     }
+
+    /// stupid social ChatUserColor.swift: initials avatar centring. Unconstrained single-line size,
+    /// measured with the same engine as `boundingRect`.
+    public func size() -> CGSize {
+        boundingRect(
+            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+            options: [],
+            context: nil
+        ).size
+    }
+
+    /// stupid social ChatUserColor.swift: draws the initials into a UIGraphicsImageRenderer context.
+    /// Uses UILabel's attributed-text drawing so runs, fonts and colours match a label's.
+    public func draw(at point: CGPoint) {
+        let bounds = CGRect(origin: point, size: size())
+        let label = UILabel()
+        label.attributedText = self
+        UIGraphics.draw { label._drawText(in: $0, bounds: bounds) }
+    }
 }
