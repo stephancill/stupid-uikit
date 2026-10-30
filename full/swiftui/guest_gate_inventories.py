@@ -697,6 +697,20 @@ def inputs(gate: str, name: str, arch: str) -> tuple[str, ...]:
         )
         if gained and X86_OVERLAY_AUTOLINK_TBD not in items:
             items = items + (X86_OVERLAY_AUTOLINK_TBD,)
+        # Swift 6.4.2: the link maps follow SWIFT64_X86_LOADS (measured from
+        # build/swiftui-guest-x86_64/audit/*.link-map; all other dylibs match).
+        if _swift64():
+            if (gate, name) == ("widget", "openuikit"):
+                items = tuple(
+                    "{SYS}/usr/lib/swift/libswift_StringProcessing.tbd" if item == X86_OVERLAY_AUTOLINK_TBD else item
+                    for item in items
+                )
+            elif (gate, name) == ("widget", "opencoregraphics"):
+                objc = "{SYS}/usr/lib/libobjc.tbd"
+                swift_objc = "{SYS}/usr/lib/swift/libswiftObjectiveC.tbd"
+                if swift_objc not in items and objc in items:
+                    at = items.index(objc)
+                    items = items[:at] + (swift_objc,) + items[at:]
     return items
 
 
