@@ -2057,6 +2057,9 @@ private func _normalizedProgress(value: Double?, total: Double) -> Double? {
 private enum _ViewRenderer {
     static let defaultSpacing: CGFloat = 8
     static let defaultFormRowHeight: CGFloat = 44
+    /// The height proposed to a List/Form/Section row when measuring it: unbounded, as
+    /// in SwiftUI, matching placeList's plain rows (`_bounded` caps it at 10,000).
+    static let selfSizingRowProposalHeight: CGFloat = 10_000
     static let navigationBarHeight: CGFloat = 52
     static let toggleSize = CGSize(width: 63, height: 28)
 
@@ -2260,9 +2263,11 @@ private enum _ViewRenderer {
         case .form(let rows):
             var width: CGFloat = 0
             var height: CGFloat = 0
+            // Rows self-size as in SwiftUI: an unbounded height proposal, then the
+            // 44 pt minimum. Proposing 44 squeezed multi-line rows to one line.
             let rowProposal = CGSize(
                 width: _bounded(proposed).width,
-                height: defaultFormRowHeight
+                height: selfSizingRowProposalHeight
             )
             for row in rows {
                 let size = measure(row, proposed: rowProposal, environment: environment)
@@ -2277,7 +2282,7 @@ private enum _ViewRenderer {
             for row in rows {
                 let size = measure(
                     row,
-                    proposed: CGSize(width: bounded.width, height: defaultFormRowHeight),
+                    proposed: CGSize(width: bounded.width, height: selfSizingRowProposalHeight),
                     environment: environment
                 )
                 height += max(defaultFormRowHeight, size.height)
@@ -2324,7 +2329,7 @@ private enum _ViewRenderer {
             var height: CGFloat = 0
             let rowProposal = CGSize(
                 width: max(0, viewport.width - 32),
-                height: defaultFormRowHeight
+                height: selfSizingRowProposalHeight
             )
             for row in rows {
                 let size = measure(row, proposed: rowProposal, environment: environment)
@@ -4276,7 +4281,7 @@ private enum _ViewRenderer {
         for (index, row) in rows.enumerated() {
             let proposal = CGSize(
                 width: max(0, section.bounds.width - 32),
-                height: defaultFormRowHeight
+                height: selfSizingRowProposalHeight
             )
             let measured = measure(row, proposed: proposal, environment: environment)
             let height = max(defaultFormRowHeight, measured.height)
@@ -4350,7 +4355,7 @@ private enum _ViewRenderer {
         for (index, row) in rows.enumerated() {
             let proposal = CGSize(
                 width: max(0, formView.bounds.width - 32),
-                height: defaultFormRowHeight
+                height: selfSizingRowProposalHeight
             )
             let measured = measure(row, proposed: proposal, environment: environment)
             let rowHeight = max(defaultFormRowHeight, measured.height)
