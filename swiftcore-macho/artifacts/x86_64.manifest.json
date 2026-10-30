@@ -267,8 +267,8 @@
       "sha256": "49661771ad903553be90f8ba7c5a3b8b01cda9c36c823f1f9b5450af858dfa21"
     },
     "swift-macosx/x86_64/libswiftCore.dylib": {
-      "bytes": 10254960,
-      "sha256": "47d9228da9710ea62625fcdd819a935d573440501b6caa7541b4b0d68f42c121"
+      "bytes": 10250296,
+      "sha256": "63ace50fdf8f1f10d779e0e9c4bba7b2bcdab83fe3c9abdb8703a35fe4cb961c"
     },
     "swift-macosx/x86_64/libswiftDarwin.dylib": {
       "bytes": 76352,
@@ -280,19 +280,19 @@
     },
     "swift-macosx/x86_64/libswiftObservation.dylib": {
       "bytes": 229440,
-      "sha256": "c2be86972ea452cb176ad64897e87fe512bb20e0512bd3da94bea001dd8bf9b7"
+      "sha256": "24bb0e054cfec7148a7c067e3f4604ba99e35e024275d6b60de3cda053b475fe"
     },
     "swift-macosx/x86_64/libswiftSynchronization.dylib": {
-      "bytes": 91680,
-      "sha256": "0df5b649277cee414efd3b1c19fd09eed6f140d72fa632410dc9a5492be1eaef"
+      "bytes": 87552,
+      "sha256": "157c1f9dbad13f29af1f2b5364c0c3b50e6b75d8ab9ed409f50be69230da2d92"
     },
     "swift-macosx/x86_64/libswift_Builtin_float.dylib": {
       "bytes": 15120,
-      "sha256": "e0703b923f17d726af34a29c4545921ea0a78c95ec1676e1f97ac5ec7824bc6f"
+      "sha256": "3b50680cd1c5d903b0000e0ebd748f05e41eeb8f3bd5df172f8b2ac08b551ac0"
     },
     "swift-macosx/x86_64/libswift_Concurrency.dylib": {
-      "bytes": 928248,
-      "sha256": "78d2476d5a29c2e677edf63fd8b77ba10a0caa7c34f0905a2f228e3a5f708263"
+      "bytes": 928256,
+      "sha256": "233572089677a0e80c30e37122a15377b089824c9a4318a5781fe19bbbf8b5d9"
     },
     "swift-macosx/x86_64/libswift_DarwinFoundation1.dylib": {
       "bytes": 8400,
@@ -308,11 +308,11 @@
     },
     "swift-macosx/x86_64/libswift_RegexParser.dylib": {
       "bytes": 1293016,
-      "sha256": "4d3d593dd6aa73b4c8716a76d28a9365761dd4d79ad2cbe5db1c22ba733381b9"
+      "sha256": "299d7c5ae3771538f024092a1fd6eb35eeac79c2b73c190b18010040742b0235"
     },
     "swift-macosx/x86_64/libswift_StringProcessing.dylib": {
       "bytes": 1005256,
-      "sha256": "79bbb6c2e6d445cbf75e01dffbb139ceb9c8d46188bed7f989e3c3ce67ca8242"
+      "sha256": "03637ba8fcb305d75876f864273c5223144cefb771dee5c14ca631e1bf6364c7"
     },
     "swift-macosx/x86_64/libswift_errno.dylib": {
       "bytes": 17112,
@@ -332,7 +332,7 @@
     "SWIFT_SDK_OSX_ARCHITECTURES": "x86_64",
     "SWIFT_STDLIB_ENABLE_OBJC_INTEROP": "ON"
   },
-  "generatedAtUtc": "2026-10-30T18:07:59Z",
+  "generatedAtUtc": "2026-10-30T19:18:07Z",
   "host": "x86_64-unknown-linux-gnu",
   "moduleTriple": "x86_64-apple-macos",
   "patches": "scripts/apply_patches.py 1-5+7+8; patch 5 via SWIFTCORE_MACHO_LEGACY_IMAGE_REG=1; patch 6 (isa widen) off; patch 8 Darwin-target skips CMake dispatch link lib",
