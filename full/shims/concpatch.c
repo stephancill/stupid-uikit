@@ -58,13 +58,11 @@ static void conc_abort(const char *who)
 
 /* ---- libdispatch: queues, sources, timers ------------------------------- */
 STUB(dispatch_activate)
-STUB(dispatch_after_f)
 STUB(dispatch_release)
 STUB(dispatch_set_context)
 STUB(dispatch_source_create)
 STUB(dispatch_source_set_event_handler_f)
 STUB(dispatch_source_set_timer)
-STUB(dispatch_walltime)  /* Swift 6.4 _Concurrency */
 
 /* dispatch_assert_queue$V2 -- the `$` is not a C identifier character, so the
  * symbol is named with an asm label rather than by spelling the function. */
@@ -114,6 +112,9 @@ extern void *dispatch_host_get_global_queue(int64_t, uint64_t)
 extern void dispatch_host_async(
     uint32_t, void *, void *, openui_dispatch_callback_v1
 ) __asm__("_glibc_openui_dispatch_host_v1_async");
+extern void dispatch_host_after(
+    uint32_t, void *, uint64_t, void *, openui_dispatch_callback_v1
+) __asm__("_glibc_openui_dispatch_host_v1_after");
 extern void dispatch_host_main(void)
     __asm__("_glibc_openui_dispatch_host_v1_main")
     __attribute__((noreturn));
@@ -213,6 +214,85 @@ void dispatch_async_f(void *queue, void *context, void (*function)(void *))
         conc_abort("dispatch_async_f(unmapped queue)");
     }
     dispatch_host_async(kind, host_queue, context, function);
+}
+
+/* ---- delayed jobs (Task.sleep, deadlines) --------------------------------
+ * dispatch_time_t is Darwin's encoding (libdispatch shims/time.h): bit 63 clear
+ * is an uptime value in mach_absolute_time units; bits 63:62 = 10 is a
+ * continuous (mach_continuous_time) value; 11 is a wall-clock value stored as
+ * the negated nanoseconds since the epoch. Under machorun both mach clocks
+ * count nanoseconds (timebase 1/1, darwin/src/mach.c), so a deadline becomes a
+ * relative delay for the host's dispatch_after. */
+#define CONC_TIME_NOW 0ull
+#define CONC_TIME_FOREVER (~0ull)
+#define CONC_WALLTIME_NOW (~1ull)
+#define CONC_UP_OR_MONOTONIC_MASK (1ull << 63)
+#define CONC_WALLTIME_MASK (1ull << 62)
+
+extern uint64_t mach_absolute_time(void);
+extern uint64_t mach_continuous_time(void);
+
+struct conc_timespec { long tv_sec; long tv_nsec; };
+extern int clock_gettime(int, struct conc_timespec *);
+#define CONC_CLOCK_REALTIME 0 /* Darwin _CLOCK_REALTIME */
+
+static uint64_t conc_wall_nanoseconds(void)
+{
+    struct conc_timespec now = { 0, 0 };
+    if (clock_gettime(CONC_CLOCK_REALTIME, &now) != 0) conc_abort("dispatch_walltime(clock_gettime failed)");
+    return (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
+}
+
+static uint64_t conc_delay_until(uint64_t when)
+{
+    uint64_t now, deadline;
+    if (when == CONC_TIME_NOW) return 0;
+    if (when == CONC_TIME_FOREVER) conc_abort("dispatch_after_f(DISPATCH_TIME_FOREVER)");
+    if (when & CONC_UP_OR_MONOTONIC_MASK) {
+        if (when & CONC_WALLTIME_MASK) {
+            now = conc_wall_nanoseconds();
+            deadline = when == CONC_WALLTIME_NOW ? now : (uint64_t)(-(int64_t)when);
+        } else {
+            now = mach_continuous_time();
+            deadline = when & ~CONC_UP_OR_MONOTONIC_MASK;
+        }
+    } else {
+        now = mach_absolute_time();
+        deadline = when;
+    }
+    return deadline > now ? deadline - now : 0;
+}
+
+void dispatch_after_f(uint64_t when, void *queue, void *context, void (*function)(void *));
+void dispatch_after_f(uint64_t when, void *queue, void *context, void (*function)(void *))
+{
+    uint32_t kind;
+    void *host_queue;
+    if (function == NULL) conc_abort("dispatch_after_f(NULL function)");
+    if (queue == (void *)&_dispatch_main_q[0]) {
+        kind = OPENUI_DISPATCH_QUEUE_MAIN_V1;
+        host_queue = NULL;
+    } else if (is_registered_global_queue(queue)) {
+        kind = OPENUI_DISPATCH_QUEUE_GLOBAL_V1;
+        host_queue = queue;
+    } else {
+        conc_abort("dispatch_after_f(unmapped queue)");
+    }
+    dispatch_host_after(kind, host_queue, conc_delay_until(when), context, function);
+}
+
+/* Darwin's wall-clock dispatch_time_t: the negated deadline in nanoseconds
+ * since the epoch. Swift 6.4 _Concurrency builds these for suspending-clock
+ * deadlines. */
+uint64_t dispatch_walltime(const struct conc_timespec *when, int64_t delta);
+uint64_t dispatch_walltime(const struct conc_timespec *when, int64_t delta)
+{
+    uint64_t base = when
+        ? (uint64_t)when->tv_sec * 1000000000ull + (uint64_t)when->tv_nsec
+        : conc_wall_nanoseconds();
+    int64_t deadline = (int64_t)base + delta;
+    if (deadline <= 1) return delta < 0 ? CONC_WALLTIME_NOW : CONC_TIME_FOREVER;
+    return (uint64_t)(-deadline);
 }
 
 __attribute__((noreturn)) void dispatch_main(void);
