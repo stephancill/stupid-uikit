@@ -99,3 +99,22 @@ scroll keeps its offset, builds the new region and releases the top rows,
 content stays eager, an unscrolled stack builds everything, a small stack lays
 out exactly as the eager stack, and an 800-row one-row pager keeps 8 rows
 built.
+
+## Result: stupid social on the x86_64 Linux guest
+
+`stupid-social-guest.sh run` (SSG_OFFLINE=1, SSG_TURNS=300, SSG_SCALE=1)
+against this tree:
+
+| | eager (before) | lazy |
+|---|---|---|
+| mounted hierarchy | 20,402 views | 602 views |
+| story pager rows built | ~800 | 8 |
+| guest run (300 turns + render) | ~6–7 min | 20–32 s |
+
+The rendered root screen is pixel-identical (ImageMagick `compare -metric AE`
+= 0) to the eager render at the same base revision: the pager's one visible
+row is unchanged, and the other 792 rows were never on screen.
+
+Phase 2 rung b (Focus widget + onboarding, `PHASE2_RUNGS=b`) passes on this
+change (`b=PASS/widget+onboarding under X86_64 loader`, exit 0). Neither
+gate uses a lazy stack with more than the initial window.
