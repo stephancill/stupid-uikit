@@ -54,6 +54,9 @@ EXPECTED_WIDGET_FILES=16
 EXPECTED_WIDGET_DIRECTORIES=7
 # 19 before the formatter oracles (2026-09-05): fewer undefined _StringProcessing symbols.
 EXPECTED_FOUNDATION_STRING_PROCESSING_UNDEFINEDS=18
+# Swift 6.4.2 (measured x86_64, swift64 branch): 19 -- StringProtocol.contains(_:) now binds to
+# _StringProcessing; the other 18 are the same Regex/AnyRegexOutput accessors.
+case "${OPENUIKIT_SWIFT_VERSION:-}" in 6.4*) EXPECTED_FOUNDATION_STRING_PROCESSING_UNDEFINEDS=19 ;; esac
 EXPECTED_FOUNDATION_SYNCHRONIZATION_UNDEFINEDS=2
 EXPECTED_FOUNDATION_REGEX_PARSER_UNDEFINEDS=0
 
