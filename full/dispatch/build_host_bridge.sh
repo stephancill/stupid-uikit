@@ -137,6 +137,7 @@ DISPATCH_HOST_EXPECTED_EXPORTS=$WORK_DIR/open-dispatch-host-expected-exports.txt
         openui_dispatch_host_v1_after \
         openui_dispatch_host_v1_async \
         openui_dispatch_host_v1_create_queue \
+        openui_dispatch_host_v1_drain_main_queue \
         openui_dispatch_host_v1_get_global_queue \
         openui_dispatch_host_v1_get_specific \
         openui_dispatch_host_v1_main \

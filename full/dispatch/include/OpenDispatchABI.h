@@ -69,6 +69,10 @@ OPENUI_DISPATCH_EXPORT void openui_dispatch_host_v1_after(
     openui_dispatch_callback_v1 callback
 );
 OPENUI_DISPATCH_EXPORT uint64_t openui_dispatch_host_v1_monotonic_nanoseconds(void);
+/* Runs the blocks queued on the host main queue (libdispatch's CFRunLoop hook,
+ * _dispatch_main_queue_callback_4CF). A frame loop that is not dispatch_main
+ * calls this once per turn, as CFRunLoop does on Darwin. */
+OPENUI_DISPATCH_EXPORT void openui_dispatch_host_v1_drain_main_queue(void);
 OPENUI_DISPATCH_EXPORT void openui_dispatch_host_v1_queue_set_specific(
     uint32_t queue_kind,
     void *queue,
@@ -109,6 +113,7 @@ OPENUI_DISPATCH_EXPORT void *openui_dispatch_v1_create_queue(
     void *target_queue
 );
 OPENUI_DISPATCH_EXPORT void openui_dispatch_v1_release_queue(void *queue);
+OPENUI_DISPATCH_EXPORT void openui_dispatch_v1_drain_main_queue(void);
 OPENUI_DISPATCH_EXPORT void openui_dispatch_v1_async(
     uint32_t queue_kind,
     void *queue,

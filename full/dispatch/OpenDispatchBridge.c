@@ -21,6 +21,8 @@ extern void host_sync(
 extern void host_after(
     uint32_t, void *, uint64_t, void *, openui_dispatch_callback_v1
 ) __asm__("_glibc_openui_dispatch_host_v1_after");
+extern void host_drain_main_queue(void)
+    __asm__("_glibc_openui_dispatch_host_v1_drain_main_queue");
 extern uint64_t host_monotonic_nanoseconds(void)
     __asm__("_glibc_openui_dispatch_host_v1_monotonic_nanoseconds");
 extern void host_queue_set_specific(
@@ -64,6 +66,11 @@ void *openui_dispatch_v1_create_queue(
 void openui_dispatch_v1_release_queue(void *queue)
 {
     host_release_queue(queue);
+}
+
+void openui_dispatch_v1_drain_main_queue(void)
+{
+    host_drain_main_queue();
 }
 
 void openui_dispatch_v1_async(

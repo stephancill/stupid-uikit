@@ -463,6 +463,15 @@ uint64_t openui_dispatch_host_v1_monotonic_nanoseconds(void)
         + (uint64_t)value.tv_nsec;
 }
 
+/* libdispatch SPI for run loops that service the main queue themselves. */
+extern void _dispatch_main_queue_callback_4CF(void *message);
+
+void openui_dispatch_host_v1_drain_main_queue(void)
+{
+    require_runtime();
+    _dispatch_main_queue_callback_4CF(NULL);
+}
+
 void openui_dispatch_host_v1_main(void)
 {
     require_runtime();

@@ -484,6 +484,9 @@ enum _OpenSwiftUIApplicationLifecycle {
             )
             previous = sample
             let elapsed = sample - start
+            // Each turn services the main queue first, as CFRunLoop does on Darwin: without it no
+            // DispatchQueue.main block or MainActor job (every `.task`) ever runs.
+            _applicationHostDrainMainQueue?()
             OpenUIKitRuntime.animationTime = elapsed
             for window in windows {
                 window.tick(timestamp: elapsed)
@@ -508,6 +511,19 @@ enum _OpenSwiftUIApplicationLifecycle {
             waitUntil(start + elapsed + frameInterval)
         }
     }
+
+    /// The Mach-O guest's Dispatch bridge entry point that drains the host libdispatch main queue
+    /// (full/dispatch/OpenDispatchBridge.c). Absent outside a machorun guest, where the platform's
+    /// own run loop or dispatch_main services the main queue.
+    private static let _applicationHostDrainMainQueue: (@convention(c) () -> Void)? = {
+        #if canImport(Darwin)
+            let defaultHandle = UnsafeMutableRawPointer(bitPattern: -2)  // RTLD_DEFAULT
+        #else
+            let defaultHandle: UnsafeMutableRawPointer? = nil
+        #endif
+        guard let symbol = dlsym(defaultHandle, "openui_dispatch_v1_drain_main_queue") else { return nil }
+        return unsafeBitCast(symbol, to: (@convention(c) () -> Void).self)
+    }()
 
     static func _applicationHostTurnLimit(_ value: String?) -> Int? {
         guard let value else { return nil }
