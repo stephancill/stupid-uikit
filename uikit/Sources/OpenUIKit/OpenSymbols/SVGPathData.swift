@@ -279,18 +279,22 @@ private struct _SVGPathParser {
         let x1p = cosPhi * dx + sinPhi * dy
         let y1p = -sinPhi * dx + cosPhi * dy
         let lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry)
-        if lambda > 1 {
-            let s = lambda.squareRoot()
+        var coefficient: CGFloat = 0
+        // At λ ≥ 1 the (scaled) ellipse passes through both endpoints with
+        // its centre on their midpoint; computing the root there only
+        // amplifies rounding (√ of a ~1e-12 residue).
+        if lambda >= 1 - 1e-9 {
+            let s = Swift.max(1, lambda).squareRoot()
             rx *= s
             ry *= s
+        } else {
+            let rx2 = rx * rx
+            let ry2 = ry * ry
+            let numerator = Swift.max(0, rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p)
+            let denominator = rx2 * y1p * y1p + ry2 * x1p * x1p
+            coefficient = denominator == 0 ? 0 : (numerator / denominator).squareRoot()
+            if largeArc == sweep { coefficient = -coefficient }
         }
-        let rx2 = rx * rx
-        let ry2 = ry * ry
-        var numerator = rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p
-        if numerator < 0 { numerator = 0 }
-        let denominator = rx2 * y1p * y1p + ry2 * x1p * x1p
-        var coefficient = denominator == 0 ? 0 : (numerator / denominator).squareRoot()
-        if largeArc == sweep { coefficient = -coefficient }
         let cxp = coefficient * rx * y1p / ry
         let cyp = -coefficient * ry * x1p / rx
         let cx = cosPhi * cxp - sinPhi * cyp + (start.x + end.x) / 2
