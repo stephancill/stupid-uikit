@@ -649,10 +649,29 @@ public struct _OpenGeometryReader<Content: _OpenView>: _OpenView {
     }
 }
 
-/// `LazyVStack` shares the eager stack node today, but not merely as a syntax
-/// alias: a scroll host measures and clips that node against its viewport,
-/// and its children retain stable IDs for programmatic scrolling.  The public
-/// nominal leaves room for viewport materialisation without changing app ABI.
+/// `LazyVStack` builds only the rows near its scroll viewport when its content
+/// is a single `ForEach` (directly, not wrapped in modifiers or siblings):
+///
+/// - Graph evaluation builds the elements in the window the last layout
+///   requested (`_OpenLazyStackState`); before any layout, the first
+///   `initialWindowCount` elements.
+/// - Layout measures the built rows, sizes every other element from measured
+///   extents (an element measured earlier keeps its extent) or their average,
+///   and reports the visible region. When the viewport plus a prefetch margin
+///   leaves the built window, or the window grows far larger than that region,
+///   the layout requests a new window and invalidates the graph, so rows far
+///   offscreen are released on that re-evaluation.
+/// - A row that leaves the window keeps its `@State` while its ID stays in
+///   the data (Apple's lazy stacks keep scrolled-away rows' state too); its
+///   tasks, subscriptions and represented views end with the row.
+/// - Outside a SwiftUI `ScrollView` there is no viewport, so the first layout
+///   requests every element.
+///
+/// Any other content (static rows, several ForEach siblings, a modified
+/// ForEach) is built eagerly through the shared stack node, as before. A lazy
+/// stack whose data fits the initial window and has never been laid out
+/// lazily also produces the eager node, so small stacks render exactly as a
+/// VStack does.
 public struct _OpenLazyVStack<Content: _OpenView>: _OpenView {
     public typealias Body = Never
     public let alignment: HorizontalAlignment
@@ -673,17 +692,154 @@ public struct _OpenLazyVStack<Content: _OpenView>: _OpenView {
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        _OpenViewNode(
-            .vStack(
-                children: _openFlattenGroup(
-                    _OpenGraphContext.withStructuralScope(.vStackContent) {
-                        content._makeOpenUIKitNode()
-                    }
-                ),
-                alignment: alignment,
-                spacing: spacing
+        guard let source = content as? any _OpenLazyStackSource,
+              let state = _OpenGraphContext.lazyStackState()
+        else {
+            return _OpenViewNode(
+                .vStack(
+                    children: _openFlattenGroup(
+                        _OpenGraphContext.withStructuralScope(.vStackContent) {
+                            content._makeOpenUIKitNode()
+                        }
+                    ),
+                    alignment: alignment,
+                    spacing: spacing
+                )
+            )
+        }
+        // The scopes mirror eager ForEach expansion inside a stack, so a row's
+        // identity does not depend on whether it was built lazily.
+        let (identifiers, window, rows) = _OpenGraphContext.withStructuralScope(.vStackContent) {
+            _OpenGraphContext.withStructuralScope(.forEachContent) {
+                let identifiers = source._openLazyElementIDs()
+                _OpenGraphContext.retainLazyElementState(identifiers: Set(identifiers))
+                let window = state.window(for: identifiers)
+                let rows = window.map { offset in
+                    source._openLazyElementNode(at: offset, identifier: identifiers[offset])
+                }
+                return (identifiers, window, rows)
+            }
+        }
+        if window.count == identifiers.count, !state.hasMountedLazily {
+            return _OpenViewNode(
+                .vStack(
+                    children: rows.flatMap { _openFlattenGroup($0) },
+                    alignment: alignment,
+                    spacing: spacing
+                )
+            )
+        }
+        return _OpenViewNode(
+            .modified(
+                _OpenViewNode(.vStack(children: rows, alignment: alignment, spacing: spacing)),
+                .lazyStack(
+                    _OpenLazyStackLayout(
+                        state: state,
+                        identifiers: identifiers,
+                        window: window,
+                        alignment: alignment,
+                        spacing: spacing
+                    )
+                )
             )
         )
+    }
+}
+
+/// Dynamic content a lazy stack can materialise element by element. Only
+/// ForEach conforms: its element count and identities are known without
+/// building any element.
+@MainActor
+protocol _OpenLazyStackSource {
+    /// Every element's identity in data order. Traps on duplicates exactly as
+    /// eager expansion does.
+    func _openLazyElementIDs() -> [AnyHashable]
+    /// Builds one element; the caller is inside the `.forEachContent` scope.
+    func _openLazyElementNode(at offset: Int, identifier: AnyHashable) -> _OpenViewNode
+}
+
+/// One evaluation's lazy stack: every element identity, the materialised
+/// window, and the persistent state the host reports layout back into. The
+/// wrapped `.vStack` holds exactly one node per window element.
+@MainActor
+struct _OpenLazyStackLayout {
+    let state: _OpenLazyStackState
+    let identifiers: [AnyHashable]
+    let window: Range<Int>
+    let alignment: HorizontalAlignment
+    let spacing: CGFloat?
+}
+
+/// Per-lazy-stack state retained by the graph host across evaluations (keyed
+/// by the stack's graph identity, released with it).
+@MainActor
+final class _OpenLazyStackState {
+    struct RowMetric {
+        let height: CGFloat
+        /// False when the element produced no view (`EmptyView`, a false
+        /// `if`): like the eager stack, it then takes no spacing either.
+        let isPresent: Bool
+    }
+
+    /// Elements built before the first layout reports a viewport.
+    static let initialWindowCount = 8
+
+    /// Extents of every element measured at `measuredWidth`, by identity.
+    var rowMetrics: [AnyHashable: RowMetric] = [:]
+    var measuredWidth: CGFloat?
+    var measuredMaxWidth: CGFloat = 0
+    /// The enclosing scroll view's offset, restored when the host rebuilds
+    /// the scroll view (every graph invalidation does).
+    var contentOffset: CGPoint?
+    /// Set by the first lazy layout. From then on the stack keeps producing
+    /// the lazy node even when every element is built, so its viewport keeps
+    /// being tracked and its scroll offset restored.
+    var hasMountedLazily = false
+    private var requestedWindow: Range<Int>?
+    private var anchorIdentifier: AnyHashable?
+    private let invalidate: @MainActor () -> Void
+
+    init(invalidate: @escaping @MainActor () -> Void) {
+        self.invalidate = invalidate
+    }
+
+    /// The window to build for the current data. A requested window follows
+    /// its first element when earlier elements are inserted or removed.
+    func window(for identifiers: [AnyHashable]) -> Range<Int> {
+        let count = identifiers.count
+        guard let requestedWindow else {
+            return 0 ..< min(count, Self.initialWindowCount)
+        }
+        var lower = requestedWindow.lowerBound
+        if let anchorIdentifier,
+           let anchored = identifiers.firstIndex(of: anchorIdentifier) {
+            lower = anchored
+        }
+        lower = min(max(0, lower), count)
+        let upper = min(count, lower + requestedWindow.count)
+        if lower == upper, count > 0 {
+            return max(0, count - Self.initialWindowCount) ..< count
+        }
+        return lower ..< upper
+    }
+
+    var estimatedRowHeight: CGFloat {
+        var total: CGFloat = 0
+        var present = 0
+        for metric in rowMetrics.values where metric.isPresent {
+            total += metric.height
+            present += 1
+        }
+        return present == 0 ? 44 : total / CGFloat(present)
+    }
+
+    func request(_ window: Range<Int>, identifiers: [AnyHashable]) {
+        guard window != requestedWindow
+            || (window.isEmpty ? nil : identifiers[window.lowerBound]) != anchorIdentifier
+        else { return }
+        requestedWindow = window
+        anchorIdentifier = window.isEmpty ? nil : identifiers[window.lowerBound]
+        invalidate()
     }
 }
 

@@ -240,6 +240,89 @@ private final class _SwiftUITextView: UITextView, UITextViewDelegate {
 @MainActor
 private final class _SwiftUIScrollView: UIScrollView {
     var retainedCoordinator: _SwiftUIScrollCoordinator?
+    /// Lazy stacks placed in this scroll view's content during the current
+    /// layout; told about every offset change.
+    var lazyStackTrackers: [_SwiftUILazyStackTracker] = []
+}
+
+/// Reports a placed lazy stack's viewport back to its retained state and asks
+/// for a new materialisation window when the built one no longer covers the
+/// viewport plus prefetch margin, or has grown far larger than that region.
+@MainActor
+private final class _SwiftUILazyStackTracker {
+    /// Rows within half a viewport of the visible region must be built...
+    static let requiredMargin: CGFloat = 0.5
+    /// ...and a new window extends one and a half viewports past it.
+    static let windowMargin: CGFloat = 1.5
+
+    private let layout: _OpenLazyStackLayout
+    private let tops: [CGFloat]
+    private let heights: [CGFloat]
+    private let origin: CGPoint
+    private weak var surface: UIView?
+
+    init(
+        layout: _OpenLazyStackLayout,
+        tops: [CGFloat],
+        heights: [CGFloat],
+        origin: CGPoint,
+        surface: UIView
+    ) {
+        self.layout = layout
+        self.tops = tops
+        self.heights = heights
+        self.origin = origin
+        self.surface = surface
+    }
+
+    func scrollViewDidChange(_ scrollView: UIScrollView) {
+        guard let surface else { return }
+        // The stack's origin in the scroll view's content coordinates.
+        var stackOrigin = origin
+        var view: UIView = surface
+        while view !== scrollView {
+            guard let parent = view.superview else { return }
+            stackOrigin.x += view.frame.minX - view.bounds.minX
+            stackOrigin.y += view.frame.minY - view.bounds.minY
+            view = parent
+        }
+        layout.state.contentOffset = scrollView.contentOffset
+        let top = scrollView.contentOffset.y - stackOrigin.y
+        let height = max(1, scrollView.bounds.height)
+        let required = rows(
+            from: top - height * Self.requiredMargin,
+            to: top + height * (1 + Self.requiredMargin)
+        )
+        let wanted = rows(
+            from: top - height * Self.windowMargin,
+            to: top + height * (1 + Self.windowMargin)
+        )
+        let window = layout.window
+        let uncovered = !required.isEmpty
+            && (required.lowerBound < window.lowerBound
+                || required.upperBound > window.upperBound)
+        let oversized = window.count > wanted.count * 2 + _OpenLazyStackState.initialWindowCount
+        guard uncovered || oversized, wanted != window else { return }
+        layout.state.request(wanted, identifiers: layout.identifiers)
+    }
+
+    /// Elements whose extent intersects `minY ..< maxY` (stack coordinates).
+    private func rows(from minY: CGFloat, to maxY: CGFloat) -> Range<Int> {
+        // Both edges are non-decreasing in index, so binary search each.
+        var low = 0
+        var high = tops.count
+        while low < high {
+            let mid = (low + high) / 2
+            if tops[mid] + heights[mid] <= minY { low = mid + 1 } else { high = mid }
+        }
+        let first = low
+        high = tops.count
+        while low < high {
+            let mid = (low + high) / 2
+            if tops[mid] < maxY { low = mid + 1 } else { high = mid }
+        }
+        return first ..< max(first, low)
+    }
 }
 
 @MainActor
@@ -338,6 +421,9 @@ private final class _SwiftUIScrollCoordinator: _SwiftUIScrollCoordinatorBase, UI
     }
 
     func notify(_ scrollView: UIScrollView) {
+        if let host = scrollView as? _SwiftUIScrollView {
+            host.lazyStackTrackers.forEach { $0.scrollViewDidChange(scrollView) }
+        }
         let geometry = ScrollGeometry(scrollView: scrollView)
         let newValues = geometryObservers.map { $0.read(geometry) }
         let isInitialDelivery = previousGeometryValues.isEmpty
@@ -1917,6 +2003,9 @@ private struct _RenderEnvironment {
     var usesSegmentedPickerStyle = false
     var symbolRenderingMode: SymbolRenderingMode?
     var scrollStorage: _OpenScrollProxyStorage?
+    /// The nearest enclosing SwiftUI scroll view while placing its content;
+    /// lazy stacks track its viewport.
+    var lazyScrollView: UIScrollView?
     var scrollVisibilityObservers: [_OpenScrollVisibilityObserver] = []
     var scrollGeometryObservers: [_OpenScrollGeometryObserver] = []
     var scrollPhaseObservers: [_OpenScrollPhaseObserver] = []
@@ -2614,6 +2703,16 @@ private enum _ViewRenderer {
                  .navigationDestination, .toolbar, .toolbarItem, .tag,
                  .pageTabViewStyle:
                 return measure(content, proposed: proposed, environment: environment)
+            case .lazyStack(let layout):
+                guard let rows = _lazyStackRows(content, layout: layout) else {
+                    return measure(content, proposed: proposed, environment: environment)
+                }
+                return lazyStackMetrics(
+                    layout,
+                    rows: rows,
+                    proposal: proposed,
+                    environment: environment
+                ).size
             }
         }
     }
@@ -3079,6 +3178,7 @@ private enum _ViewRenderer {
             var measurementEnvironment = environment
             measurementEnvironment.measuresUnboundedVerticalScroll = true
             measurementEnvironment.scrollStorage = storage
+            measurementEnvironment.lazyScrollView = scrollView
             let measured = measure(
                 content,
                 proposed: scrollView.bounds.size,
@@ -4242,8 +4342,183 @@ private enum _ViewRenderer {
                 // NavigationView consumes this metadata while building its
                 // node.  Outside a NavigationView it leaves content intact.
                 place(content, in: rect, on: surface, environment: environment)
+            case .lazyStack(let layout):
+                guard let rows = _lazyStackRows(content, layout: layout) else {
+                    place(content, in: rect, on: surface, environment: environment)
+                    return
+                }
+                placeLazyStack(
+                    layout,
+                    rows: rows,
+                    in: rect,
+                    on: surface,
+                    environment: environment
+                )
             }
         }
+    }
+
+    private struct _LazyStackMetrics {
+        /// Every element's offset from the stack's top and its extent.
+        var tops: [CGFloat]
+        var heights: [CGFloat]
+        /// Each built row's flattened views with their measured sizes.
+        var built: [[(node: _OpenViewNode, size: CGSize)]]
+        var size: CGSize
+    }
+
+    /// The built rows a lazy-stack wrapper carries, or nil when a node
+    /// transform rewrote its `.vStack` so it no longer matches the window
+    /// (the content then lays out as the eager stack it wraps).
+    private static func _lazyStackRows(
+        _ content: _OpenViewNode,
+        layout: _OpenLazyStackLayout
+    ) -> [_OpenViewNode]? {
+        guard case .vStack(let rows, _, _) = content.kind,
+              rows.count == layout.window.count else { return nil }
+        return rows
+    }
+
+    /// Measures the built rows (recording their extents on the retained
+    /// state) and positions every element, unbuilt ones at their remembered
+    /// or estimated extent.
+    private static func lazyStackMetrics(
+        _ layout: _OpenLazyStackLayout,
+        rows: [_OpenViewNode],
+        proposal: CGSize,
+        environment: _RenderEnvironment
+    ) -> _LazyStackMetrics {
+        let state = layout.state
+        let spacing = layout.spacing ?? defaultSpacing
+        if state.measuredWidth != proposal.width {
+            state.rowMetrics.removeAll(keepingCapacity: true)
+            state.measuredWidth = proposal.width
+            state.measuredMaxWidth = 0
+        }
+        var built: [[(node: _OpenViewNode, size: CGSize)]] = []
+        built.reserveCapacity(rows.count)
+        for (offset, row) in rows.enumerated() {
+            let views = _openFlattenGroup(row).map { node in
+                (node: node, size: measure(node, proposed: proposal, environment: environment))
+            }
+            let height = views.reduce(CGFloat.zero) { $0 + $1.size.height }
+                + spacing * CGFloat(max(0, views.count - 1))
+            state.rowMetrics[layout.identifiers[layout.window.lowerBound + offset]] =
+                _OpenLazyStackState.RowMetric(height: height, isPresent: !views.isEmpty)
+            for view in views {
+                state.measuredMaxWidth = max(state.measuredMaxWidth, view.size.width)
+            }
+            built.append(views)
+        }
+        let estimate = state.estimatedRowHeight
+        var tops: [CGFloat] = []
+        var heights: [CGFloat] = []
+        tops.reserveCapacity(layout.identifiers.count)
+        heights.reserveCapacity(layout.identifiers.count)
+        var y: CGFloat = 0
+        var placedAny = false
+        for identifier in layout.identifiers {
+            let metric = state.rowMetrics[identifier]
+                ?? _OpenLazyStackState.RowMetric(height: estimate, isPresent: true)
+            if metric.isPresent {
+                if placedAny { y += spacing }
+                placedAny = true
+            }
+            tops.append(y)
+            let height = metric.isPresent ? metric.height : 0
+            heights.append(height)
+            y += height
+        }
+        return _LazyStackMetrics(
+            tops: tops,
+            heights: heights,
+            built: built,
+            size: CGSize(width: state.measuredMaxWidth, height: y)
+        )
+    }
+
+    private static func placeLazyStack(
+        _ layout: _OpenLazyStackLayout,
+        rows: [_OpenViewNode],
+        in rect: CGRect,
+        on surface: UIView,
+        environment: _RenderEnvironment
+    ) {
+        let scrollView = environment.lazyScrollView
+        // Rows are proposed the viewport height, as the scroll view's own
+        // measurement pass proposes its content, so measured extents match.
+        let metrics = lazyStackMetrics(
+            layout,
+            rows: rows,
+            proposal: CGSize(
+                width: rect.width,
+                height: scrollView?.bounds.height ?? rect.height
+            ),
+            environment: environment
+        )
+        let spacing = layout.spacing ?? defaultSpacing
+        for (offset, views) in metrics.built.enumerated() {
+            var y = rect.minY + metrics.tops[layout.window.lowerBound + offset]
+            for view in views {
+                let width = min(view.size.width, rect.width)
+                let x: CGFloat
+                switch layout.alignment.value {
+                case .leading: x = rect.minX
+                case .center: x = rect.minX + (rect.width - width) / 2
+                case .trailing: x = rect.maxX - width
+                }
+                place(
+                    view.node,
+                    in: CGRect(x: x, y: y, width: max(0, width), height: max(0, view.size.height)),
+                    on: surface,
+                    environment: environment
+                )
+                y += view.size.height + spacing
+            }
+        }
+        layout.state.hasMountedLazily = true
+        // Every element is a scroll target by its ForEach ID, built or not,
+        // so ScrollViewReader can reach rows that are not materialised. An
+        // explicit `.id` placed above keeps its exact frame.
+        if let storage = environment.scrollStorage {
+            for (index, identifier) in layout.identifiers.enumerated()
+            where storage.targetRects[identifier] == nil {
+                storage.targetRects[identifier] = CGRect(
+                    x: rect.minX,
+                    y: rect.minY + metrics.tops[index],
+                    width: rect.width,
+                    height: metrics.heights[index]
+                )
+            }
+        }
+        guard let scrollView = scrollView as? _SwiftUIScrollView else {
+            // No viewport to bound the window: build every element.
+            layout.state.request(
+                0 ..< layout.identifiers.count,
+                identifiers: layout.identifiers
+            )
+            return
+        }
+        if let saved = layout.state.contentOffset, saved != scrollView.contentOffset {
+            let inset = scrollView.contentInset
+            let maxX = max(-inset.left,
+                           scrollView.contentSize.width - scrollView.bounds.width + inset.right)
+            let maxY = max(-inset.top,
+                           scrollView.contentSize.height - scrollView.bounds.height + inset.bottom)
+            scrollView.contentOffset = CGPoint(
+                x: min(max(saved.x, -inset.left), maxX),
+                y: min(max(saved.y, -inset.top), maxY)
+            )
+        }
+        scrollView.lazyStackTrackers.append(
+            _SwiftUILazyStackTracker(
+                layout: layout,
+                tops: metrics.tops,
+                heights: metrics.heights,
+                origin: rect.origin,
+                surface: surface
+            )
+        )
     }
 
     private static func placeSection(

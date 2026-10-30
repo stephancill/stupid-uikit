@@ -1040,6 +1040,12 @@ final class _OpenGraphHost {
     private var activeChangeKeys: Set<_OpenEffectKey> = []
     private var activeSubscriptionKeys: Set<_OpenEffectKey> = []
     private var activeTaskKeys: Set<_OpenEffectKey> = []
+    private var lazyStackStates: [_OpenGraphIdentity: _OpenLazyStackState] = [:]
+    private var activeLazyStackKeys: Set<_OpenGraphIdentity> = []
+    /// Per evaluation: each lazy stack's `.forEachContent` path and the
+    /// element IDs still in its data. State below an unbuilt element of
+    /// these survives the stale-state sweep.
+    private var lazyElementRetention: [[_OpenGraphPathComponent]: Set<AnyHashable>] = [:]
     private var postEvaluationActions: [@MainActor () -> Void] = []
     private var isEvaluating = false
     private var pendingInvalidationToken: _OpenGraphInvalidationToken?
@@ -1091,6 +1097,8 @@ final class _OpenGraphHost {
         activeChangeKeys.removeAll(keepingCapacity: true)
         activeSubscriptionKeys.removeAll(keepingCapacity: true)
         activeTaskKeys.removeAll(keepingCapacity: true)
+        activeLazyStackKeys.removeAll(keepingCapacity: true)
+        lazyElementRetention.removeAll(keepingCapacity: true)
         postEvaluationActions.removeAll(keepingCapacity: true)
         path.removeAll(keepingCapacity: true)
         environmentValues = EnvironmentValues()
@@ -1126,7 +1134,9 @@ final class _OpenGraphHost {
 
         precondition(path.isEmpty, "unbalanced SwiftUI structural graph scopes")
 
-        let staleStateKeys = state.keys.filter { !activeStateKeys.contains($0) }
+        let staleStateKeys = state.keys.filter {
+            !activeStateKeys.contains($0) && !isRetainedByLazyStack($0.viewPath)
+        }
         for key in staleStateKeys {
             state.removeValue(forKey: key)?.detachFromGraph()
         }
@@ -1165,6 +1175,12 @@ final class _OpenGraphHost {
         let staleTaskKeys = tasks.keys.filter { !activeTaskKeys.contains($0) }
         for key in staleTaskKeys {
             tasks.removeValue(forKey: key)?.cancel()
+        }
+        let staleLazyStackKeys = lazyStackStates.keys.filter {
+            !activeLazyStackKeys.contains($0)
+        }
+        for key in staleLazyStackKeys {
+            lazyStackStates.removeValue(forKey: key)
         }
         isEvaluating = false
         let actions = postEvaluationActions
@@ -1220,6 +1236,32 @@ final class _OpenGraphHost {
 
     func currentIdentity() -> _OpenGraphIdentity {
         _OpenGraphIdentity(path: path)
+    }
+
+    func lazyStackState() -> _OpenLazyStackState {
+        let identity = currentIdentity()
+        activeLazyStackKeys.insert(identity)
+        if let existing = lazyStackStates[identity] { return existing }
+        let created = _OpenLazyStackState { [weak self] in
+            self?.scheduleInvalidation()
+        }
+        lazyStackStates[identity] = created
+        return created
+    }
+
+    func retainLazyElementState(identifiers: Set<AnyHashable>) {
+        lazyElementRetention[path] = identifiers
+    }
+
+    private func isRetainedByLazyStack(_ viewPath: [_OpenGraphPathComponent]) -> Bool {
+        for (prefix, identifiers) in lazyElementRetention
+        where viewPath.count > prefix.count && viewPath.starts(with: prefix) {
+            if case .structural(.forEachElement(let identifier)) = viewPath[prefix.count],
+               identifiers.contains(identifier) {
+                return true
+            }
+        }
+        return false
     }
 
     private func withPath<Result>(
@@ -1874,6 +1916,16 @@ enum _OpenGraphContext {
 
     static func currentIdentity() -> _OpenGraphIdentity? {
         currentHost?.currentIdentity()
+    }
+
+    /// The lazy stack at the current path's retained state, or nil outside a
+    /// graph host (no invalidation route, so the stack builds eagerly).
+    static func lazyStackState() -> _OpenLazyStackState? {
+        currentHost?.lazyStackState()
+    }
+
+    static func retainLazyElementState(identifiers: Set<AnyHashable>) {
+        currentHost?.retainLazyElementState(identifiers: identifiers)
     }
 
     static func trackAnimation<Value: Equatable>(

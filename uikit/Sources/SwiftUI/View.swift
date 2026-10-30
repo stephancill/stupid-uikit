@@ -414,6 +414,10 @@ enum _OpenViewModification {
     case toolbarItem(ToolbarItemPlacement)
     case projection(@MainActor (CGSize) -> ProjectionTransform)
     case effect
+    /// Wraps the `.vStack` of a LazyVStack's materialised rows. The host lays
+    /// the rows out at their positions among every element's measured or
+    /// estimated extent and reports the viewport back (`_OpenLazyStackState`).
+    case lazyStack(_OpenLazyStackLayout)
 }
 
 /// Construction-time modifier payload. Background and overlay views remain
@@ -1855,21 +1859,51 @@ where Data: RandomAccessCollection, ID: Hashable, Content: _OpenView {
                     seen.insert(identifier).inserted,
                     "ForEach requires unique element IDs"
                 )
-                return _OpenGraphContext.withStructuralScope(.forEachElement(identifier)) {
-                    let node = contentBuilder(element)._makeOpenUIKitNode()
-                    if _openExtractTag(node).tag != nil {
-                        return node
-                    }
-                    return _OpenViewNode(
-                        .modified(
-                            node,
-                            .tag(identifier)
-                        )
-                    )
-                }
+                return elementNode(element, identifier: identifier)
             }
             return _OpenViewNode(.group(nodes))
         }
+    }
+
+    /// One element's node in its typed `.forEachElement` scope. Eager
+    /// expansion and lazy-stack materialisation share it, so an element's
+    /// graph identity (and therefore its retained state) is the same whether
+    /// or not its container builds every sibling.
+    private func elementNode(_ element: Data.Element, identifier: AnyHashable) -> _OpenViewNode {
+        _OpenGraphContext.withStructuralScope(.forEachElement(identifier)) {
+            let node = contentBuilder(element)._makeOpenUIKitNode()
+            if _openExtractTag(node).tag != nil {
+                return node
+            }
+            return _OpenViewNode(
+                .modified(
+                    node,
+                    .tag(identifier)
+                )
+            )
+        }
+    }
+}
+
+extension _OpenForEach: _OpenLazyStackSource {
+    func _openLazyElementIDs() -> [AnyHashable] {
+        var seen: Set<AnyHashable> = []
+        seen.reserveCapacity(data.count)
+        return data.map { element in
+            let identifier = AnyHashable(element[keyPath: idKeyPath])
+            precondition(
+                seen.insert(identifier).inserted,
+                "ForEach requires unique element IDs"
+            )
+            return identifier
+        }
+    }
+
+    func _openLazyElementNode(at offset: Int, identifier: AnyHashable) -> _OpenViewNode {
+        elementNode(
+            data[data.index(data.startIndex, offsetBy: offset)],
+            identifier: identifier
+        )
     }
 }
 

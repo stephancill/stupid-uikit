@@ -679,6 +679,10 @@ let conformanceTargets: [Target] = [
     // dependency, per this manifest's header. Needed because objcparity is
     // Foundation-free: nothing else on its link line drags in libm, which
     // the rasterizer's math calls need.
+    // Native gate for SwiftUI LazyVStack viewport materialisation
+    // (docs/SWIFTUI_LAZY_STACKS.md). SwiftUITests is Darwin-only, so this
+    // drives UIHostingController directly: `swift run swiftuilazyprobe`.
+    .executableTarget(name: "swiftuilazyprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",
                       dependencies: ["OpenUIKit", "OpenUIKitC", "CPortableIO"],
                       linkerSettings: [.linkedLibrary("m", .when(platforms: [.linux]))]),
