@@ -149,12 +149,14 @@ def main() -> int:
                     help="build for the iOS simulator triple against the curated SDK")
     ap.add_argument("--ios-sdk-cache", help="where the curated SDK lives (default <package>/.build/ios-target-sdk)")
     args = ap.parse_args()
-    build_args: list[str] = []
+    # Extra `swift build` flags, e.g. "--build-system native --disable-experimental-prebuilts" on Swift 6.4.
+    build_args: list[str] = os.environ.get("CHAIN_CENSUS_EXTRA_BUILD_ARGS", "").split()
     if args.ios_target:
         import ios_target_sdk
         from pathlib import Path
-        cache = Path(args.ios_sdk_cache or os.path.join(args.package, ".build", "ios-target-sdk"))
-        build_args = ios_target_sdk.swift_build_flags(ios_target_sdk.curate(ios_target_sdk.default_sdk(), cache))
+        # Absolute: swift build runs with cwd=<package>, so a relative --sdk would resolve against it twice.
+        cache = Path(args.ios_sdk_cache or os.path.join(args.package, ".build", "ios-target-sdk")).resolve()
+        build_args += ios_target_sdk.swift_build_flags(ios_target_sdk.curate(ios_target_sdk.default_sdk(), cache))
     spec = json.load(open(args.spec))
     order = [t["name"] for t in spec.get("shims", [])] + [t["name"] for t in spec["targets"]]
     if args.only:
