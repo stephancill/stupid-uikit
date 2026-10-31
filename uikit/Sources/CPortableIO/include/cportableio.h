@@ -19,6 +19,14 @@ const char *cpio_getenv(const char *name);
 /* Terminates the process. Needed by Foundation-free executables. */
 void cpio_exit(int code);
 
+/* Renames a file (stdio rename: atomic replace within one file system).
+   Returns non-zero on success. Used by spool-file control channels, where a
+   writer publishes a complete file by renaming it into place. */
+int cpio_rename(const char *from, const char *to);
+
+/* Removes a file. Returns non-zero on success. */
+int cpio_remove(const char *path);
+
 /* A small opaque mutex for Swift state which is deliberately non-actor
    isolated (for example UIPasteboard, which UIKit marks Sendable). */
 void *cpio_mutex_create(void);

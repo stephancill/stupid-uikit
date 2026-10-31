@@ -1757,13 +1757,18 @@ public final class UINavigationBar: UIView, _UIBarItemContainer, UIBarPositionin
     }
 
     /// In large-title mode the bar is transparent chrome floating over the
-    /// content — only its interactive elements (back button) take touches;
-    /// everything else falls through to the content below.
+    /// content — only its interactive elements (the back button, bar button
+    /// items, controls inside custom item views) take touches; everything
+    /// else falls through to the content below. (The bar button items were
+    /// missing: a tap on a large-title screen's toolbar capsule reached the
+    /// list under it — MEASURED stupid social's search and settings items.)
     public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard displaysLargeTitles else { return super.hitTest(point, with: event) }
-        if let b = backButton, !b.isHidden,
-           let hit = b.hitTest(b.convert(point, from: self), with: event) {
-            return hit
+        guard let hit = super.hitTest(point, with: event) else { return nil }
+        var view: UIView? = hit
+        while let current = view, current !== self {
+            if current is UIControl { return hit }
+            view = current.superview
         }
         return nil
     }

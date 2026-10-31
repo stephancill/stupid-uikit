@@ -425,6 +425,10 @@ enum _OpenSwiftUIApplicationLifecycle {
             now: _applicationHostMonotonicSeconds,
             waitUntil: _applicationHostSleep
         )
+        if result.stoppedByHook {
+            print("PORTABLE_UIKIT_HOST_LOOP_OK turns=\(result.turns) stopped=hostTurnHook")
+            return
+        }
         guard let turnLimit else {
             preconditionFailure("unbounded SwiftUI application host loop returned")
         }
@@ -493,6 +497,17 @@ enum _OpenSwiftUIApplicationLifecycle {
                 windowTicks += 1
             }
             turns += 1
+            // An automation session (OpenUIKit Automation/) drives input and
+            // reads the screen between turns; it ends the loop when done.
+            if let hook = OpenUIKitRuntime.hostTurnHook, !hook(elapsed) {
+                application._hostWillTerminate()
+                return _OpenSwiftUIApplicationHostResult(
+                    elapsed: elapsed,
+                    turns: turns,
+                    windowTicks: windowTicks,
+                    stoppedByHook: true
+                )
+            }
 
             if let boundedTurnCount, turns >= boundedTurnCount {
                 let minimumElapsed = frameInterval
@@ -559,6 +574,8 @@ struct _OpenSwiftUIApplicationHostResult: Equatable {
     let elapsed: Double
     let turns: Int
     let windowTicks: Int
+    /// `OpenUIKitRuntime.hostTurnHook` ended the loop.
+    var stoppedByHook = false
 }
 
 @MainActor

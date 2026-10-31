@@ -72,3 +72,7 @@ int cpio_write_file(const char *path, const unsigned char *buf, size_t size) {
     if (fclose(f) != 0) return 0;
     return n == size;
 }
+
+int cpio_rename(const char *from, const char *to) { return rename(from, to) == 0; }
+
+int cpio_remove(const char *path) { return remove(path) == 0; }

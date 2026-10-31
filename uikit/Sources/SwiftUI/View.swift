@@ -52,6 +52,9 @@ public extension _OpenView where Body == Never {
 @MainActor
 public final class _OpenViewNode {
     let kind: _OpenViewNodeKind
+    /// A List's retained per-identity state (its scroll offset survives the
+    /// hosting view rebuilding the list's scroll view). Nil otherwise.
+    var retainedScrollState: _OpenLazyStackState?
 
     init(_ kind: _OpenViewNodeKind) {
         self.kind = kind
@@ -4669,7 +4672,9 @@ func _openExtractNavigationConfiguration(
         return (_OpenViewNode(.form(rows: unwrapped)), configuration)
     case .list(let rows):
         let (unwrapped, configuration) = _extractNavigationChildren(rows)
-        return (_OpenViewNode(.list(rows: unwrapped)), configuration)
+        let list = _OpenViewNode(.list(rows: unwrapped))
+        list.retainedScrollState = node.retainedScrollState
+        return (list, configuration)
     case .section(let header, let footer, let rows):
         let (unwrapped, configuration) = _extractNavigationChildren(rows)
         return (
