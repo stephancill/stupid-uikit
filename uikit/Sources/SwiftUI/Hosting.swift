@@ -2374,6 +2374,7 @@ private enum _ViewRenderer {
             let bounded = _bounded(proposed)
             let plain = _isPlainListSection(environment)
             let headerHeight: CGFloat = header == nil ? (plain ? 0 : 12) : 28
+            let rowPadding = 2 * _plainSectionRowVerticalInset(environment)
             var height = headerHeight
             for row in rows {
                 let size = measure(
@@ -2381,7 +2382,7 @@ private enum _ViewRenderer {
                     proposed: CGSize(width: bounded.width, height: selfSizingRowProposalHeight),
                     environment: environment
                 )
-                height += max(defaultFormRowHeight, size.height)
+                height += max(defaultFormRowHeight, size.height + rowPadding)
             }
             let footerHeight: CGFloat = footer == nil ? (plain ? 0 : 12) : 28
             return CGSize(width: bounded.width, height: height + footerHeight)
@@ -4568,6 +4569,13 @@ private enum _ViewRenderer {
         return false
     }
 
+    /// Vertical padding of a row inside a plain-list Section on the iOS cut:
+    /// the section's rows are the list's rows, so they take placeList's
+    /// measured plain-row padding (15 pt above and below the content).
+    static func _plainSectionRowVerticalInset(_ environment: _RenderEnvironment) -> CGFloat {
+        _isPlainListSection(environment) && OpenUIKitRuntime.systemFontCut == .iOS ? 15 : 0
+    }
+
     private static func placeSection(
         header: _OpenViewNode?,
         footer: _OpenViewNode?,
@@ -4589,6 +4597,7 @@ private enum _ViewRenderer {
         surface.addSubview(section)
 
         var y: CGFloat = header == nil ? (plain ? 0 : 12) : 28
+        let rowVerticalInset = _plainSectionRowVerticalInset(environment)
         if let header {
             var headerEnvironment = environment
             headerEnvironment.font = .caption
@@ -4612,7 +4621,7 @@ private enum _ViewRenderer {
                 height: selfSizingRowProposalHeight
             )
             let measured = measure(row, proposed: proposal, environment: environment)
-            let height = max(defaultFormRowHeight, measured.height)
+            let height = max(defaultFormRowHeight, measured.height + 2 * rowVerticalInset)
             guard y < section.bounds.height else { break }
             let rowView = UIView(
                 frame: CGRect(
@@ -4628,7 +4637,8 @@ private enum _ViewRenderer {
             place(
                 row,
                 in: rowView.bounds.inset(
-                    by: UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+                    by: UIEdgeInsets(top: rowVerticalInset, left: 16,
+                                     bottom: rowVerticalInset, right: 16)
                 ),
                 on: rowView,
                 environment: environment
@@ -4812,10 +4822,23 @@ private enum _ViewRenderer {
             ),
             height: 10_000
         )
+        // In an explicitly `.plain` list a Section is not a row: its rows are
+        // the list's rows and carry the plain-row padding themselves
+        // (placeSection), so it spans the list's full width without the row
+        // insets. `.automatic` lists keep their measured layout.
+        let plainSections = _isPlainListSection(environment)
+        func rowInsets(_ row: _OpenViewNode) -> UIEdgeInsets {
+            if plainSections, case .section = row.kind { return .zero }
+            return iOSPlainRowInsets
+        }
         for row in rows {
-            let measured = measure(row, proposed: proposal, environment: environment)
-            let padded = measured.height
-                + iOSPlainRowInsets.top + iOSPlainRowInsets.bottom
+            let insets = rowInsets(row)
+            let rowProposal = CGSize(
+                width: max(0, list.bounds.width - horizontalInset * 2 - insets.left - insets.right),
+                height: proposal.height
+            )
+            let measured = measure(row, proposed: rowProposal, environment: environment)
+            let padded = measured.height + insets.top + insets.bottom
             let height = max(defaultFormRowHeight, padded)
             rowLayouts.append((row, height))
             contentHeight += height
@@ -4836,6 +4859,7 @@ private enum _ViewRenderer {
             let rowHost: UIView
             let contentRect: CGRect
             if iOSPlainRowInsets != .zero {
+                let insets = rowInsets(layout.node)
                 let host = UIView(frame: rowFrame)
                 host.backgroundColor = list.backgroundColor
                 host.clipsToBounds = true
@@ -4843,16 +4867,10 @@ private enum _ViewRenderer {
                 list.addSubview(host)
                 rowHost = host
                 contentRect = CGRect(
-                    x: iOSPlainRowInsets.left,
-                    y: iOSPlainRowInsets.top,
-                    width: max(
-                        0,
-                        rowFrame.width - iOSPlainRowInsets.left - iOSPlainRowInsets.right
-                    ),
-                    height: max(
-                        0,
-                        rowFrame.height - iOSPlainRowInsets.top - iOSPlainRowInsets.bottom
-                    )
+                    x: insets.left,
+                    y: insets.top,
+                    width: max(0, rowFrame.width - insets.left - insets.right),
+                    height: max(0, rowFrame.height - insets.top - insets.bottom)
                 )
             } else {
                 rowHost = list
