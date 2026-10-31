@@ -344,12 +344,36 @@ public enum FontEngine {
     /// Width of a single-line string in points (advances + pair kerning),
     /// matching real UIKit's measurement of the same string.
     public static func measure(_ text: String, font: UIFont) -> CGFloat {
+        if ColorEmoji.mayContainEmoji(text) { return measureClusters(text, font: font, extra: 0) }
         var total: CGFloat = 0
         var prev: Unicode.Scalar? = nil
         for ch in text.unicodeScalars {
             if let p = prev { total += kerning(p, ch, font: font) }
             total += advance(of: ch, font: font)
             prev = ch
+        }
+        return total
+    }
+
+    /// `measure` / `measureTight` for text that may hold colour emoji
+    /// (ColorEmoji): an emoji cluster takes the emoji advance and is never
+    /// kerned; every other scalar measures exactly as in the scalar loop.
+    /// `extra` is added per scalar, emoji clusters included.
+    static func measureClusters(_ text: String, font: UIFont, extra: CGFloat) -> CGFloat {
+        var total: CGFloat = 0
+        var prev: Unicode.Scalar? = nil
+        for c in text {
+            if ColorEmoji.isEmoji(c) {
+                total += ColorEmoji.advance(of: c.unicodeScalars, font: font)
+                    + extra * CGFloat(c.unicodeScalars.count)
+                prev = nil
+                continue
+            }
+            for ch in c.unicodeScalars {
+                if let p = prev { total += kerning(p, ch, font: font) }
+                total += advance(of: ch, font: font) + extra
+                prev = ch
+            }
         }
         return total
     }
@@ -499,6 +523,7 @@ public enum FontEngine {
     /// Width of `text` at tight tracking (advances + kerning + dTight/char).
     public static func measureTight(_ text: String, font: UIFont) -> CGFloat {
         let d = tightDelta(for: font)
+        if ColorEmoji.mayContainEmoji(text) { return measureClusters(text, font: font, extra: d) }
         var total: CGFloat = 0
         var prev: Unicode.Scalar? = nil
         for ch in text.unicodeScalars {

@@ -149,6 +149,7 @@ script.
 | `scratch/mrroot_fe/darwin/usr/lib/swift/libswift{Darwin,Synchronization,_Builtin_float,_DarwinFoundation{1,2,3},_RegexParser,_StringProcessing,_errno}.dylib` | iOS CoreSimulator runtime via `full/foundation/stage_swift_overlays.sh` (**macOS only**) | recorded in that root's `.manifest` staged rows | `build_full.sh:48,317-340` |
 | `scratch/mrroot/host/{libdispatch,libBlocksRuntime}.so` | `/usr/lib/swift/linux/` | `39e502b3…` / `47a4f774…` (`build_core_guest_package.sh:402-405,2457-2459`) | `build_full.sh:346-364` |
 | `/usr/share/fonts/truetype/dejavu/DejaVuSans{,-Bold}.ttf` | distro fonts | `ae7b7855…` / `5c1247ac…` | widget `:71-74,224-225` |
+| `/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf` | distro font `fonts-noto-color-emoji=2.047-0ubuntu0.24.04.1` (upstream Noto Emoji v2.047, SIL OFL 1.1) | `93cdc4ee…` | OpenUIKit `ColorEmoji` (`uikit/docs/COLOR_EMOJI.md`); app bundles copy it to `OpenUIKit/fonts/` |
 | poppler `pdftocairo` | Homebrew 25.04.0 or Ubuntu noble `poppler-utils=24.02.0-1ubuntu9.9` | profile table `onboarding_resources_proof.py:164-183` | resource-bundle producer for the widget gate input |
 
 ---

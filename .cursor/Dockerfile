@@ -21,6 +21,7 @@ RUN apt-get update \
         curl \
         file \
         fonts-dejavu-core \
+        fonts-noto-color-emoji=2.047-0ubuntu0.24.04.1 \
         git \
         git-lfs \
         imagemagick \

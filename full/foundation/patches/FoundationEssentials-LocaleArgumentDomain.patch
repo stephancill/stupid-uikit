@@ -1,0 +1,72 @@
+--- FoundationEssentials/Locale/Locale_Cache.swift
++++ FoundationEssentials/Locale/Locale_Cache.swift
+@@ -285,19 +285,65 @@
+         return preferredLocaleID
+     }
+ #else
++    // Linux-hosted Mach-O guests (stupid-uikit) have no CFPreferences. The
++    // launch arguments' NSArgumentDomain keys stand in for the global
++    // preferences, as Xcode's scheme language/region options and
++    // `simctl launch <app> -AppleLocale en_GB` set them on iOS:
++    //   -AppleLocale <identifier>
++    //   -AppleLanguages "(<language>, ...)"   (or one bare identifier)
++    //   -AppleICUForce24HourTime YES | -AppleICUForce12HourTime YES
++    // Without them the upstream defaults stand (en_001, no hour override).
++    static let argumentDomain: [String: String] = {
++        var values: [String: String] = [:]
++        let args = CommandLine.arguments
++        var i = 1
++        while i + 1 < args.count {
++            let key = args[i]
++            if key.hasPrefix("-"), key.count > 1, !args[i + 1].hasPrefix("-") {
++                values[String(key.dropFirst())] = args[i + 1]
++                i += 2
++            } else {
++                i += 1
++            }
++        }
++        return values
++    }()
++
++    static var argumentLocale: String? { argumentDomain["AppleLocale"] }
++
++    static var argumentLanguages: [String]? {
++        guard let raw = argumentDomain["AppleLanguages"] else { return nil }
++        // An old-style property-list array, "(en-GB, fr)"; quotes optional.
++        let items = raw.split(whereSeparator: { "(), \"\t".contains($0) }).map(String.init)
++        return items.isEmpty ? nil : items
++    }
++
++    static func argumentBool(_ key: String) -> Bool? {
++        guard let v = argumentDomain[key]?.lowercased() else { return nil }
++        switch v {
++        case "yes", "true", "1": return true
++        case "no", "false", "0": return false
++        default: return nil
++        }
++    }
++
+     func preferences() -> (LocalePreferences, Bool) {
+         var prefs = LocalePreferences()
+-        prefs.locale = "en_001"
+-        prefs.languages = ["en-001"]
++        prefs.locale = LocaleCache.argumentLocale ?? "en_001"
++        prefs.languages = LocaleCache.argumentLanguages ?? ["en-001"]
++        prefs.force24Hour = LocaleCache.argumentBool("AppleICUForce24HourTime")
++        prefs.force12Hour = LocaleCache.argumentBool("AppleICUForce12HourTime")
+         return (prefs, true)
+     }
+ 
+     func preferredLanguages(forCurrentUser: Bool) -> [String] {
+-        [Locale.canonicalLanguageIdentifier(from: "en-001")]
++        (LocaleCache.argumentLanguages ?? ["en-001"]).map {
++            Locale.canonicalLanguageIdentifier(from: $0)
++        }
+     }
+ 
+     func preferredLocale() -> String? {
+-        "en_001"
++        LocaleCache.argumentLocale ?? "en_001"
+     }
+ #endif
+ 

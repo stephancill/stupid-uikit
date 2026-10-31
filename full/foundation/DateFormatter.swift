@@ -35,7 +35,7 @@ open class DateFormatter {
             return _render(dateFormat, date: date)
         }
         if let pattern = _stylePatterns[_styleKey] {
-            return _render(pattern, date: date)
+            return _render(_applyingHourPreference(pattern), date: date)
         }
         return ""
     }
@@ -50,7 +50,7 @@ open class DateFormatter {
         if let dateFormat, !dateFormat.isEmpty {
             pattern = dateFormat
         } else if let styled = _stylePatterns[_styleKey] {
-            pattern = styled
+            pattern = _applyingHourPreference(styled)
         } else {
             return nil
         }
@@ -74,6 +74,49 @@ open class DateFormatter {
 
     private var _language: String {
         String(_localeIdentifier.split(separator: "_").first ?? "en")
+    }
+
+    /// A style pattern under the user's 24-Hour Time preference
+    /// (`-AppleICUForce24HourTime` / `-AppleICUForce12HourTime`, which
+    /// Locale.current carries as its hour cycle): as CFDateFormatter does,
+    /// a forced 24-hour clock turns h/K into H/k and drops the day period
+    /// with its separator; a forced 12-hour clock turns H/k into h/K and
+    /// appends the day period. A locale without a preference keeps the
+    /// table's pattern.
+    private func _applyingHourPreference(_ pattern: String) -> String {
+        let locale = self.locale ?? .current
+        let natural = Locale(identifier: locale.identifier).hourCycle
+        let effective = locale.hourCycle
+        func twelve(_ c: Locale.HourCycle) -> Bool { c == .oneToTwelve || c == .zeroToEleven }
+        guard twelve(natural) != twelve(effective) else { return pattern }
+        var out = ""
+        var quoted = false
+        if twelve(effective) {
+            var sawHour = false
+            for c in pattern {
+                if c == "'" { quoted.toggle() }
+                if !quoted && c == "H" { out.append("h"); sawHour = true; continue }
+                if !quoted && c == "k" { out.append("K"); sawHour = true; continue }
+                out.append(c)
+            }
+            guard sawHour, !pattern.contains("a") else { return pattern }
+            // After the last time field (m or s), as en_US places it.
+            if let last = out.lastIndex(where: { $0 == "m" || $0 == "s" }) {
+                out.insert(contentsOf: "\u{202F}a", at: out.index(after: last))
+            }
+            return out
+        }
+        for c in pattern {
+            if c == "'" { quoted.toggle() }
+            if !quoted && c == "h" { out.append("H"); continue }
+            if !quoted && c == "K" { out.append("k"); continue }
+            if !quoted && c == "a" {
+                while let l = out.last, l == " " || l == "\u{202F}" || l == "\u{00A0}" { out.removeLast() }
+                continue
+            }
+            out.append(c)
+        }
+        return out
     }
 
     private var _usesTwelveHourStyle: Bool {

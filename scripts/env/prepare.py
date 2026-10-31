@@ -576,7 +576,7 @@ def staged_outcome(root: Path, row: dict, verify_only: bool, arch: str, system: 
             return Outcome("staged", ident, f"path={dest} from x86 artifact")
         source = root / row["source"]
         return stage_file(source, dest, row["sha256"], ident, verify_only)
-    if ident in ("dejavu-sans", "dejavu-sans-bold"):
+    if ident in ("dejavu-sans", "dejavu-sans-bold", "noto-color-emoji"):
         return verify_absolute_hash(Path(row["path"]), row["sha256"], ident)
     if ident == "mrroot_fe-overlays":
         path = resolve_row_path(root, row)
