@@ -2717,7 +2717,7 @@ private enum _ViewRenderer {
                 return measure(content, proposed: proposed, environment: environment)
             case .overlay:
                 return measure(content, proposed: proposed, environment: environment)
-            case .mask:
+            case .mask, .strokeOverhang:
                 return measure(content, proposed: proposed, environment: environment)
             case .multilineTextAlignment(let alignment):
                 var next = environment
@@ -2974,10 +2974,11 @@ private enum _ViewRenderer {
             case .fill(let color):
                 view.backgroundColor = (color ?? environment.foregroundColor ?? .black).resolve()
                 view.accessibilityIdentifier = "SwiftUI.RoundedRectangle.fill"
-            case .stroke(let color, let lineWidth):
-                view.backgroundColor = .clear
-                view.layer.borderWidth = max(0, lineWidth)
-                view.layer.borderColor = color.resolve().resolvedCGColor(with: view.traitCollection).cgColor
+            case .stroke(let color, let lineWidth, let placement):
+                _applyStrokeBorder(
+                    to: view, shapeRect: rect,
+                    cornerRadius: Swift.min(max(0, cornerRadius), Swift.min(rect.width, rect.height) / 2),
+                    color: color, lineWidth: lineWidth, placement: placement)
                 view.accessibilityIdentifier = "SwiftUI.RoundedRectangle.stroke"
             }
             surface.addSubview(view)
@@ -2989,10 +2990,11 @@ private enum _ViewRenderer {
             case .fill(let color):
                 view.backgroundColor = (color ?? environment.foregroundColor ?? .black).resolve()
                 view.accessibilityIdentifier = "SwiftUI.Capsule.fill"
-            case .stroke(let color, let lineWidth):
-                view.backgroundColor = .clear
-                view.layer.borderWidth = max(0, lineWidth)
-                view.layer.borderColor = color.resolve().resolvedCGColor(with: view.traitCollection).cgColor
+            case .stroke(let color, let lineWidth, let placement):
+                _applyStrokeBorder(
+                    to: view, shapeRect: rect,
+                    cornerRadius: max(0, min(rect.width, rect.height) / 2),
+                    color: color, lineWidth: lineWidth, placement: placement)
                 view.accessibilityIdentifier = "SwiftUI.Capsule.stroke"
             }
             surface.addSubview(view)
@@ -3066,14 +3068,7 @@ private enum _ViewRenderer {
         case .spacer:
             return
         case .gradient(let gradient, let start, let end):
-            let view = UIGradientView(frame: rect)
-            view.isUserInteractionEnabled = false
-            view.colors = gradient.colors.map { $0.resolve() }
-            view.locations = gradient.stops.map(\.location)
-            view.startPoint = CGPoint(x: start.x, y: start.y)
-            view.endPoint = CGPoint(x: end.x, y: end.y)
-            view.accessibilityIdentifier = "SwiftUI.LinearGradient"
-            surface.addSubview(view)
+            placeGradient(gradient, start: start, end: end, frame: rect, unitRect: rect, on: surface)
         case .hStack(let children, let alignment, let spacing):
             placeHStack(
                 children,
@@ -3870,6 +3865,14 @@ private enum _ViewRenderer {
                     layer.position = CGPoint(x: maskRect.midX, y: maskRect.midY)
                     layer.backgroundColor = UIColor.white.cgColor
                     host.layer.mask = layer
+                }
+            case .strokeOverhang(let overhang):
+                let grown = rect.insetBy(dx: -overhang, dy: -overhang)
+                if case .gradient(let gradient, let start, let end) = content.kind {
+                    placeGradient(gradient, start: start, end: end,
+                                  frame: grown, unitRect: rect, on: surface)
+                } else {
+                    place(content, in: grown, on: surface, environment: environment)
                 }
             case .multilineTextAlignment(let alignment):
                 var next = environment
@@ -5451,6 +5454,26 @@ private enum _ViewRenderer {
                 forFontWeight: (environment.font ?? .body).resolve(weight: environment.weight).weight
             )
             symbol.frame = rect
+            // A fixed-size (not resizable) open symbol keeps its font-derived
+            // size and is centred on its anchor in the rect it is placed in,
+            // as SwiftUI places a fixed-size image in a larger or smaller
+            // frame; it was scaled to fill the rect (a 28 pt frame shrank
+            // stupid social's 29 pt badge symbol).
+            if OpenUIKitRuntime.openSymbolFallback, !environment.imageResizable,
+               !_SystemSymbolView.isHandDrawn(name),
+               let layout = OpenSymbols.layout(
+                   name: name,
+                   pointSize: (environment.font ?? .body)
+                       .resolve(weight: environment.weight).pointSize
+               ) {
+                let factor = environment.imageScale.factor
+                symbol.frame = CGRect(
+                    x: rect.midX - layout.anchor.x * factor,
+                    y: rect.midY - layout.anchor.y * factor,
+                    width: layout.size.width * factor,
+                    height: layout.size.height * factor
+                )
+            }
             symbol.accessibilityIdentifier = "SwiftUI.Image.systemName.\(name)"
             surface.addSubview(symbol)
         case .named(let name, let bundle):
@@ -5477,6 +5500,30 @@ private enum _ViewRenderer {
             imageView.accessibilityIdentifier = "SwiftUI.Image.uiImage"
             surface.addSubview(imageView)
         }
+    }
+
+    /// A stroked rounded rectangle (or capsule) as a layer border. A border is
+    /// drawn inside its layer's bounds, with an inner corner radius of
+    /// `cornerRadius - borderWidth`. SwiftUI's `stroke` centres the line on
+    /// the shape's outline, so the view is grown by half the line on every
+    /// side (not clipped, as SwiftUI does not clip it) and its corners by the
+    /// same amount: the outer edge is the outline offset outward (radius
+    /// r + w/2, square when r is 0, the default miter join) and the inner
+    /// edge the outline offset inward (radius max(0, r - w/2)), exactly the
+    /// centred stroke. `strokeBorder` keeps the frame: the inside border is
+    /// the shape inset by half the line, stroked.
+    static func _applyStrokeBorder(
+        to view: UIView, shapeRect rect: CGRect, cornerRadius: CGFloat,
+        color: Color, lineWidth: CGFloat, placement: _OpenStrokePlacement
+    ) {
+        let width = lineWidth.isFinite ? max(0, lineWidth) : 0
+        let overhang = rect.width > 0 && rect.height > 0
+            ? placement.overhang(lineWidth: width) : 0
+        view.frame = rect.insetBy(dx: -overhang, dy: -overhang)
+        view.layer.cornerRadius = cornerRadius > 0 ? cornerRadius + overhang : 0
+        view.backgroundColor = .clear
+        view.layer.borderWidth = width
+        view.layer.borderColor = color.resolve().resolvedCGColor(with: view.traitCollection).cgColor
     }
 
     /// SwiftUI masks by the alpha its mask content draws. When that content
@@ -5569,6 +5616,32 @@ private enum _ViewRenderer {
             container.addSublayer(layer)
         }
         return container
+    }
+
+    /// A linear gradient view at `frame` whose unit points are relative to
+    /// `unitRect` (the frame itself, or a stroked shape's frame inside a
+    /// frame grown by the stroke's overhang).
+    private static func placeGradient(
+        _ gradient: Gradient, start: UnitPoint, end: UnitPoint,
+        frame: CGRect, unitRect: CGRect, on surface: UIView
+    ) {
+        let view = UIGradientView(frame: frame)
+        view.isUserInteractionEnabled = false
+        view.colors = gradient.colors.map { $0.resolve() }
+        view.locations = gradient.stops.map(\.location)
+        func local(_ point: UnitPoint) -> CGPoint {
+            guard frame != unitRect, frame.width > 0, frame.height > 0 else {
+                return CGPoint(x: point.x, y: point.y)
+            }
+            return CGPoint(
+                x: (unitRect.minX - frame.minX + point.x * unitRect.width) / frame.width,
+                y: (unitRect.minY - frame.minY + point.y * unitRect.height) / frame.height
+            )
+        }
+        view.startPoint = local(start)
+        view.endPoint = local(end)
+        view.accessibilityIdentifier = "SwiftUI.LinearGradient"
+        surface.addSubview(view)
     }
 
     private static func alignedRect(

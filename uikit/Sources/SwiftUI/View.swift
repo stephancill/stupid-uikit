@@ -168,7 +168,24 @@ indirect enum _OpenViewNodeKind {
 
 enum _OpenRoundedRectangleStyle {
     case fill(Color?)
-    case stroke(Color, lineWidth: CGFloat)
+    case stroke(Color, lineWidth: CGFloat, placement: _OpenStrokePlacement)
+}
+
+/// Where a shape's stroke lies relative to its outline. SwiftUI's
+/// `stroke(_:lineWidth:)` centres the line on the path, so half of it lies
+/// outside the shape's frame (and is not clipped there); `strokeBorder`
+/// insets the shape by half the width first, so the line stays inside.
+enum _OpenStrokePlacement: Sendable {
+    case centered
+    case inside
+
+    /// How far the stroke reaches outside the shape's frame.
+    func overhang(lineWidth: CGFloat) -> CGFloat {
+        switch self {
+        case .centered: return lineWidth.isFinite ? max(0, lineWidth) / 2 : 0
+        case .inside: return 0
+        }
+    }
 }
 
 struct _OpenTabPage {
@@ -337,6 +354,11 @@ enum _OpenViewModification {
     case background(_OpenViewNode, alignment: Alignment)
     case overlay(_OpenViewNode, alignment: Alignment)
     case mask(_OpenViewNode, alignment: Alignment)
+    /// Placement only: the content is laid out in the proposed rect but
+    /// placed in that rect grown by this much on every side (a centred
+    /// stroke's style painted under its mask). A gradient keeps its unit
+    /// points relative to the unexpanded rect.
+    case strokeOverhang(CGFloat)
     case resizable
     case aspectRatio(CGFloat?, ContentMode)
     case multilineTextAlignment(TextAlignment)
@@ -1477,7 +1499,8 @@ extension _OpenRoundedRectangle: _OpenView {
         _OpenRoundedRectangleStroke(
             cornerRadius: cornerRadius,
             color: color,
-            lineWidth: lineWidth
+            lineWidth: lineWidth,
+            placement: .centered
         )
     }
 
@@ -1485,7 +1508,8 @@ extension _OpenRoundedRectangle: _OpenView {
         _OpenRoundedRectangleStroke(
             cornerRadius: cornerRadius,
             color: color,
-            lineWidth: lineWidth
+            lineWidth: lineWidth,
+            placement: .inside
         )
     }
 
@@ -1601,12 +1625,13 @@ public struct _OpenRoundedRectangleStroke: _OpenView {
     public let cornerRadius: CGFloat
     public let color: Color
     public let lineWidth: CGFloat
+    let placement: _OpenStrokePlacement
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
         _OpenViewNode(
             .roundedRectangle(
                 cornerRadius: cornerRadius,
-                style: .stroke(color, lineWidth: max(0, lineWidth))
+                style: .stroke(color, lineWidth: max(0, lineWidth), placement: placement)
             )
         )
     }
@@ -1622,6 +1647,18 @@ extension _OpenRectangle: _OpenView {
     public func fill(_ color: Color) -> some _OpenView {
         _OpenFilledRoundedRectangle(cornerRadius: 0, color: color)
     }
+
+    public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenRoundedRectangleStroke(
+            cornerRadius: 0, color: color, lineWidth: lineWidth, placement: .centered
+        )
+    }
+
+    public func strokeBorder(_ color: Color, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenRoundedRectangleStroke(
+            cornerRadius: 0, color: color, lineWidth: lineWidth, placement: .inside
+        )
+    }
 }
 
 extension _OpenCapsule: _OpenView {
@@ -1636,7 +1673,11 @@ extension _OpenCapsule: _OpenView {
     }
 
     public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some _OpenView {
-        _OpenStrokedCapsule(color: color, lineWidth: lineWidth)
+        _OpenStrokedCapsule(color: color, lineWidth: lineWidth, placement: .centered)
+    }
+
+    public func strokeBorder(_ color: Color, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenStrokedCapsule(color: color, lineWidth: lineWidth, placement: .inside)
     }
 }
 
@@ -1652,7 +1693,11 @@ extension _OpenCircle: _OpenView {
     }
 
     public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some _OpenView {
-        _OpenStrokedCapsule(color: color, lineWidth: lineWidth)
+        _OpenStrokedCapsule(color: color, lineWidth: lineWidth, placement: .centered)
+    }
+
+    public func strokeBorder(_ color: Color, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenStrokedCapsule(color: color, lineWidth: lineWidth, placement: .inside)
     }
 }
 
@@ -1709,13 +1754,19 @@ public struct _OpenTrimmedCircleStroke<Style: ShapeStyle>: _OpenView {
     let strokeStyle: StrokeStyle
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
+        // The arc is centred on the circle's outline, as SwiftUI strokes it:
+        // the view is placed over the frame grown by the overhang (half the
+        // line, more for square caps) so nothing outside the frame is cut.
+        let overhang = _SwiftUITrimmedCircleStrokeView.overhang(for: strokeStyle)
         let view = _SwiftUITrimmedCircleStrokeView(
             startFraction: shape.startFraction,
             endFraction: shape.endFraction,
             color: style._openResolvedForegroundColor(),
-            strokeStyle: strokeStyle
+            strokeStyle: strokeStyle,
+            overhang: overhang
         )
-        return _OpenViewNode(.view(view))
+        let node = _OpenViewNode(.view(view))
+        return overhang > 0 ? _OpenViewNode(.modified(node, .strokeOverhang(overhang))) : node
     }
 }
 
@@ -1755,17 +1806,32 @@ private final class _SwiftUITrimmedCircleStrokeView: UIView {
     let endFraction: CGFloat
     let strokeColor: Color
     let strokeStyle: StrokeStyle
+    /// The view is placed this far outside the circle's frame on every side.
+    let overhang: CGFloat
+
+    /// Furthest a stroke of `style` reaches outside its circle: half the
+    /// line, or a square cap's corner (half the line along both the radius
+    /// and the tangent).
+    static func overhang(for style: StrokeStyle) -> CGFloat {
+        let width = style.lineWidth.isFinite ? max(0, style.lineWidth) : 0
+        switch style.lineCap {
+        case .square: return width / 2 * CGFloat(2).squareRoot()
+        default: return width / 2
+        }
+    }
 
     init(
         startFraction: CGFloat,
         endFraction: CGFloat,
         color: Color,
-        strokeStyle: StrokeStyle
+        strokeStyle: StrokeStyle,
+        overhang: CGFloat
     ) {
         self.startFraction = startFraction
         self.endFraction = endFraction
         strokeColor = color
         self.strokeStyle = strokeStyle
+        self.overhang = overhang
         super.init(frame: .zero)
         backgroundColor = .clear
         isOpaque = false
@@ -1774,6 +1840,11 @@ private final class _SwiftUITrimmedCircleStrokeView: UIView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// A shape takes the size it is offered, as the other shape nodes
+    /// measure (UIView's default answered its zero frame, so a trimmed
+    /// circle in an overlay or stack collapsed to nothing).
+    override func sizeThatFits(_ size: CGSize) -> CGSize { size }
 
     override func drawContent(in canvas: Canvas, bounds: CGRect) {
         let width = strokeStyle.lineWidth.isFinite
@@ -1785,9 +1856,10 @@ private final class _SwiftUITrimmedCircleStrokeView: UIView {
         let end = min(max(endFraction, 0), 1)
         guard end > start else { return }
 
-        let radius = max(0, min(bounds.width, bounds.height) / 2 - width / 2)
+        let circle = bounds.insetBy(dx: overhang, dy: overhang)
+        let radius = max(0, min(circle.width, circle.height) / 2)
         guard radius > 0 else { return }
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let center = CGPoint(x: circle.midX, y: circle.midY)
         let circumference = 2 * CGFloat.pi * radius
         guard circumference.isFinite, circumference > 0 else { return }
         let pathLength = (end - start) * circumference
@@ -1898,9 +1970,12 @@ public struct _OpenStrokedCapsule: _OpenView {
     public typealias Body = Never
     public let color: Color
     public let lineWidth: CGFloat
+    let placement: _OpenStrokePlacement
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        _OpenViewNode(.capsule(.stroke(color, lineWidth: max(0, lineWidth))))
+        _OpenViewNode(.capsule(.stroke(
+            color, lineWidth: max(0, lineWidth), placement: placement
+        )))
     }
 }
 
@@ -1911,6 +1986,10 @@ public struct _OpenStrokedCapsule: _OpenView {
 public struct _OpenShapeStyleStroke<Style: ShapeStyle>: _OpenView {
     public typealias Body = Never
     let style: Style
+    /// How far the stroke reaches outside the shape's frame: the masked
+    /// style is drawn over the frame grown by this much, so a centred
+    /// stroke's outer half is painted too.
+    let overhang: CGFloat
     let stroke: @MainActor (Color) -> _OpenViewNode
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
@@ -1922,44 +2001,86 @@ public struct _OpenShapeStyleStroke<Style: ShapeStyle>: _OpenView {
 
     private func masked<Content: _OpenView>(_ content: Content) -> _OpenViewNode {
         let strokeNode = stroke(.black)
-        return _OpenViewNode(.modified(
-            content._makeOpenUIKitNode(),
-            .mask(strokeNode, alignment: .center)
-        ))
+        var painted = content._makeOpenUIKitNode()
+        if overhang > 0 {
+            painted = _OpenViewNode(.modified(painted, .strokeOverhang(overhang)))
+        }
+        return _OpenViewNode(.modified(painted, .mask(strokeNode, alignment: .center)))
     }
 }
 
 public extension _OpenCircle {
     @_disfavoredOverload
     func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
-        _OpenShapeStyleStroke(style: content) {
-            _OpenStrokedCapsule(color: $0, lineWidth: lineWidth)._makeOpenUIKitNode()
-        }
+        _OpenShapeStyleStroke.capsule(content, lineWidth: lineWidth, placement: .centered)
+    }
+
+    @_disfavoredOverload
+    func strokeBorder<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke.capsule(content, lineWidth: lineWidth, placement: .inside)
     }
 }
 
 public extension _OpenCapsule {
     @_disfavoredOverload
     func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
-        _OpenShapeStyleStroke(style: content) {
-            _OpenStrokedCapsule(color: $0, lineWidth: lineWidth)._makeOpenUIKitNode()
-        }
+        _OpenShapeStyleStroke.capsule(content, lineWidth: lineWidth, placement: .centered)
+    }
+
+    @_disfavoredOverload
+    func strokeBorder<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke.capsule(content, lineWidth: lineWidth, placement: .inside)
     }
 }
 
 public extension _OpenRoundedRectangle {
     @_disfavoredOverload
     func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
-        _OpenShapeStyleStroke(style: content) { [cornerRadius] in
-            _OpenRoundedRectangleStroke(
-                cornerRadius: cornerRadius, color: $0, lineWidth: lineWidth
-            )._makeOpenUIKitNode()
-        }
+        _OpenShapeStyleStroke.roundedRectangle(
+            content, cornerRadius: cornerRadius, lineWidth: lineWidth, placement: .centered)
     }
 
     @_disfavoredOverload
     func strokeBorder<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
-        stroke(content, lineWidth: lineWidth)
+        _OpenShapeStyleStroke.roundedRectangle(
+            content, cornerRadius: cornerRadius, lineWidth: lineWidth, placement: .inside)
+    }
+}
+
+public extension _OpenRectangle {
+    @_disfavoredOverload
+    func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke.roundedRectangle(
+            content, cornerRadius: 0, lineWidth: lineWidth, placement: .centered)
+    }
+
+    @_disfavoredOverload
+    func strokeBorder<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke.roundedRectangle(
+            content, cornerRadius: 0, lineWidth: lineWidth, placement: .inside)
+    }
+}
+
+extension _OpenShapeStyleStroke {
+    static func capsule(
+        _ content: Style, lineWidth: CGFloat, placement: _OpenStrokePlacement
+    ) -> Self {
+        Self(style: content, overhang: placement.overhang(lineWidth: lineWidth)) {
+            _OpenStrokedCapsule(color: $0, lineWidth: lineWidth, placement: placement)
+                ._makeOpenUIKitNode()
+        }
+    }
+
+    static func roundedRectangle(
+        _ content: Style, cornerRadius: CGFloat, lineWidth: CGFloat,
+        placement: _OpenStrokePlacement
+    ) -> Self {
+        Self(style: content, overhang: placement.overhang(lineWidth: lineWidth)) {
+            _OpenRoundedRectangleStroke(
+                cornerRadius: cornerRadius, color: $0, lineWidth: lineWidth,
+                placement: placement
+            )._makeOpenUIKitNode()
+        }
     }
 }
 

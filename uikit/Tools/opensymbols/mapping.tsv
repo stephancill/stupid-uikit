@@ -1,8 +1,11 @@
 # SF Symbol name -> Phosphor Icons 2.1.1 glyph. Columns (tab-separated):
-#   sf_name  phosphor_icon  weight(regular|regular-only|fill)  composite(-|ring|disc|mirror)  note
+#   sf_name  phosphor_icon  weight(regular|regular-only|fill)  composite(-|ring|disc|mirror|badge-plus)  note
 # composite ring: Phosphor `circle` (regular) with the icon (regular) at half size in its centre.
 # composite disc: Phosphor `circle` (fill) with the icon (fill) at half size cut out (even-odd).
 # composite mirror: the icon mirrored horizontally (facing the other way).
+# composite badge-plus: SF's person.fill.badge.plus drawn from measured primitives (head and body
+#   ellipses, a disc with a plus cut out over the figure's lower right, the figure knocked out
+#   around it; OpenSymbols.badgePlusGeometry). The icon column must be `user` (unused for drawing).
 # Every regular-weight row also vendors the icon's Phosphor bold drawing, used for SF semibold
 # and heavier. regular-only draws the regular glyph at every weight: SF draws the symbol lighter
 # than Phosphor bold even at semibold (MEASURED `at`, title2 semibold, iPhone 16e @3x iOS 27:
@@ -92,7 +95,7 @@ person.crop.circle.fill	user-circle	fill	-
 person.crop.circle.badge.questionmark	user-circle	regular	-	badge omitted
 person.crop.circle.badge.xmark	user-circle-minus	regular	-	minus badge instead of xmark
 person.fill	user	fill	-
-person.fill.badge.plus	user-plus	fill	-	plus drawn beside the figure, not as a badge
+person.fill.badge.plus	user	fill	badge-plus	measured primitives, not a Phosphor drawing
 photo	image	regular	-
 photo.fill	image	fill	-
 photo.on.rectangle	images	regular	-

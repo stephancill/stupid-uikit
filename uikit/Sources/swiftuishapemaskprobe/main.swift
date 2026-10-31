@@ -172,8 +172,8 @@ struct TextMask: View {
               "\(tag) stroked circle builds a shape mask tree")
         let b = render(ring, compositor)
         check(isClear(pixel(b, 35, 35, scale: 2)), "\(tag) ring clears the centre")
-        check(isOpaque(pixel(b, 35, 1.5, scale: 2)), "\(tag) ring keeps the 3 pt band (top)")
-        check(isOpaque(pixel(b, 68.5, 35, scale: 2)), "\(tag) ring keeps the 3 pt band (right)")
+        check(isOpaque(pixel(b, 35, 0.5, scale: 2)), "\(tag) ring keeps the stroke's inner 1.5 pt (top)")
+        check(isOpaque(pixel(b, 69, 35, scale: 2)), "\(tag) ring keeps the stroke's inner 1.5 pt (right)")
         check(isClear(pixel(b, 35, 5, scale: 2)), "\(tag) ring clears inside the band")
         check(isClear(pixel(b, 1, 1, scale: 2)), "\(tag) ring clears the corner")
     }
@@ -190,7 +190,7 @@ struct TextMask: View {
     withExtendedLifetime(gradientHost) {
         guard let gradient else { return check(false, "\(tag) gradient stroke: no mask host") }
         let b = render(gradient, compositor)
-        let band = pixel(b, 35, 1.5, scale: 2)
+        let band = pixel(b, 35, 0.5, scale: 2)
         check(isOpaque(band) && band[0] > band[1],
               "\(tag) gradient stroke draws the gradient on the band: \(band)")
         check(isClear(pixel(b, 35, 35, scale: 2)), "\(tag) gradient stroke clears the centre")
