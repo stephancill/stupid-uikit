@@ -59,9 +59,10 @@ and `.title2` become bold; every other text style and `.system(size:)` at
 unchanged. `fontWeight(.bold)` and `.weight(.bold)` stay the bold weight. So
 stupid social's `Text(actor).bold()` in `.body` is semibold 17, which is why
 its actor names looked too heavy and wide. The macOS cut keeps bold.
-Unmeasured: light/thin bases (kept bold); a text style that already carries
-a weight follows the system-size rule (`.title2.weight(.semibold).bold()` is
-bold on iOS, semibold here).
+Unmeasured: light/thin bases (kept bold). A text style that already carries
+a weight keeps its style (`SWIFTUI_TEXT_METRICS.md`) and takes the style rule:
+`.title2.weight(.semibold).bold()` is bold and `.body.weight(.medium).bold()`
+semibold, as measured on iOS.
 
 ## Rendering (`Hosting.swift`)
 
@@ -82,8 +83,9 @@ bold on iOS, semibold here).
   draw it.
 - An inline image is an `NSTextAttachment` on U+FFFC. A bitmap
   (`Image(uiImage:)`, `Image(_ name:bundle:)`) keeps its point size with its
-  bottom on the baseline, raised by the run's `baselineOffset` (attachment
-  `bounds.origin.y`). A system symbol is `UIImage(systemName:withConfiguration:)`
+  bottom on the baseline, moved by the run's `baselineOffset`, which stays a
+  `.baselineOffset` attribute of the attachment run so the line box grows
+  with it (`SWIFTUI_TEXT_METRICS.md`). A system symbol is `UIImage(systemName:withConfiguration:)`
   at the run's font point size, tinted with the run's colour and centred on
   the cap height. An image that does not resolve (unknown asset or symbol) is
   left out of the line.

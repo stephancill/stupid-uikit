@@ -3977,10 +3977,15 @@ private enum _ViewRenderer {
                     ),
                     environment: environment
                 )
-                let size = CGSize(
-                    width: horizontal ? ideal.width : rect.width,
-                    height: vertical ? ideal.height : rect.height
-                )
+                // SwiftUI: the modifier is the child's size for the adjusted
+                // proposal on BOTH axes; a non-fixed axis passes the proposal
+                // through but still takes the child's answer. MEASURED iOS
+                // 27.0 simulator: stupid social's story names
+                // (`Text.lineLimit(1).fixedSize(horizontal: false, vertical:
+                // true).frame(width: 70)`) are centred under the bubble
+                // ("Nico" ink at x 40-61.5 pt of a 70 pt column at 16), where
+                // taking the proposed width left-aligned them.
+                let size = ideal
                 place(
                     content,
                     in: alignedRect(size: size, in: rect, alignment: .center),
@@ -5285,6 +5290,7 @@ private enum _ViewRenderer {
         label.minimumScaleFactor = environment.minimumScaleFactor
         label.allowsDefaultTighteningForTruncation = environment.allowsTightening
         label.numberOfLines = max(0, environment.lineLimit ?? 0)
+        label._avoidsOrphanLastWord = true
         label.lineBreakMode = environment.lineLimit == 1
             ? .byTruncatingTail
             : .byWordWrapping
@@ -5335,11 +5341,15 @@ private enum _ViewRenderer {
                 guard let attachment = _textAttachment(
                     image.source,
                     font: uiFont,
-                    color: color,
-                    baselineOffset: attributes.baselineOffset ?? 0
+                    color: color
                 ) else { continue }
-                // The attachment's bounds carry the offset.
-                values[.baselineOffset] = nil
+                // The run keeps its baseline offset, so the image moves with
+                // it AND the line box grows by it, as a lowered text run's
+                // does. MEASURED iOS 27.0 simulator (iPhone 16e 3x, stupid
+                // social's feed headlines `Text(badge).baselineOffset(-1)`,
+                // 14 pt badge, 17 pt text): the headline is 21.333 pt
+                // (16.187 + 4.101 + 1, up to the pixel), not the 20.333 of
+                // an offset carried in the attachment bounds.
                 values[.attachment] = attachment
                 result.append(OpenUIKit.NSAttributedString(
                     string: NSAttachmentCharacterString,
@@ -5351,15 +5361,15 @@ private enum _ViewRenderer {
     }
 
     /// An inline image as a text attachment. SwiftUI puts the image's bottom
-    /// on the baseline, raised by the run's baseline offset; a bitmap keeps
-    /// its point size; a system symbol is `UIImage(systemName:)` at the run's
-    /// font size, in the text colour, centred on the cap height. An image
-    /// that does not resolve (unknown name or symbol) is left out.
+    /// on the baseline (the run's baseline offset, an attribute of the
+    /// attachment run, moves it); a bitmap keeps its point size; a system
+    /// symbol is `UIImage(systemName:)` at the run's font size, in the text
+    /// colour, centred on the cap height. An image that does not resolve
+    /// (unknown name or symbol) is left out.
     private static func _textAttachment(
         _ source: _OpenImageSource,
         font: UIFont,
-        color: UIColor,
-        baselineOffset: CGFloat
+        color: UIColor
     ) -> NSTextAttachment? {
         let attachment = NSTextAttachment()
         switch source {
@@ -5383,7 +5393,7 @@ private enum _ViewRenderer {
             attachment.image = image
             attachment.bounds = CGRect(
                 x: 0,
-                y: (font.capHeight - image.size.height) / 2 + baselineOffset,
+                y: (font.capHeight - image.size.height) / 2,
                 width: image.size.width,
                 height: image.size.height
             )
@@ -5392,7 +5402,7 @@ private enum _ViewRenderer {
         guard let size = attachment.image?.size, size.width > 0, size.height > 0 else {
             return nil
         }
-        attachment.bounds = CGRect(x: 0, y: baselineOffset, width: size.width, height: size.height)
+        attachment.bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)
         return attachment
     }
 

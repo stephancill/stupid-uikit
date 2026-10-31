@@ -265,8 +265,10 @@ enum AttributedTextLayout {
                     proposedLineFragment: CGRect(x: 0, y: 0, width: 0, height: 0),
                     glyphPosition: CGPoint(x: 0, y: 0),
                     characterIndex: i)
-                let attAscent = Swift.max(0, b.origin.y + b.height)
-                let attDescent = Swift.max(0, -b.origin.y)
+                // A `.baselineOffset` on the attachment run moves the image
+                // with the run (AttributedTextDraw), so its box moves too.
+                let attAscent = Swift.max(0, b.origin.y + b.height + bo)
+                let attDescent = Swift.max(0, -b.origin.y - bo)
                 runAscent = Swift.max(runAscent, attAscent)
                 runDescent = Swift.max(runDescent, attDescent)
             }
@@ -293,7 +295,7 @@ enum AttributedTextLayout {
     /// the last line holds only its own wrapped content (UILabel measures a
     /// capped label that way — drawing tail-truncates separately).
     static func wrap(_ t: Text, maxWidth: CGFloat, maxLines: Int,
-                     scale: CGFloat) -> [Line] {
+                     scale: CGFloat, avoidOrphan: Bool = false) -> [Line] {
         let p = t.paragraph
         let unlimited = maxLines <= 0
         var lines: [Line] = []
@@ -365,6 +367,25 @@ enum AttributedTextLayout {
             // other exhaustion ends the loop.
             if i >= t.count, !(hardBreak && i == t.count) { break }
         }
+        if avoidOrphan { lines = avoidingOrphan(lines, t, p, scale: scale) }
+        // iOS cut: a text-style font's leading (UIFont.leading of
+        // preferredFont(forTextStyle:) and SwiftUI's text-style fonts)
+        // separates line boxes as on a plain label (FontEngine.
+        // labelBlockHeight: n-1 gaps, none above the first line). The
+        // line's largest leading applies. systemFont(ofSize:) carries none,
+        // so text without a text-style font is unchanged.
+        if GlyphInkTable.usesIOSTable, lines.count > 1 {
+            for k in 0..<(lines.count - 1) {
+                var leading: CGFloat = 0
+                for c in lines[k].range where c < t.count {
+                    leading = Swift.max(leading, t.style(c).font.textStyleLeading ?? 0)
+                }
+                if lines[k].range.isEmpty, lines[k].range.lowerBound < t.count {
+                    leading = t.style(lines[k].range.lowerBound).font.textStyleLeading ?? 0
+                }
+                lines[k].spacingBelow += leading
+            }
+        }
         // lineSpacing separates line boxes (n-1 gaps).
         if p.lineSpacing != 0 {
             for k in 0..<Swift.max(0, lines.count - 1) {
@@ -372,6 +393,45 @@ enum AttributedTextLayout {
             }
         }
         return lines
+    }
+
+    // Orphan avoidance (SwiftUI Text on the iOS cut; UILabel
+    // `_avoidsOrphanLastWord`; see TextLayout.avoidingOrphan). MEASURED iOS 27.0 simulator (iPhone 16e,
+    // stupid social's feed): "Big fan of showing notifications without the
+    // feed." in the 302 pt `.subheadline` preview wraps "...without / the
+    // feed.", where greedy wrapping fits "the" on line 1 and leaves "feed."
+    // alone. That is TextKit's `LineBreakStrategy.pushOut` (part of
+    // `.standard`): a last line holding a single word takes the previous
+    // line's last word when it fits. Only the text's last line, only when
+    // all of the text is laid out (a capped, truncated block is left alone).
+    static func avoidingOrphan(_ lines: [Line], _ t: Text, _ p: NSParagraphStyle,
+                               scale: CGFloat) -> [Line] {
+        guard lines.count >= 2, let last = lines.last,
+              last.range.upperBound == t.count, !last.range.isEmpty,
+              !last.range.contains(where: { t.scalars[$0] == " " || t.scalars[$0] == "\n" })
+        else { return lines }
+        let prev = lines[lines.count - 2]
+        guard prev.range.upperBound < t.count, t.scalars[prev.range.upperBound] == " ",
+              let space = prev.range.last(where: { t.scalars[$0] == " " }),
+              space > prev.range.lowerBound else { return lines }
+        let movedW = width(t, from: space + 1, to: t.count)
+        guard movedW <= last.available + 1e-6 else { return lines }
+        func line(_ range: Range<Int>, from old: Line, measured: CGFloat) -> Line {
+            let (natH, asc) = lineMetrics(t, range)
+            let h = styledHeight(natH, p, scale: scale)
+            var l = old
+            l.range = range
+            l.measuredWidth = old.indent + measured
+            l.drawWidth = width(t, from: range.lowerBound, to: range.upperBound)
+            l.height = h
+            l.ascent = asc + Swift.max(0, h - natH)
+            return l
+        }
+        var out = lines
+        out[out.count - 2] = line(prev.range.lowerBound..<space, from: prev,
+                                  measured: width(t, from: prev.range.lowerBound, to: space + 1))
+        out[out.count - 1] = line((space + 1)..<t.count, from: last, measured: movedW)
+        return out
     }
 
     /// Break one line starting at `from`; returns (end of drawn text,

@@ -63,6 +63,36 @@ public enum TextLayout {
         return lines
     }
 
+    // Orphan avoidance (SwiftUI Text on the iOS cut; UILabel
+    // `_avoidsOrphanLastWord`). MEASURED iOS 27.0 simulator (iPhone 16e,
+    // stupid social's feed): "Big fan of showing notifications without the
+    // feed." in the 302 pt `.subheadline` preview wraps "...without / the
+    // feed.", where greedy wrapping fits "the" on line 1 and leaves "feed."
+    // alone. That is TextKit's `LineBreakStrategy.pushOut` (part of
+    // `.standard`): a last line holding a single word takes the previous
+    // line's last word when it fits. Only the text's last line, only when
+    // all of the text is laid out (a capped, truncated block is left alone).
+    static func avoidingOrphan(_ lines: [Line], text: String, font: UIFont,
+                               maxWidth: CGFloat) -> [Line] {
+        guard lines.count >= 2, let last = lines.last,
+              last.text.endIndex == text.endIndex,
+              !last.text.contains(" "), !last.text.contains("\n") else { return lines }
+        let prev = lines[lines.count - 2]
+        guard prev.text.endIndex < text.endIndex, text[prev.text.endIndex] == " ",
+              let space = prev.text.lastIndex(of: " "),
+              space > prev.text.startIndex else { return lines }
+        let moved = text[text.index(after: space)..<last.text.endIndex]
+        let movedW = FontEngine.measure(String(moved), font: font)
+        guard movedW <= maxWidth + 1e-6 else { return lines }
+        let kept = text[prev.text.startIndex..<space]
+        var out = lines
+        out[out.count - 2] = Line(text: kept,
+                                  measuredWidth: FontEngine.measure(String(kept) + " ", font: font),
+                                  drawWidth: FontEngine.measure(String(kept), font: font))
+        out[out.count - 1] = Line(text: moved, measuredWidth: movedW, drawWidth: movedW)
+        return out
+    }
+
     /// Break one line off the front of `s`; returns (line, remainder).
     /// The break space (if any) is consumed and belongs to neither.
     static func breakLine(_ s: Substring, font: UIFont, maxWidth: CGFloat)

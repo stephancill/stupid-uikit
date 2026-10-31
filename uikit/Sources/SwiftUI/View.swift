@@ -4507,11 +4507,22 @@ private enum _OpenDefaultTaskIdentity: Equatable {
 /// (`.empty`) are not children in SwiftUI, so they take no slot and no
 /// spacing. Counting them applied HStack(spacing: -6)'s gap to a lone
 /// avatar and squeezed it from 32 to 26 points (stupid social AvatarStrip).
+/// A modified EmptyView (`EmptyView().padding(.trailing, 24)`) is still
+/// empty: MEASURED iOS 27.0 simulator, stupid social's follow row (a
+/// `VStack(spacing: 6)` whose last child is that padded EmptyView) is
+/// 75.333 pt, the same as without the child; counting it added 6 pt.
 @MainActor
 private func _stackChildren(_ node: _OpenViewNode) -> [_OpenViewNode] {
-    _flattenGroup(node).filter {
-        if case .empty = $0.kind { return false }
-        return true
+    _flattenGroup(node).filter { !_isEmptyContent($0) }
+}
+
+@MainActor
+private func _isEmptyContent(_ node: _OpenViewNode) -> Bool {
+    switch node.kind {
+    case .empty: return true
+    case .modified(let content, _): return _isEmptyContent(content)
+    case .group(let children): return children.allSatisfy { _isEmptyContent($0) }
+    default: return false
     }
 }
 

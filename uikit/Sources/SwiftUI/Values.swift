@@ -45,7 +45,12 @@ public struct _OpenFont: Hashable, Sendable {
 
     enum Storage: Hashable, Sendable {
         case textStyle(TextStyle)
-        case uiFont(pointSize: CGFloat, weight: UIFont.Weight, design: UIFont.Design)
+        /// `textStyle` is the semantic style a weight/design/italic variant
+        /// came from (`.body.weight(.medium)`, `.system(.body, design:)`): it
+        /// keeps the style's line spacing and bold-trait rule, as SwiftUI's
+        /// text-style fonts do (docs/SWIFTUI_TEXT_METRICS.md).
+        case uiFont(pointSize: CGFloat, weight: UIFont.Weight, design: UIFont.Design,
+                    textStyle: TextStyle? = nil)
         /// A concrete UIFont kept whole — a registered face (KDS's Inter via
         /// `Font(uiFont)`) must not be flattened into the system font.
         case font(UIFont)
@@ -100,8 +105,8 @@ public struct _OpenFont: Hashable, Sendable {
         switch storage {
         case .textStyle(let style):
             return weight(Weight(Self.boldTraitWeight(style: style, weight: .regular)))
-        case .uiFont(_, let stored, _):
-            return weight(Weight(Self.boldTraitWeight(style: nil, weight: stored)))
+        case .uiFont(_, let stored, _, let style):
+            return weight(Weight(Self.boldTraitWeight(style: style, weight: stored)))
         case .font(let font):
             return weight(Weight(Self.boldTraitWeight(style: nil, weight: font.weight)))
         }
@@ -120,6 +125,10 @@ public struct _OpenFont: Hashable, Sendable {
     /// already carries a weight (`.body.weight(.medium).bold()` measured
     /// semibold, `.title2.weight(.semibold).bold()` bold) follows the
     /// size-only `.uiFont` rule, which gives medium and semibold.
+    /// A `.uiFont` that came from a text style (`.title2.weight(.semibold)`)
+    /// keeps its style, so it takes the style rule: both measured cases
+    /// (`.body.weight(.medium).bold()` semibold, `.title2.weight(.semibold)
+    /// .bold()` bold) follow it.
     static func boldTraitWeight(style: TextStyle?, weight: UIFont.Weight) -> UIFont.Weight {
         if let style {
             switch style {
@@ -143,7 +152,7 @@ public struct _OpenFont: Hashable, Sendable {
         guard design != nil || weight != nil else { return _OpenFont(style) }
         let base = _OpenFont(style).resolve(weight: weight)
         return _OpenFont(storage: .uiFont(pointSize: base.pointSize, weight: base.weight,
-                                          design: design ?? .default))
+                                          design: design ?? .default, textStyle: style))
     }
 
     /// Returns the same semantic text style or concrete font descriptor with
@@ -170,15 +179,17 @@ public struct _OpenFont: Hashable, Sendable {
                 storage: .uiFont(
                     pointSize: pointSize,
                     weight: weight.value,
-                    design: .default
+                    design: .default,
+                    textStyle: style
                 )
             )
-        case .uiFont(let pointSize, _, let design):
+        case .uiFont(let pointSize, _, let design, let style):
             return _OpenFont(
                 storage: .uiFont(
                     pointSize: pointSize,
                     weight: weight.value,
-                    design: design
+                    design: design,
+                    textStyle: style
                 )
             )
         case .font(let font):
@@ -197,11 +208,13 @@ public struct _OpenFont: Hashable, Sendable {
     /// is a separate registered font — not measured).
     public func italic() -> _OpenFont {
         switch storage {
-        case .textStyle:
+        case .textStyle(let style):
             let base = resolve(weight: nil)
-            return _OpenFont(storage: .uiFont(pointSize: base.pointSize, weight: base.weight, design: .italic))
-        case .uiFont(let pointSize, let weight, _):
-            return _OpenFont(storage: .uiFont(pointSize: pointSize, weight: weight, design: .italic))
+            return _OpenFont(storage: .uiFont(pointSize: base.pointSize, weight: base.weight,
+                                              design: .italic, textStyle: style))
+        case .uiFont(let pointSize, let weight, _, let style):
+            return _OpenFont(storage: .uiFont(pointSize: pointSize, weight: weight, design: .italic,
+                                              textStyle: style))
         case .font(let font):
             guard font.fontName.hasPrefix(".SF") else { return self }
             return _OpenFont(storage: .uiFont(pointSize: font.pointSize, weight: font.weight, design: .italic))
@@ -233,18 +246,21 @@ public struct _OpenFont: Hashable, Sendable {
             if override?.isBoldTrait == true, OpenUIKitRuntime.systemFontCut == .iOS {
                 weight = Self.boldTraitWeight(style: style, weight: .regular)
             }
-            return .systemFont(ofSize: size, weight: weight)
-        case .uiFont(let pointSize, let storedWeight, let design):
+            return UIFont.systemFont(ofSize: size, weight: weight)
+                ._applyingTextStyleLineSpacing(style.uiKitTextStyle)
+        case .uiFont(let pointSize, let storedWeight, let design, let style):
             var weight = override?.value ?? storedWeight
             if override?.isBoldTrait == true, OpenUIKitRuntime.systemFontCut == .iOS {
-                weight = Self.boldTraitWeight(style: nil, weight: storedWeight)
+                weight = Self.boldTraitWeight(style: style, weight: storedWeight)
             }
             let descriptor = UIFontDescriptor(
                 pointSize: pointSize,
                 weight: weight,
                 design: design
             )
-            return UIFont(descriptor: descriptor, size: pointSize)
+            let font = UIFont(descriptor: descriptor, size: pointSize)
+            guard let style else { return font }
+            return font._applyingTextStyleLineSpacing(style.uiKitTextStyle)
         case .font(let font):
             guard let override, font.fontName.hasPrefix(".SF") else { return font }
             var weight = override.value
@@ -252,6 +268,25 @@ public struct _OpenFont: Hashable, Sendable {
                 weight = Self.boldTraitWeight(style: nil, weight: font.weight)
             }
             return .systemFont(ofSize: font.pointSize, weight: weight)
+        }
+    }
+}
+
+extension _OpenFont.TextStyle {
+    /// The UIKit text style SwiftUI's style resolves through.
+    var uiKitTextStyle: UIFont.TextStyle {
+        switch self {
+        case .largeTitle: return .largeTitle
+        case .title: return .title1
+        case .title2: return .title2
+        case .title3: return .title3
+        case .headline: return .headline
+        case .body: return .body
+        case .callout: return .callout
+        case .subheadline: return .subheadline
+        case .footnote: return .footnote
+        case .caption: return .caption1
+        case .caption2: return .caption2
         }
     }
 }

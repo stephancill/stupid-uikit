@@ -179,6 +179,15 @@ open class UILabel: UIView {
         }
     }
     final var _attributed: NSAttributedString?
+    /// SwiftUI Text's line breaking on the iOS cut: a single-word last line
+    /// takes the previous line's last word (TextLayout.avoidingOrphan).
+    /// Not UIKit API; UIKit's own default strategy is not measured here, so
+    /// plain UILabels keep greedy wrapping.
+    public final var _avoidsOrphanLastWord = false
+
+    final var _avoidsOrphans: Bool {
+        _avoidsOrphanLastWord && OpenUIKitRuntime.systemFontCut == .iOS
+    }
 
     final func _setTextStorageFromAttributed(_ a: NSAttributedString?) {
         _text = a?.string
@@ -260,8 +269,11 @@ open class UILabel: UIView {
             let w = FontEngine.ceilToPixel(FontEngine.measure(text, font: _font), scale: scale)
             return CGSize(width: w, height: lineH)
         }
-        let lines = TextLayout.wrap(text, font: _font, maxWidth: size.width,
+        var lines = TextLayout.wrap(text, font: _font, maxWidth: size.width,
                                     maxLines: numberOfLines)
+        if _avoidsOrphans {
+            lines = TextLayout.avoidingOrphan(lines, text: text, font: _font, maxWidth: size.width)
+        }
         guard !lines.isEmpty else { return .zero }
         var maxW: CGFloat = 0
         for (i, l) in lines.enumerated() {
@@ -315,7 +327,8 @@ open class UILabel: UIView {
         let maxWidth = (numberOfLines == 1 || unbounded)
             ? CGFloat.greatestFiniteMagnitude / 4 : size.width
         let lines = AttributedTextLayout.wrap(t, maxWidth: maxWidth,
-                                              maxLines: numberOfLines, scale: scale)
+                                              maxLines: numberOfLines, scale: scale,
+                                              avoidOrphan: _avoidsOrphans)
         guard !lines.isEmpty else { return .zero }
         return AttributedTextLayout.blockSize(lines, scale: scale)
     }
@@ -324,7 +337,7 @@ open class UILabel: UIView {
     final func attributedDrawLines(_ t: AttributedTextLayout.Text,
                              width: CGFloat) -> [AttributedTextLayout.Line] {
         AttributedTextLayout.wrap(t, maxWidth: width, maxLines: numberOfLines,
-                                  scale: layoutScale)
+                                  scale: layoutScale, avoidOrphan: _avoidsOrphans)
     }
 
     // MARK: - Drawing
@@ -451,9 +464,13 @@ open class UILabel: UIView {
                 needsClip = w > bounds.width + 1e-6
             }
         } else {
-            let wrapped = TextLayout.wrap(text, font: drawingFont,
+            var wrapped = TextLayout.wrap(text, font: drawingFont,
                                           maxWidth: bounds.width,
                                           maxLines: numberOfLines)
+            if _avoidsOrphans {
+                wrapped = TextLayout.avoidingOrphan(wrapped, text: text, font: drawingFont,
+                                                    maxWidth: bounds.width)
+            }
             for (i, l) in wrapped.enumerated() {
                 if i == wrapped.count - 1, l.text.endIndex < text.endIndex {
                     // Text remains beyond the last line: tail-truncate the

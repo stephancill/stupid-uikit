@@ -692,6 +692,9 @@ let conformanceTargets: [Target] = [
     // Native gate for SwiftUI stroke geometry (docs/SHAPE_STROKES.md):
     // centred `stroke`, inset `strokeBorder`, gradients and StrokeStyle arcs.
     .executableTarget(name: "swiftuistrokeprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for SwiftUI text metrics on the iOS cut
+    // (docs/SWIFTUI_TEXT_METRICS.md).
+    .executableTarget(name: "swiftuitextmetricsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",
                       dependencies: ["OpenUIKit", "OpenUIKitC", "CPortableIO"],
                       linkerSettings: [.linkedLibrary("m", .when(platforms: [.linux]))]),

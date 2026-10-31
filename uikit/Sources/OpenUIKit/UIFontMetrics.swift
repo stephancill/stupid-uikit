@@ -228,6 +228,26 @@ extension UIFont {
         return font
     }
 
+    /// A SwiftUI text-style font (`Font.subheadline`, `.body.weight(.bold)`):
+    /// the system font of the style's size and weight with the style's
+    /// line spacing, as `preferredFont(forTextStyle:)` carries it. Not
+    /// SwiftUI or UIKit API; SwiftUI's `Font` resolution calls it.
+    ///
+    /// iOS 27.0 simulator (iPhone 16e 3x, stupid social's feed): a 2-line
+    /// `.subheadline` Text is 38 pt and a 1-line one 18 pt (row heights
+    /// 119.33 / 99.33 / 75.33 with and without the preview); the 2x
+    /// render's preview baselines are 40 px (20 pt) apart. That is the
+    /// UILabel rule above (2 x 17.900 + 2.100); `systemFont(ofSize: 15)`
+    /// would give 36 and an 18 pt pitch.
+    public func _applyingTextStyleLineSpacing(_ style: TextStyle) -> UIFont {
+        guard OpenUIKitRuntime.systemFontCut == .iOS, customFontName == nil,
+              let spacing = UIFont.iOSTextStyleLineSpacingLarge[style.rawValue]
+        else { return self }
+        let cat = UITraitCollection.current.preferredContentSizeCategory
+        guard cat == .large || cat == .unspecified else { return self }
+        return _withTextStyleLeading(spacing - FontEngine.metrics(for: self).lineHeight)
+    }
+
     /// `UIFont.lineHeight + UIFont.leading` for `preferredFont(forTextStyle:)`
     /// at `.large`. MEASURED probe_textstyle_leading, iPhone SE 2x / iOS 26.1
     /// (one-line `font.leading` dump plus 2-line `sizeThatFits` height).
