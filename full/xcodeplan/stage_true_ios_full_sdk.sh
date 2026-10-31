@@ -39,7 +39,8 @@ trap cleanup EXIT HUP INT TERM
 mkdir -p "$STAGE/sdk" "$STAGE/apple-overlays" "$STAGE/attestation"
 cp -a "$CORE_PACKAGE/sdk/." "$STAGE/sdk/"
 
-TARGET_VARIANT=arm64-apple-ios-simulator
+# STAGE_TRUE_IOS_ARCH=x86_64 stages the x86_64 slice (scripts/x86/stage_ios_sim_sysroot.sh).
+TARGET_VARIANT=${STAGE_TRUE_IOS_ARCH:-arm64}-apple-ios-simulator
 SDK_MODULES=(
     Swift
     SwiftOnoneSupport
@@ -128,7 +129,7 @@ fi
     shasum -a 256 sdk/usr/lib/libSystem.B.tbd sdk/usr/lib/libobjc.A.tbd
 ) > "$STAGE/attestation/target-sdk-inputs.sha256"
 printf '%s\n' \
-    'TRUE_IOS_FULL_SDK_COMPLETE target=arm64-apple-ios18.0-simulator apple-overlays=darwin,objectivec' \
+    "TRUE_IOS_FULL_SDK_COMPLETE target=$TARGET_VARIANT apple-overlays=darwin,objectivec" \
     > "$STAGE/SDK_COMPLETE"
 
 mv "$STAGE" "$OUTPUT_ROOT"
