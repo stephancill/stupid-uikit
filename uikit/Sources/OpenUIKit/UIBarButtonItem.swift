@@ -490,6 +490,28 @@ public enum _UIBarMetrics {
     public static let shadowOpacity: Float = 0.075
     public static let shadowRadius: CGFloat = 10
     public static let shadowOffset = CGSize(width: 0, height: 4)
+    /// iOS 27's platter shadow is much lighter. MEASURED stupid social's
+    /// toolbar capsule, iPhone 16e @3x / iOS 27.0, white backdrop: at most
+    /// 3 counts below the capsule and none above or beside it, about a
+    /// quarter of the iOS 26.1 falloff (12 counts below, 7 above) at the
+    /// same radius and offset.
+    public static let iOS27ShadowOpacity: Float = 0.02
+    /// Glass platter shadow opacity for the configured chrome release.
+    public static var platterShadowOpacity: Float {
+        OpenUIKitRuntime.chromeRelease == .iOS27 ? iOS27ShadowOpacity : shadowOpacity
+    }
+
+    /// iOS 27 draws a thin grey rim just inside a glass platter's outline,
+    /// darkest where the outline is vertical. MEASURED stupid social's
+    /// toolbar capsule (108 x 44 pt), iPhone 16e @3x / iOS 27.0, light, over
+    /// white: a 0.5 pt line inside the edge; at the capsule's left/right
+    /// extremes it darkens the 250 glass to 175 (black at 0.30), along the
+    /// straight top and bottom edges by about 25 (black at 0.10). Between
+    /// them it follows the outline normal's horizontal component, which on
+    /// a semicircular end is linear in x — one horizontal gradient.
+    public static let platterRimWidth: CGFloat = 0.5
+    public static let platterRimSideAlpha: CGFloat = 0.30
+    public static let platterRimFlatAlpha: CGFloat = 0.10
 
     /// Flat fallback when `_UIGlassMaterial` does not apply (Catalyst, dark,
     /// `.done` tint fill): measured white over a light backdrop, (25, 25, 25)
@@ -550,6 +572,8 @@ final class _UIBarButtonItemView: UIControl {
     /// shadow, so the platter underneath still casts the measured one.
     let refractionHost = UIView()
     let refractionBand = UIView()
+    /// iOS 27's grey glass rim (`_UIBarMetrics.platterRimWidth`).
+    let rim = _UIBarPlatterRimView()
 
     init(item: UIBarButtonItem) {
         self.item = item
@@ -558,7 +582,7 @@ final class _UIBarButtonItemView: UIControl {
         platter.isOpaque = false
         platter.layer.cornerRadius = _UIBarMetrics.platterRadius
         platter.layer._shadowColorValue = CanvasColor(red: 0, green: 0, blue: 0, alpha: 1)
-        platter.layer.shadowOpacity = _UIBarMetrics.shadowOpacity
+        platter.layer.shadowOpacity = _UIBarMetrics.platterShadowOpacity
         platter.layer.shadowRadius = _UIBarMetrics.shadowRadius
         platter.layer.shadowOffset = _UIBarMetrics.shadowOffset
         platter.isUserInteractionEnabled = false
@@ -632,7 +656,7 @@ final class _UIBarButtonItemView: UIControl {
         // same mix as the tab bar (Tabs t1000.dark Left interior 19 vs
         // the previous shared platterFill 25).
         platter._usesIOSDarkBarGlass = platter._usesIOSGlass && !appliesRefraction
-        platter.layer.shadowOpacity = _platterHiddenByGroup ? 0 : _UIBarMetrics.shadowOpacity
+        platter.layer.shadowOpacity = _platterHiddenByGroup ? 0 : _UIBarMetrics.platterShadowOpacity
         platter.isHidden = !showsPlatter
     }
 
@@ -725,6 +749,9 @@ final class _UIBarButtonItemView: UIControl {
         refractionHost.isHidden = backdropColor == nil || item.style == .done
             || !showsPlatter || !appliesRefraction || _platterHiddenByGroup
         platter.sendSubviewToBack(refractionHost)   // under the content
+        if rim.superview !== platter { platter.addSubview(rim) }
+        rim.frame = platter.bounds
+        rim.isHidden = !_UIBarPlatterRimView.applies(to: platter)
         if let cv = item.customView {
             if cv.superview !== self { addSubview(cv) }
             let s = contentSize
@@ -794,7 +821,7 @@ final class _UIBarSharedPlatterView: UIView {
         _usesIOSGlass = true
         layer.cornerRadius = _UIBarMetrics.platterRadius
         layer._shadowColorValue = CanvasColor(red: 0, green: 0, blue: 0, alpha: 1)
-        layer.shadowOpacity = _UIBarMetrics.shadowOpacity
+        layer.shadowOpacity = _UIBarMetrics.platterShadowOpacity
         layer.shadowRadius = _UIBarMetrics.shadowRadius
         layer.shadowOffset = _UIBarMetrics.shadowOffset
         backgroundColor = _UIBarMetrics.platterFill
@@ -803,18 +830,129 @@ final class _UIBarSharedPlatterView: UIView {
         refractionHost.layer.cornerRadius = _UIBarMetrics.platterRadius
         refractionHost.addSubview(refractionBand)
         addSubview(refractionHost)
+        addSubview(rim)
     }
+
+    /// iOS 27's grey glass rim (`_UIBarMetrics.platterRimWidth`).
+    let rim = _UIBarPlatterRimView()
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decodable") }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        layer.shadowOpacity = _UIBarMetrics.platterShadowOpacity
+        rim.frame = bounds
+        rim.isHidden = !_UIBarPlatterRimView.applies(to: self)
         refractionHost.frame = bounds
         refractionBand.frame = CGRect(x: 0, y: 0, width: bounds.width,
                                       height: _UIBarMetrics.platterRefractionHeight)
         refractionBand.backgroundColor = backdropColor
         refractionHost.isHidden = backdropColor == nil
+    }
+}
+
+// MARK: - iOS 27 platter rim
+
+/// The system chrome generation a host renders. `.iOS26` (the default) is
+/// the measured iOS 26.1 chrome every existing gate pins; `.iOS27` adds what
+/// iOS 27 changed on glass bar platters (`_UIBarMetrics.platterRimWidth`,
+/// `_UIBarMetrics.iOS27ShadowOpacity`). Host-requested only.
+public enum OpenUIKitChromeRelease: Sendable {
+    case iOS26
+    case iOS27
+}
+
+extension OpenUIKitRuntime {
+    public static var chromeRelease: OpenUIKitChromeRelease = .iOS26
+}
+
+/// The grey rim iOS 27 draws just inside a glass platter's capsule outline
+/// (see `_UIBarMetrics.platterRimWidth`). Light appearance only: the dark
+/// rim is not measured.
+@preconcurrency @MainActor
+final class _UIBarPlatterRimView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        accessibilityIdentifier = "UIKit.BarPlatterRim"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not decodable") }
+
+    static func applies(to platter: UIView) -> Bool {
+        OpenUIKitRuntime.chromeRelease == .iOS27 && platter._usesIOSGlass
+            && platter.traitCollection.userInterfaceStyle != .dark
+    }
+
+    override func drawContent(in canvas: Canvas, bounds: CGRect) {
+        let w = _UIBarMetrics.platterRimWidth
+        let r = min(bounds.width, bounds.height) / 2
+        guard r > w, bounds.width >= bounds.height else { return }
+        // The 0.5 pt band inside the capsule: the outline clockwise, the
+        // inset outline counter-clockwise (nonzero leaves the inside out).
+        var band = Self.capsule(bounds, clockwise: true)
+        band.elements += Self.capsule(bounds.insetBy(dx: w, dy: w), clockwise: false).elements
+        let side = CanvasColor(red: 0, green: 0, blue: 0, alpha: _UIBarMetrics.platterRimSideAlpha)
+        let flat = CanvasColor(red: 0, green: 0, blue: 0, alpha: _UIBarMetrics.platterRimFlatAlpha)
+        let end = r / bounds.width
+        canvas.save()
+        canvas.clip(to: band)
+        canvas.drawLinearGradient(
+            colors: [side, flat, flat, side], locations: [0, end, 1 - end, 1],
+            start: CGPoint(x: bounds.minX, y: bounds.midY),
+            end: CGPoint(x: bounds.maxX, y: bounds.midY), in: bounds)
+        canvas.restore()
+    }
+
+    /// A horizontal capsule (width >= height) as lines and quarter arcs.
+    static func capsule(_ rect: CGRect, clockwise: Bool) -> Path {
+        let r = rect.height / 2
+        let k = r * 0.5522847498
+        let l = rect.minX + r, rr = rect.maxX - r
+        let top = rect.minY, bottom = rect.maxY, mid = rect.midY
+        // Clockwise on screen (y down): along the top to the right, round
+        // the right end, back along the bottom, round the left end.
+        var points: [(CGPoint, CGPoint, CGPoint)?] = [
+            nil,
+            (CGPoint(x: rr + k, y: top), CGPoint(x: rect.maxX, y: mid - k), CGPoint(x: rect.maxX, y: mid)),
+            (CGPoint(x: rect.maxX, y: mid + k), CGPoint(x: rr + k, y: bottom), CGPoint(x: rr, y: bottom)),
+            nil,
+            (CGPoint(x: l - k, y: bottom), CGPoint(x: rect.minX, y: mid + k), CGPoint(x: rect.minX, y: mid)),
+            (CGPoint(x: rect.minX, y: mid - k), CGPoint(x: l - k, y: top), CGPoint(x: l, y: top)),
+        ]
+        var ends = [CGPoint(x: rr, y: top), CGPoint(x: rect.maxX, y: mid), CGPoint(x: rr, y: bottom),
+                    CGPoint(x: l, y: bottom), CGPoint(x: rect.minX, y: mid), CGPoint(x: l, y: top)]
+        var path = Path()
+        if clockwise {
+            path.move(to: CGPoint(x: l, y: top))
+            for (i, segment) in points.enumerated() {
+                if case let (c1, c2, p)? = segment {
+                    path.addCurve(to: p, control1: c1, control2: c2)
+                } else {
+                    path.addLine(to: ends[i])
+                }
+            }
+        } else {
+            // The same segments walked backwards: start where the clockwise
+            // walk ends, swap each curve's controls.
+            points.reverse()
+            ends.reverse()
+            path.move(to: CGPoint(x: l, y: top))
+            for (i, segment) in points.enumerated() {
+                let target = i + 1 < ends.count ? ends[i + 1] : CGPoint(x: l, y: top)
+                if case let (c1, c2, _)? = segment {
+                    path.addCurve(to: target, control1: c2, control2: c1)
+                } else {
+                    path.addLine(to: target)
+                }
+            }
+        }
+        path.close()
+        return path
     }
 }
 

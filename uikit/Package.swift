@@ -689,6 +689,9 @@ let conformanceTargets: [Target] = [
     // Native gate for shape masks (docs/SHAPE_MASKS.md): CAShapeLayer in
     // both compositors and SwiftUI `.mask { shape }`.
     .executableTarget(name: "swiftuishapemaskprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for SwiftUI stroke geometry (docs/SHAPE_STROKES.md):
+    // centred `stroke`, inset `strokeBorder`, gradients and StrokeStyle arcs.
+    .executableTarget(name: "swiftuistrokeprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",
                       dependencies: ["OpenUIKit", "OpenUIKitC", "CPortableIO"],
                       linkerSettings: [.linkedLibrary("m", .when(platforms: [.linux]))]),

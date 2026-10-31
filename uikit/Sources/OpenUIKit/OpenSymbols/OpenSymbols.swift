@@ -61,6 +61,12 @@ enum _OpenSymbolComposite {
     /// The glyph mirrored horizontally about the viewBox centre (an icon
     /// drawn facing the other way).
     case mirror
+    /// SF's `person.fill.badge.plus`: a figure (head ellipse over a
+    /// half-ellipse body) and a disc with a plus cut out overlapping its
+    /// lower right, the figure knocked out around the disc, all drawn from
+    /// the measured `badgePlusGeometry` (Phosphor's filled figure merges
+    /// head and body and has a far larger head, so it is not used).
+    case badgePlus
 }
 
 struct _OpenSymbolEntry {
@@ -85,6 +91,18 @@ public enum OpenSymbols {
     public struct Layout: Equatable, Sendable {
         public var size: CGSize
         public var ink: CGRect
+        /// The point of the box a fixed-size SwiftUI image centres in its
+        /// frame: the box centre, except for a badge composite, whose
+        /// figure is centred and whose badge hangs off it (MEASURED
+        /// `person.fill.badge.plus`: the figure's centre sits on the
+        /// frame's centre, the badge 0.6 pt past a 28 pt frame).
+        public var anchor: CGPoint
+
+        public init(size: CGSize, ink: CGRect, anchor: CGPoint? = nil) {
+            self.size = size
+            self.ink = ink
+            self.anchor = anchor ?? CGPoint(x: size.width / 2, y: size.height / 2)
+        }
     }
 
     public static func layout(name: String, pointSize: CGFloat) -> Layout? {
@@ -101,8 +119,16 @@ public enum OpenSymbols {
         let inkH = glyph.bounds.height * unit
         let padX = 2 * k
         let padY = 1 * k
+        var anchor: CGPoint?
+        if _OpenSymbolCatalog.entry(name)?.composite == .badgePlus {
+            let m = badgePlusGeometry
+            let figureCentre = m.square.minX + m.bodyCentre.x * m.square.width
+            anchor = CGPoint(x: padX + (figureCentre - glyph.bounds.minX) * unit,
+                             y: padY + inkH / 2)
+        }
         return Layout(size: CGSize(width: inkW + 2 * padX, height: inkH + 2 * padY),
-                      ink: CGRect(x: padX, y: padY, width: inkW, height: inkH))
+                      ink: CGRect(x: padX, y: padY, width: inkW, height: inkH),
+                      anchor: anchor)
     }
 
     /// Glyph paths for `name` placed in `bounds`, which is treated as the
@@ -143,6 +169,27 @@ public enum OpenSymbols {
         return (drawn.paths.map { $0.applying(transform) }, drawn.evenOdd)
     }
 
+    /// The knockout of a `badgePlus` composite placed in `bounds` as
+    /// `paths(name:in:weight:)` places the glyph: the first `pathCount`
+    /// paths are drawn only outside `circle`. nil for other names.
+    static func knockout(name: String, in bounds: CGRect,
+                         weight: UIImage.SymbolWeight = .regular) -> (circle: CGRect, pathCount: Int)? {
+        guard let regular = glyph(for: name) else { return nil }
+        let drawn = usesBoldGlyph(weight) ? (boldGlyph(for: name) ?? regular) : regular
+        guard let knockout = drawn.knockout,
+              let layout = layout(name: name, pointSize: 17) else { return nil }
+        let fit = Swift.min(bounds.width / layout.size.width, bounds.height / layout.size.height)
+        let originX = bounds.minX + (bounds.width - layout.size.width * fit) / 2
+        let originY = bounds.minY + (bounds.height - layout.size.height * fit) / 2
+        let ink = CGRect(x: originX + layout.ink.minX * fit, y: originY + layout.ink.minY * fit,
+                         width: layout.ink.width * fit, height: layout.ink.height * fit)
+        let g = regular.bounds
+        let s = Swift.min(ink.width / g.width, ink.height / g.height)
+        let c = knockout.circle
+        return (CGRect(x: ink.midX - g.midX * s + c.minX * s, y: ink.midY - g.midY * s + c.minY * s,
+                       width: c.width * s, height: c.height * s), knockout.pathCount)
+    }
+
     /// Fills `name`'s glyph into `bounds` with `color`. Returns false (and
     /// draws nothing) for unmapped names.
     @discardableResult
@@ -150,7 +197,29 @@ public enum OpenSymbols {
                             color: CanvasColor,
                             weight: UIImage.SymbolWeight = .regular) -> Bool {
         guard let placed = paths(name: name, in: bounds, weight: weight) else { return false }
-        for path in placed.paths {
+        var first = 0
+        if let knockout = knockout(name: name, in: bounds, weight: weight) {
+            // Everything but the knockout circle: a clockwise rectangle
+            // around the glyph and the circle wound the other way (nonzero).
+            let r = knockout.circle
+            let outer = bounds.union(r).insetBy(dx: -r.width, dy: -r.height)
+            var clip = Path()
+            clip.move(to: CGPoint(x: outer.minX, y: outer.minY))
+            clip.addLine(to: CGPoint(x: outer.maxX, y: outer.minY))
+            clip.addLine(to: CGPoint(x: outer.maxX, y: outer.maxY))
+            clip.addLine(to: CGPoint(x: outer.minX, y: outer.maxY))
+            clip.close()
+            clip.elements += circlePath(centre: CGPoint(x: r.midX, y: r.midY),
+                                        radius: r.width / 2, clockwise: false).elements
+            canvas.save()
+            canvas.clip(to: clip)
+            for path in placed.paths.prefix(knockout.pathCount) {
+                canvas.fill(path, color: color, evenOdd: placed.evenOdd)
+            }
+            canvas.restore()
+            first = knockout.pathCount
+        }
+        for path in placed.paths.dropFirst(first) {
             canvas.fill(path, color: color, evenOdd: placed.evenOdd)
         }
         return true
@@ -163,6 +232,9 @@ public enum OpenSymbols {
         let evenOdd: Bool
         /// Ink bounds in viewBox units.
         let bounds: CGRect
+        /// The first `pathCount` paths are drawn only outside `circle`
+        /// (viewBox units).
+        var knockout: (circle: CGRect, pathCount: Int)? = nil
     }
 
     private static var cache: [String: Glyph] = [:]
@@ -180,7 +252,7 @@ public enum OpenSymbols {
     static func boldGlyph(for name: String) -> Glyph? {
         if let hit = boldCache[name] { return hit }
         guard let entry = _OpenSymbolCatalog.entry(name),
-              entry.composite != .disc,
+              entry.composite != .disc, entry.composite != .badgePlus,
               _OpenSymbolCatalog.pathData(entry.glyph + "-bold") != nil else { return nil }
         let glyph = build(entry, bold: true)
         boldCache[name] = glyph
@@ -210,8 +282,100 @@ public enum OpenSymbols {
                 cut.elements.append(contentsOf: p.applying(halfSizeAboutCentre).elements)
             }
             glyph = Glyph(paths: [cut], evenOdd: true, bounds: boundsOf([cut]))
+        case .badgePlus:
+            glyph = badgePlus()
         }
         return glyph
+    }
+
+    /// MEASURED `person.fill.badge.plus`, iOS 27.0 simulator, iPhone 16e @3x,
+    /// title2 semibold (stupid social's follow row): the ink is a 24 x 24 pt
+    /// square (72 px). In units of that square: the head is an ellipse in
+    /// [0.195, 0.570] x [0, 0.403]; the body a half-ellipse on the baseline
+    /// y 0.847, centred at x 0.379, 0.758 wide and 0.377 tall (its outline
+    /// is within 1 px of the reference at every measured row); the badge
+    /// disc is centred at (0.768, 0.757) with radius 0.236; the figure is
+    /// knocked out within radius 0.292 of the disc's centre (a 4 px gap);
+    /// the plus cut out of the disc has arms of half-length 0.146 and
+    /// half-width 0.036. The square is 227 viewBox units (24 pt at 22 pt
+    /// through the Phosphor optical size, 208 units per point size), centred.
+    static let badgePlusGeometry = (
+        square: CGRect(x: 14.5, y: 14.5, width: 227, height: 227),
+        head: CGRect(x: 0.195, y: 0, width: 0.375, height: 0.403),
+        bodyCentre: CGPoint(x: 0.379, y: 0.847), bodyRadii: CGSize(width: 0.379, height: 0.377),
+        disc: CGPoint(x: 0.768, y: 0.757), discRadius: CGFloat(0.236),
+        knockoutRadius: CGFloat(0.292),
+        armHalfLength: CGFloat(0.146), armHalfWidth: CGFloat(0.036)
+    )
+
+    private static func badgePlus() -> Glyph {
+        let m = badgePlusGeometry
+        let u = m.square.width
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: m.square.minX + x * u, y: m.square.minY + y * u)
+        }
+        let headOrigin = point(m.head.minX, m.head.minY)
+        let head = ellipsePath(CGRect(x: headOrigin.x, y: headOrigin.y,
+                                      width: m.head.width * u, height: m.head.height * u),
+                               clockwise: true)
+        let base = point(m.bodyCentre.x, m.bodyCentre.y)
+        let rx = m.bodyRadii.width * u, ry = m.bodyRadii.height * u
+        let k: CGFloat = 0.5522847498
+        var body = Path()
+        body.move(to: CGPoint(x: base.x - rx, y: base.y))
+        body.addCurve(to: CGPoint(x: base.x, y: base.y - ry),
+                      control1: CGPoint(x: base.x - rx, y: base.y - k * ry),
+                      control2: CGPoint(x: base.x - k * rx, y: base.y - ry))
+        body.addCurve(to: CGPoint(x: base.x + rx, y: base.y),
+                      control1: CGPoint(x: base.x + k * rx, y: base.y - ry),
+                      control2: CGPoint(x: base.x + rx, y: base.y - k * ry))
+        body.close()
+        // The disc clockwise, the plus counter-clockwise: nonzero leaves the
+        // plus as a hole.
+        let centre = point(m.disc.x, m.disc.y)
+        var badge = circlePath(centre: centre, radius: m.discRadius * u, clockwise: true)
+        let a = m.armHalfLength * u, w = m.armHalfWidth * u
+        let cross: [(CGFloat, CGFloat)] = [
+            (-w, -a), (-w, -w), (-a, -w), (-a, w), (-w, w), (-w, a),
+            (w, a), (w, w), (a, w), (a, -w), (w, -w), (w, -a),
+        ]
+        badge.move(to: CGPoint(x: centre.x + cross[0].0, y: centre.y + cross[0].1))
+        for (dx, dy) in cross.dropFirst() {
+            badge.addLine(to: CGPoint(x: centre.x + dx, y: centre.y + dy))
+        }
+        badge.close()
+        let r = m.knockoutRadius * u
+        let paths = [head, body, badge]
+        return Glyph(paths: paths, evenOdd: false, bounds: boundsOf(paths),
+                     knockout: (CGRect(x: centre.x - r, y: centre.y - r, width: 2 * r, height: 2 * r), 2))
+    }
+
+    static func circlePath(centre c: CGPoint, radius r: CGFloat, clockwise: Bool) -> Path {
+        ellipsePath(CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r), clockwise: clockwise)
+    }
+
+    /// An ellipse of four cubic arcs, clockwise on screen (y down) or not.
+    static func ellipsePath(_ rect: CGRect, clockwise: Bool) -> Path {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let rx = rect.width / 2, ry = rect.height / 2
+        let kx = rx * 0.5522847498, ky = ry * 0.5522847498
+        let s: CGFloat = clockwise ? 1 : -1
+        var path = Path()
+        path.move(to: CGPoint(x: c.x + rx, y: c.y))
+        path.addCurve(to: CGPoint(x: c.x, y: c.y + s * ry),
+                      control1: CGPoint(x: c.x + rx, y: c.y + s * ky),
+                      control2: CGPoint(x: c.x + kx, y: c.y + s * ry))
+        path.addCurve(to: CGPoint(x: c.x - rx, y: c.y),
+                      control1: CGPoint(x: c.x - kx, y: c.y + s * ry),
+                      control2: CGPoint(x: c.x - rx, y: c.y + s * ky))
+        path.addCurve(to: CGPoint(x: c.x, y: c.y - s * ry),
+                      control1: CGPoint(x: c.x - rx, y: c.y - s * ky),
+                      control2: CGPoint(x: c.x - kx, y: c.y - s * ry))
+        path.addCurve(to: CGPoint(x: c.x + rx, y: c.y),
+                      control1: CGPoint(x: c.x + kx, y: c.y - s * ry),
+                      control2: CGPoint(x: c.x + rx, y: c.y - s * ky))
+        path.close()
+        return path
     }
 
     private static let mirrorAboutCentre = CGAffineTransform(a: -1, b: 0, c: 0, d: 1,

@@ -68,10 +68,9 @@ equivalent.
 that is a view (`LinearGradient`) becomes the gradient masked by the same shape
 stroked in black; any other style strokes in its resolved colour.
 
-Known approximation, unchanged here: this port's `stroke` of a shape draws an
-inside border (`layer.borderWidth`), not a stroke centred on the outline, so a
-3 pt ring on a 70 pt circle spans radius 32-35 pt instead of SwiftUI's
-33.5-36.5 pt.
+`stroke` is centred on the outline and `strokeBorder` inset, as in SwiftUI;
+a centred gradient stroke paints its style over the frame grown by half the
+line (docs/SHAPE_STROKES.md).
 
 ## Verification
 

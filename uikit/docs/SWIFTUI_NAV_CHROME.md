@@ -35,9 +35,11 @@ compat module's `ToolbarItemGroup`.
 | "All Stories" | x 16.67, top 163.5 | x 32.5, top 89.5 | x 16.67, top 163.5 |
 | first feed row icon | top 297.5 | top 240 | top 298.5 |
 
-Remaining differences in this region: the iOS 27 platter has a thin grey rim and a lighter
-shadow (version-specific: the measured iOS 26.1 platter has none); the search symbol is the bar's
-lighter `.search` stamp; the gear is the open-symbol (Phosphor) approximation.
+Remaining differences in this region: the search symbol is the bar's lighter `.search` stamp;
+the gear is the open-symbol (Phosphor) approximation. The iOS 27 platter's grey rim and lighter
+shadow are drawn when a host sets `OpenUIKitRuntime.chromeRelease = .iOS27`
+(docs/SHAPE_STROKES.md, "iOS 27 platter rim"); the default `.iOS26` keeps the measured iOS 26.1
+platter, which has neither.
 
 ## Version notes
 

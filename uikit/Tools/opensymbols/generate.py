@@ -17,7 +17,7 @@ import re
 import sys
 
 PHOSPHOR_VERSION = "2.1.1"
-COMPOSITES = {"-": "none", "ring": "ring", "disc": "disc", "mirror": "mirror"}
+COMPOSITES = {"-": "none", "ring": "ring", "disc": "disc", "mirror": "mirror", "badge-plus": "badgePlus"}
 PATH_RE = re.compile(r'<path d="([^"]+)"/>')
 D_CHARS = re.compile(r"^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\- ]+$")
 
@@ -86,6 +86,8 @@ def main():
         seen.add(name)
         if weight not in ("regular", "regular-only", "fill") or composite not in COMPOSITES:
             die("mapping.tsv:%d: bad weight or composite" % lineno)
+        if composite == "badge-plus" and icon != "user":
+            die("mapping.tsv:%d: badge-plus is drawn from primitives; its icon must be user" % lineno)
         path, key = glyph_file(assets, icon, weight)
         glyphs[key] = load_paths(path)
         # Regular-weight entries also carry Phosphor's bold drawing, which
