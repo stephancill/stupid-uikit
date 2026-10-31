@@ -2372,7 +2372,8 @@ private enum _ViewRenderer {
             return CGSize(width: width, height: height)
         case .section(let header, let footer, let rows):
             let bounded = _bounded(proposed)
-            let headerHeight: CGFloat = header == nil ? 12 : 28
+            let plain = _isPlainListSection(environment)
+            let headerHeight: CGFloat = header == nil ? (plain ? 0 : 12) : 28
             var height = headerHeight
             for row in rows {
                 let size = measure(
@@ -2382,7 +2383,7 @@ private enum _ViewRenderer {
                 )
                 height += max(defaultFormRowHeight, size.height)
             }
-            let footerHeight: CGFloat = footer == nil ? 12 : 28
+            let footerHeight: CGFloat = footer == nil ? (plain ? 0 : 12) : 28
             return CGSize(width: bounded.width, height: height + footerHeight)
         case .toggle(let label, _, _):
             let labelSize = measure(label, proposed: proposed, environment: environment)
@@ -4560,6 +4561,13 @@ private enum _ViewRenderer {
         )
     }
 
+    /// Sections inside a List styled `.plain` explicitly (`.automatic` keeps
+    /// the measured grouped section chrome).
+    static func _isPlainListSection(_ environment: _RenderEnvironment) -> Bool {
+        if case .plain = environment.listStyle.storage { return true }
+        return false
+    }
+
     private static func placeSection(
         header: _OpenViewNode?,
         footer: _OpenViewNode?,
@@ -4568,13 +4576,19 @@ private enum _ViewRenderer {
         on surface: UIView,
         environment: _RenderEnvironment
     ) {
+        // A section in a `.plain` List has no grouped chrome: no grouped
+        // background, no 12 pt gap above or below a header/footer-less
+        // section, and rows on the list's own background (clear here, so the
+        // list's color, or what is behind a `.scrollContentBackground(.hidden)`
+        // list, shows through).
+        let plain = _isPlainListSection(environment)
         let section = UIView(frame: rect)
-        section.backgroundColor = .systemGroupedBackground
+        section.backgroundColor = plain ? .clear : .systemGroupedBackground
         section.clipsToBounds = true
         section.accessibilityIdentifier = "SwiftUI.Section"
         surface.addSubview(section)
 
-        var y: CGFloat = header == nil ? 12 : 28
+        var y: CGFloat = header == nil ? (plain ? 0 : 12) : 28
         if let header {
             var headerEnvironment = environment
             headerEnvironment.font = .caption
@@ -4608,7 +4622,7 @@ private enum _ViewRenderer {
                     height: min(height, section.bounds.height - y)
                 )
             )
-            rowView.backgroundColor = .secondarySystemBackground
+            rowView.backgroundColor = plain ? .clear : .secondarySystemBackground
             rowView.accessibilityIdentifier = "SwiftUI.Section.row.\(index)"
             section.addSubview(rowView)
             place(
