@@ -223,6 +223,9 @@ public final class UIAutomationSession {
         /// Log which views differ between unsettled turns (debugging an app
         /// that never settles).
         public var diagnoseSettling = false
+        /// Log each touch phase: the view it hit and its recognizers' states
+        /// (debugging an input that has no effect).
+        public var diagnoseInput = false
 
         public init(outputDirectory: String) {
             self.outputDirectory = outputDirectory
@@ -667,7 +670,13 @@ public final class UIAutomationSession {
             deliveredThisTurn += 1
             switch event {
             case .touch(let phase, let point):
-                window.sendTouch(phase, at: point, timestamp: timestamp)
+                let touch = window.sendTouch(phase, at: point, timestamp: timestamp)
+                if configuration.diagnoseInput {
+                    let recognizers = (touch?.gestureRecognizers ?? []).map {
+                        "\(type(of: $0))@\($0.view.map { "\(type(of: $0))" } ?? "-")=\($0.state)"
+                    }
+                    log("automation: touch \(phase) at \(point) t=\(timestamp) view=\(touch?.view.map { "\(type(of: $0))" } ?? "none") recognizers=\(recognizers)")
+                }
                 if phase != .moved { return }
             case .text(let text):
                 window.sendText(text, timestamp: timestamp)
