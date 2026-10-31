@@ -536,6 +536,12 @@ open class UICollectionView: UIScrollView {
             .map(\.value)
     }
 
+    /// Index paths of the visible supplementary views of `elementKind`,
+    /// sorted so callers iterate them deterministically.
+    public func indexPathsForVisibleSupplementaryElements(ofKind elementKind: String) -> [IndexPath] {
+        visibleViews.views.keys.filter { $0.kind == elementKind }.map(\.indexPath).sorted()
+    }
+
     // MARK: Geometry queries (forwarded to the layout)
 
     public func layoutAttributesForItem(at indexPath: IndexPath)

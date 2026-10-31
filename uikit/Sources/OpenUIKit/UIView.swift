@@ -247,6 +247,37 @@ open class CALayer: NSObject {
         _insertSublayer(layer, at: Swift.min(Int(index), storedSublayers.count))
     }
 
+    /// Core Animation's `insertSublayer(_:above:)` / `(_:below:)`. A nil
+    /// sibling inserts on top (`above`) or at the bottom (`below`). Explicit
+    /// sublayers here always draw above the layer's contents and below its
+    /// view's subviews (LayerBridge), so ordering against a subview's
+    /// backing layer cannot be honoured and fails loudly, as does a sibling
+    /// that is not a sublayer (Core Animation raises for that too).
+    public final func insertSublayer(_ layer: CALayer, above sibling: CALayer?) {
+        _insertSublayer(layer, relativeTo: sibling, offset: 1, api: "insertSublayer(_:above:)")
+    }
+
+    public final func insertSublayer(_ layer: CALayer, below sibling: CALayer?) {
+        _insertSublayer(layer, relativeTo: sibling, offset: 0, api: "insertSublayer(_:below:)")
+    }
+
+    private final func _insertSublayer(_ layer: CALayer, relativeTo sibling: CALayer?, offset: Int,
+                                       api: String) {
+        guard let sibling else {
+            _insertSublayer(layer, at: offset == 1 ? storedSublayers.count : 0)
+            return
+        }
+        guard layer !== sibling else { return }
+        if sibling.owner != nil, sibling.owner?.superview?.layer === self {
+            preconditionFailure("OpenUIKit: CALayer.\(api) relative to a subview's backing layer is not supported (explicit sublayers draw below subviews)")
+        }
+        if layer.superlayer === self { layer.removeFromSuperlayer() }
+        guard let index = storedSublayers.firstIndex(where: { $0 === sibling }) else {
+            preconditionFailure("OpenUIKit: CALayer.\(api): the sibling is not a sublayer of the receiver")
+        }
+        _insertSublayer(layer, at: index + offset)
+    }
+
     private final func _insertSublayer(_ layer: CALayer, at index: Int) {
         // Reject self and ancestor insertion. Without this guard a malformed
         // graph would recurse forever in both render pipelines.
