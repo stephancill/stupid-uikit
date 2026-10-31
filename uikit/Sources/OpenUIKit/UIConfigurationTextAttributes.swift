@@ -120,8 +120,14 @@ public extension AttributeDynamicLookup {
 // Disfavoured, like UIKit's own UIKitAttributes lookup (iOS 26.1 SDK
 // UIKit.swiftinterface), so `run.font = .system(.body)` picks SwiftUI's Font
 // attribute when SwiftUI is imported (NetNewsWire ErrorLogView.swift:111).
+// Internal on the iOS triple: the literal UIKit module (Sources/UIKitShim)
+// declares Apple's complete, equally disfavoured UIKitAttributes lookup, and
+// two disfavoured candidates with the same value type made every
+// `attributed.font = UIFont…` in app code ambiguous (MEASURED, stupid social
+// on x86_64-apple-ios26.0-simulator: ChatUIKitView.swift `ambiguous use of
+// 'font'`). OpenUIKit's own sources keep this lookup.
 @available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
-public extension AttributeDynamicLookup {
+extension AttributeDynamicLookup {
     @_disfavoredOverload
     subscript<T: AttributedStringKey>(
         dynamicMember keyPath: KeyPath<AttributeScopes.OpenUIKitAttributes, T>

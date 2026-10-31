@@ -406,6 +406,7 @@ enum _OpenViewModification {
     case contextMenu(_OpenViewNode)
     case matchedGeometry(id: AnyHashable, namespace: Namespace.ID, isSource: Bool)
     case listStyle(ListStyle)
+    case scrollContentBackground(Visibility)
     case listRowBackground(_OpenViewNode)
     case listRowSeparator(Visibility, VerticalEdge.Set)
     case searchable(_OpenSearchConfiguration)
@@ -551,6 +552,7 @@ fileprivate enum _OpenViewModifier {
     case contextMenu(@MainActor () -> _OpenViewNode)
     case matchedGeometry(id: AnyHashable, namespace: Namespace.ID, isSource: Bool)
     case listStyle(ListStyle)
+    case scrollContentBackground(Visibility)
     case listRowBackground(@MainActor () -> _OpenViewNode)
     case listRowSeparator(Visibility, VerticalEdge.Set)
     case searchable(_OpenSearchConfiguration)
@@ -752,6 +754,7 @@ fileprivate enum _OpenViewModifier {
         case .matchedGeometry(let id, let namespace, let isSource):
             return .matchedGeometry(id: id, namespace: namespace, isSource: isSource)
         case .listStyle(let style): return .listStyle(style)
+        case .scrollContentBackground(let visibility): return .scrollContentBackground(visibility)
         case .listRowBackground(let makeBackground):
             return .listRowBackground(
                 _OpenGraphContext.withStructuralScope(
@@ -4254,6 +4257,12 @@ public extension _OpenView {
 
     func listStyle(_ style: ListStyle) -> some _OpenView {
         _OpenModifiedContent(content: self, modification: .listStyle(style))
+    }
+
+    /// Hides (or shows) the system background of a List or Form; content
+    /// behind the scroll view shows through when hidden.
+    func scrollContentBackground(_ visibility: Visibility) -> some _OpenView {
+        _OpenModifiedContent(content: self, modification: .scrollContentBackground(visibility))
     }
 
     func listStyle(_ style: GroupedListStyle) -> some _OpenView {

@@ -2013,6 +2013,9 @@ private struct _RenderEnvironment {
     var refreshAction: (@MainActor () async -> Void)?
     var scrollIndicatorVisibility: Visibility = .automatic
     var listStyle: ListStyle = .automatic
+    /// `.scrollContentBackground(_:)`: `.hidden` clears the List/Form
+    /// container background (rows and sections keep theirs).
+    var scrollContentBackground: Visibility = .automatic
     var menuIndicatorVisibility: Visibility = .automatic
     /// MEASURED realapp_hackers_feed_light, iPhone 16 @3x: the principal
     /// `HostedViewWrapper` is 36 pt (`_UINavigationBarTitleControl`); the
@@ -2668,6 +2671,10 @@ private enum _ViewRenderer {
             case .listStyle(let style):
                 var next = environment
                 next.listStyle = style
+                return measure(content, proposed: proposed, environment: next)
+            case .scrollContentBackground(let visibility):
+                var next = environment
+                next.scrollContentBackground = visibility
                 return measure(content, proposed: proposed, environment: next)
             case .searchable:
                 // The search field occupies the content's existing viewport;
@@ -4223,6 +4230,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.listStyle = style
                 place(content, in: rect, on: surface, environment: next)
+            case .scrollContentBackground(let visibility):
+                var next = environment
+                next.scrollContentBackground = visibility
+                place(content, in: rect, on: surface, environment: next)
             case .listRowSeparator:
                 // Consumed by `placeList` when it creates the physical row
                 // boundary. Outside a list it is layout-transparent.
@@ -4649,7 +4660,8 @@ private enum _ViewRenderer {
         environment: _RenderEnvironment
     ) {
         let formView = UIView(frame: rect)
-        formView.backgroundColor = .systemGroupedBackground
+        formView.backgroundColor = environment.scrollContentBackground == .hidden
+            ? .clear : .systemGroupedBackground
         formView.clipsToBounds = true
         formView.accessibilityIdentifier = "SwiftUI.Form"
         surface.addSubview(formView)
@@ -4716,6 +4728,9 @@ private enum _ViewRenderer {
             list.backgroundColor = .secondarySystemBackground
         case .automatic, .plain:
             list.backgroundColor = .systemBackground
+        }
+        if environment.scrollContentBackground == .hidden {
+            list.backgroundColor = .clear
         }
         list.clipsToBounds = true
         list.accessibilityIdentifier = "SwiftUI.List"
