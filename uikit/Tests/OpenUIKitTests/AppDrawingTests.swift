@@ -135,9 +135,22 @@ final class AppDrawingTests: XCTestCase {
             write(gradientBitmap(width: 40, height: 20), to: dir + "/plain@2x.png")
             write(gradientBitmap(width: 60, height: 30), to: dir + "/plain@3x.png")
 
+            let saved = OpenUIKitRuntime.imageScreenScale
+            defer { OpenUIKitRuntime.imageScreenScale = saved }
+            OpenUIKitRuntime.imageScreenScale = 1
             let one = UIImage(contentsOfFile: dir + "/plain.png")
             XCTAssertEqual(one?.scale, 1)
             XCTAssertEqual(one?.size, CGSize(width: 20, height: 10))
+
+            // UIKit: an unsuffixed path loads the screen-scale variant first.
+            OpenUIKitRuntime.imageScreenScale = 3
+            let screen3 = UIImage(contentsOfFile: dir + "/plain.png")
+            XCTAssertEqual(screen3?.scale, 3)
+            XCTAssertEqual(screen3?.size, CGSize(width: 20, height: 10))
+            OpenUIKitRuntime.imageScreenScale = 2
+            XCTAssertEqual(UIImage(contentsOfFile: dir + "/plain.png")?.scale, 2)
+            // An explicit suffix is loaded as named, whatever the screen.
+            XCTAssertEqual(UIImage(contentsOfFile: dir + "/plain@3x.png")?.scale, 3)
 
             let two = UIImage(contentsOfFile: dir + "/plain@2x.png")
             XCTAssertEqual(two?.scale, 2)
@@ -148,6 +161,10 @@ final class AppDrawingTests: XCTestCase {
             XCTAssertEqual(three?.size, CGSize(width: 20, height: 10))
 
             XCTAssertNil(UIImage(contentsOfFile: dir + "/missing.png"))
+            // No variant for the screen: the unmodified path at scale 1.
+            write(gradientBitmap(width: 12, height: 12), to: dir + "/solo.png")
+            OpenUIKitRuntime.imageScreenScale = 3
+            XCTAssertEqual(UIImage(contentsOfFile: dir + "/solo.png")?.scale, 1)
         }
     }
 

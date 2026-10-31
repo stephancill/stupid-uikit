@@ -277,10 +277,39 @@ public final class UIImage: NSObject {
 
     /// Decode an image file. Like UIKit, an `@2x`/`@3x` suffix on the file
     /// name (before the extension) sets the image's scale.
+    ///
+    /// UIKit's documented `imageWithContentsOfFile:` lookup: on a screen
+    /// whose scale is above 1, a path WITHOUT a scale suffix first tries the
+    /// same name with the screen's `@Nx` suffix (`badge.png` →
+    /// `badge@3x.png` on a 3x screen) and loads it at that scale; otherwise
+    /// it loads the unmodified path. The screen scale is
+    /// `OpenUIKitRuntime.imageScreenScale` (`configureDevice` sets it).
+    /// stupid social's network badges (`Bundle.main.path(forResource:)` +
+    /// this initializer) drew blurry from the 1x file without it.
     public convenience init?(contentsOfFile path: String) {
+        if let variant = UIImage.screenScaleVariantPath(
+               path, screenScale: OpenUIKitRuntime.imageScreenScale),
+           let bytes = ResourceIO.readFile(variant.path),
+           let bitmap = ImageCodec.decode(bytes) {
+            self.init(bitmap: bitmap, scale: variant.scale)
+            return
+        }
         guard let bytes = ResourceIO.readFile(path),
               let bitmap = ImageCodec.decode(bytes) else { return nil }
         self.init(bitmap: bitmap, scale: UIImage.scaleFromFileName(path))
+    }
+
+    /// The `name@Nx.ext` sibling `UIImage(contentsOfFile:)` tries first for
+    /// a screen of `screenScale` (rounded, 2 or 3), or nil when the scale is
+    /// 1 (or not finite) or the path already names a scale variant.
+    static func screenScaleVariantPath(_ path: String,
+                                       screenScale: CGFloat) -> (path: String, scale: CGFloat)? {
+        guard screenScale.isFinite else { return nil }
+        let want = Int(Swift.max(1, Swift.min(3, screenScale)).rounded())
+        guard want > 1, scaleFromFileName(path) == 1 else { return nil }
+        let (base, ext) = splitExtension(path)
+        let variant = base + "@\(want)x" + (ext.map { "." + $0 } ?? "")
+        return (variant, CGFloat(want))
     }
 
     /// UIKit's `UIImage(named:)`, resolved against
