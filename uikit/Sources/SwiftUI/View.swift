@@ -66,16 +66,46 @@ final class _OpenGeometryNode {
     private let builder: @MainActor (CGSize) -> _OpenViewNode
     private var cachedSize: CGSize?
     private var cachedNode: _OpenViewNode?
+    /// GeometryReader content built during graph evaluation for the size
+    /// the reader was last placed at (`_OpenGeometryReaderState`).
+    private let prebuilt: (size: CGSize, node: _OpenViewNode)?
+    private let placedAt: (@MainActor (CGSize) -> Void)?
 
-    init(builder: @escaping @MainActor (CGSize) -> _OpenViewNode) {
+    init(
+        prebuilt: (size: CGSize, node: _OpenViewNode)? = nil,
+        placedAt: (@MainActor (CGSize) -> Void)? = nil,
+        builder: @escaping @MainActor (CGSize) -> _OpenViewNode
+    ) {
         self.builder = builder
+        self.prebuilt = prebuilt
+        self.placedAt = placedAt
+        if let prebuilt {
+            cachedSize = prebuilt.size
+            cachedNode = prebuilt.node
+        }
     }
 
-    func resolve(_ size: CGSize) -> _OpenViewNode {
-        let bounded = CGSize(
+    /// The node graph walks (appearance actions, contained controllers) see:
+    /// the evaluated content when there is one.
+    var representative: _OpenViewNode {
+        prebuilt?.node ?? resolve(CGSize(width: 390, height: 844))
+    }
+
+    /// Layout placed the reader at `size` (not a measurement proposal).
+    func didPlace(at size: CGSize) {
+        placedAt?(Self.bounded(size))
+    }
+
+    static func bounded(_ size: CGSize) -> CGSize {
+        CGSize(
             width: size.width.isFinite ? max(0, size.width) : 10_000,
             height: size.height.isFinite ? max(0, size.height) : 10_000
         )
+    }
+
+    func resolve(_ size: CGSize) -> _OpenViewNode {
+        let bounded = Self.bounded(size)
+        if let prebuilt, prebuilt.size == bounded { return prebuilt.node }
         if cachedSize == bounded, let cachedNode { return cachedNode }
         let node = builder(bounded)
         cachedSize = bounded
@@ -211,6 +241,9 @@ struct _OpenAlertConfiguration {
 
 enum _OpenPresentationKind: Equatable {
     case sheet
+    /// `fullScreenCover`: UIKit's `.fullScreen` style (no dimming or sheet
+    /// platter, the presenter's view leaves the hierarchy while covered).
+    case fullScreenCover
     case navigationDestination
 }
 
@@ -3260,15 +3293,16 @@ public extension _OpenView {
     /// view's bounds behind it with a shape style. Disfavoured so a `Color`
     /// argument keeps resolving to the view overload above; an implicit
     /// member such as `.background(.white)` (KDS ColorsView.swift:198) can
-    /// only mean this one. The safe-area extension is not modelled: the fill
-    /// covers the view's own bounds.
+    /// only mean this one. The fill extends into the safe area on `edges`
+    /// that reach it, as `.ignoresSafeArea(edges:)` does.
     @_disfavoredOverload
     func background<Style: ShapeStyle>(
         _ style: Style,
         ignoresSafeAreaEdges edges: _OpenEdge.Set = .all
     ) -> some _OpenView {
         let color = style._openResolvedForegroundColor()
-        let node = _OpenViewNode(.roundedRectangle(cornerRadius: 0, style: .fill(color)))
+        let fill = _OpenViewNode(.roundedRectangle(cornerRadius: 0, style: .fill(color)))
+        let node = _OpenViewNode(.modified(fill, .safeAreaIgnored(edges)))
         return _OpenModifiedContent(
             content: self,
             modification: .background({ node }, alignment: .center)
@@ -3428,8 +3462,12 @@ public extension _OpenView {
         _ regions: SafeAreaRegions = .all,
         edges: Edge.Set = .all
     ) -> some _OpenView {
-        _ = regions
-        return _OpenModifiedContent(content: self, modification: .safeAreaIgnored(edges))
+        // Only the container region (bars, notch, home indicator) is
+        // modelled; `.keyboard` alone ignores nothing here.
+        _OpenModifiedContent(
+            content: self,
+            modification: .safeAreaIgnored(regions.contains(.container) ? edges : [])
+        )
     }
 
     func edgesIgnoringSafeArea(_ edges: Edge.Set) -> some _OpenView {
@@ -3981,6 +4019,50 @@ public extension _OpenView {
                 }
             )
         )
+    }
+
+    /// `fullScreenCover(isPresented:onDismiss:content:)`: presents content
+    /// with UIKit's `.fullScreen` modal style, as SwiftUI does on iOS. The
+    /// cover fills the window (no dimming, no sheet platter, no interactive
+    /// dismissal), its content gets the window's safe area, and the
+    /// presenter's view leaves the hierarchy while it is covered.
+    func fullScreenCover<CoverContent: _OpenView>(
+        isPresented: Binding<Bool>,
+        onDismiss: (@MainActor () -> Void)? = nil,
+        @_OpenViewBuilder content: @escaping @MainActor () -> CoverContent
+    ) -> some _OpenView {
+        let state = _OpenPresentationState(
+            getIsPresented: { isPresented.wrappedValue },
+            setIsPresented: { isPresented.wrappedValue = $0 },
+            onDismiss: onDismiss ?? {}
+        )
+        return _OpenModifiedContent(
+            content: self,
+            modification: .presentation(
+                kind: .fullScreenCover,
+                state: state,
+                makeDestination: { dismiss in
+                    AnyView(content().environment(\.dismiss, dismiss))
+                }
+            )
+        )
+    }
+
+    /// `fullScreenCover(item:onDismiss:content:)`: presented while `item` is
+    /// non-nil, built from the item's value at presentation; dismissal sets
+    /// `item` back to nil.
+    func fullScreenCover<Item: Identifiable, CoverContent: _OpenView>(
+        item: Binding<Item?>,
+        onDismiss: (@MainActor () -> Void)? = nil,
+        @_OpenViewBuilder content: @escaping @MainActor (Item) -> CoverContent
+    ) -> some _OpenView {
+        let isPresented = Binding<Bool>(
+            get: { item.wrappedValue != nil },
+            set: { if !$0 { item.wrappedValue = nil } }
+        )
+        return fullScreenCover(isPresented: isPresented, onDismiss: onDismiss) {
+            item.wrappedValue.map { AnyView(content($0)) } ?? AnyView(EmptyView())
+        }
     }
 
     /// Drives a UIKit navigation push from a Boolean binding.  When no
@@ -4623,6 +4705,15 @@ func _openExtractNavigationConfiguration(
             configuration.subtitle = subtitle
         case .navigationBarHidden(let hidden):
             configuration.barHidden = hidden
+        case .toolbarVisibility(let visibility, let placement)
+            where placement == .navigationBar || placement == .automatic:
+            // `.toolbar(.hidden, for: .navigationBar)` (and `.automatic`,
+            // which is the navigation bar on iPhone) hides the enclosing
+            // stack's bar like `navigationBarHidden(true)`: no bar, and the
+            // content's top safe area is the window's. The modifier stays on
+            // the node for anything else that reads it.
+            if visibility != .automatic { configuration.barHidden = visibility == .hidden }
+            unwrapped = _OpenViewNode(.modified(unwrapped, modification))
         case .navigationBackButtonHidden(let hidden):
             configuration.backButtonHidden = hidden
         case .navigationTitleDisplayMode(let displayMode):

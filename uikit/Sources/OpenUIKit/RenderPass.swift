@@ -211,6 +211,13 @@ public enum UIRenderer {
     /// backend — under `.swift` the render pass is always used so that
     /// path stays pure Swift.
     public static func render(_ root: UIView, scale: CGFloat) -> Bitmap {
+        // A window carrying the host's screenshot status bar resolves the
+        // bar's light/dark appearance for this frame first.
+        (root as? UIWindow)?._resolveScreenshotStatusBarAppearance(render: compositedRender)
+        return compositedRender(root, scale: scale)
+    }
+
+    private static func compositedRender(_ root: UIView, scale: CGFloat) -> Bitmap {
         if OpenUIKitRuntime.compositor == .layers,
            OpenUIKitRuntime.renderBackend == .quartz,
            !containsRenderPassOnlyEffect(root) {

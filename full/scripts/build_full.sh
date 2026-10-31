@@ -2363,6 +2363,12 @@ build_final_executable() {
             compile_app_module IOSTargetGuestProbe "$OUT/IOSTargetGuestProbe.o" \
                 "$W/full/iostarget/IOSTargetGuestProbe.swift"
             link_app_executable "$OUT/IOSTargetGuestProbe" "$OUT/IOSTargetGuestProbe.o" ;;
+        # Second-level heap-object extra inhabitants across the macOS-built
+        # runtime (full/shims/swiftcorepatch.c); full/iostarget/heap_xi_guest.sh.
+        IOSHeapXIGuestProbe)
+            compile_app_module IOSHeapXIGuestProbe "$OUT/IOSHeapXIGuestProbe.o" \
+                "$W/full/iostarget/IOSHeapXIGuestProbe.swift"
+            link_app_executable "$OUT/IOSHeapXIGuestProbe" "$OUT/IOSHeapXIGuestProbe.o" ;;
         *)
             declare -F "build_extra_probe_$1" >/dev/null || die "unknown final executable $1"
             "build_extra_probe_$1" ;;
@@ -2370,7 +2376,7 @@ build_final_executable() {
 }
 FINAL_EXECUTABLES=(render_full GuestBoundaryTests LaunchProbe FuziProbe
     BrowserInkProbe indexpath_identity_probe)
-[ "$LINK_PLATFORM" = ios-simulator ] && FINAL_EXECUTABLES+=(IOSTargetGuestProbe)
+[ "$LINK_PLATFORM" = ios-simulator ] && FINAL_EXECUTABLES+=(IOSTargetGuestProbe IOSHeapXIGuestProbe)
 rm -f "$OUT/host_full" "$OUT/host_full.o"
 if [ "$BUILD_HOST_FULL" = 1 ]; then
     [ -n "$HOST_OPT_PID" ] && wait "$HOST_OPT_PID" \

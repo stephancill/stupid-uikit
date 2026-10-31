@@ -43,11 +43,18 @@ public enum UIAutomationCommand: Equatable {
     case wait(turns: Int)
     /// `wait idle`: run turns until the app settles.
     case waitIdle
-    /// `tap <x> <y> [--hold-milliseconds 90] [--verify]`.
-    case tap(x: Double, y: Double, holdMilliseconds: Double, verify: Bool)
-    /// `swipe <x1> <y1> <x2> <y2> [<duration-ms>] [--steps 16] [--verify]`.
+    /// `wait <n>s` / `wait <n>ms`: run turns until this much host-clock
+    /// time has passed (screens that never settle, such as a story whose
+    /// progress timer runs, are captured at a time after the input).
+    case waitTime(seconds: Double)
+    /// `tap <x> <y> [--hold-milliseconds 90] [--verify] [--no-settle]`.
+    /// `--no-settle` ends the command once the finger lifts, as
+    /// `stupidsim tap` returns, instead of waiting for the app to settle.
+    case tap(x: Double, y: Double, holdMilliseconds: Double, verify: Bool, settle: Bool = true)
+    /// `swipe <x1> <y1> <x2> <y2> [<duration-ms>] [--steps 16] [--verify]
+    /// [--no-settle]`.
     case swipe(fromX: Double, fromY: Double, toX: Double, toY: Double,
-               durationMilliseconds: Double, steps: Int, verify: Bool)
+               durationMilliseconds: Double, steps: Int, verify: Bool, settle: Bool = true)
     /// `type [--verify] <text…>`: the rest of the line, one character per
     /// 25 ms, to the focused text input.
     case type(text: String, verify: Bool)
@@ -103,12 +110,20 @@ public enum UIAutomationCommand: Equatable {
 
         switch verb {
         case "wait":
-            guard arguments.count == 1 else { throw fail("takes a turn count or idle") }
+            guard arguments.count == 1 else { throw fail("takes a turn count, idle, or a time (2s, 500ms)") }
             if arguments[0] == "idle" { return .waitIdle }
+            for (suffix, unit) in [("ms", 0.001), ("s", 1.0)] where arguments[0].hasSuffix(suffix) {
+                guard let value = Double(arguments[0].dropLast(suffix.count)), value > 0, value.isFinite else {
+                    throw fail("time must be a positive number of s or ms")
+                }
+                return .waitTime(seconds: value * unit)
+            }
             guard let turns = Int(arguments[0]), turns > 0 else { throw fail("turn count must be a positive integer") }
             return .wait(turns: turns)
         case "tap":
             let verify = flag("--verify")
+            let settle = !flag("--no-settle")
+            if verify, !settle { throw fail("--verify compares the settled screen; it cannot be combined with --no-settle") }
             let hold = try option("--hold-milliseconds", "--hold").map { try number($0, "hold") } ?? 90
             var x = try option("--x")
             var y = try option("--y")
@@ -119,9 +134,12 @@ public enum UIAutomationCommand: Equatable {
             guard let x, let y else { throw fail("takes <x> <y>") }
             try noneLeft()
             guard hold >= 0 else { throw fail("hold must not be negative") }
-            return .tap(x: try coordinate(x, "x"), y: try coordinate(y, "y"), holdMilliseconds: hold, verify: verify)
+            return .tap(x: try coordinate(x, "x"), y: try coordinate(y, "y"), holdMilliseconds: hold, verify: verify,
+                        settle: settle)
         case "swipe":
             let verify = flag("--verify")
+            let settle = !flag("--no-settle")
+            if verify, !settle { throw fail("--verify compares the settled screen; it cannot be combined with --no-settle") }
             let steps = try option("--steps").map { text -> Int in
                 guard let steps = Int(text), steps > 0 else { throw fail("--steps must be a positive integer") }
                 return steps
@@ -142,7 +160,7 @@ public enum UIAutomationCommand: Equatable {
             guard duration > 0 else { throw fail("duration must be positive") }
             let values = try zip(points, ["x1", "y1", "x2", "y2"]).map { try coordinate($0.0!, $0.1) }
             return .swipe(fromX: values[0], fromY: values[1], toX: values[2], toY: values[3],
-                          durationMilliseconds: duration, steps: steps, verify: verify)
+                          durationMilliseconds: duration, steps: steps, verify: verify, settle: settle)
         case "type":
             // The text is the rest of the line, verbatim after one separator.
             var rest = trimmed.dropFirst(verb.count)
@@ -276,6 +294,7 @@ public final class UIAutomationSession {
         case startup
         case idle
         case waiting(remaining: Int)
+        case waitingUntil(Double?, seconds: Double)
         case settling(Settle)
         case input(Input)
     }
@@ -310,6 +329,7 @@ public final class UIAutomationSession {
         var start: Double?
         var next = 0
         var verify: Bool
+        var settle = true
     }
 
     /// The current request when live; nil for script steps.
@@ -338,10 +358,24 @@ public final class UIAutomationSession {
         case .idle:
             nextCommand(window: window, time: time)
         case .waiting(let remaining):
+            // A device commits layout every frame; without it a state change
+            // made by an input (a SwiftUI presentation, a push) waited for
+            // the next snapshot's layout (MEASURED: a story viewer cover
+            // tapped with --no-settle only appeared at the snapshot after
+            // `wait 2s`, two seconds late).
+            window.layoutIfNeeded()
             if remaining <= 1 {
                 finishCommand(ExitCode.ok, "")
             } else {
                 phase = .waiting(remaining: remaining - 1)
+            }
+        case .waitingUntil(let start, let seconds):
+            window.layoutIfNeeded()
+            let begin = start ?? time
+            if time - begin >= seconds {
+                finishCommand(ExitCode.ok, "")
+            } else {
+                phase = .waitingUntil(begin, seconds: seconds)
             }
         case .settling(var settle):
             window.layoutIfNeeded()
@@ -365,10 +399,13 @@ public final class UIAutomationSession {
                 phase = .settling(settle)
             }
         case .input(var input):
+            window.layoutIfNeeded()
             if input.start == nil { input.start = time }
             deliver(&input, window: window, time: time)
             if input.next >= input.events.count {
-                if input.verify {
+                if !input.settle {
+                    finishCommand(ExitCode.ok, "")
+                } else if input.verify {
                     phase = .settling(Settle(purpose: .afterInput(before: verifyBefore)))
                 } else {
                     phase = .settling(Settle(purpose: .afterInput(before: nil)))
@@ -580,10 +617,13 @@ public final class UIAutomationSession {
             phase = .waiting(remaining: count)
         case .waitIdle:
             phase = .settling(Settle(purpose: .command))
-        case .tap(let x, let y, let hold, let verify):
+        case .waitTime(let seconds):
+            phase = .waitingUntil(nil, seconds: seconds)
+        case .tap(let x, let y, let hold, let verify, let settle):
             let at = point(x, y)
-            begin(Input(name: "tap", events: [(0, .touch(.began, at)), (hold / 1000, .touch(.ended, at))], verify: verify))
-        case .swipe(let fromX, let fromY, let toX, let toY, let duration, let steps, let verify):
+            begin(Input(name: "tap", events: [(0, .touch(.began, at)), (hold / 1000, .touch(.ended, at))], verify: verify,
+                        settle: settle))
+        case .swipe(let fromX, let fromY, let toX, let toY, let duration, let steps, let verify, let settle):
             let from = point(fromX, fromY)
             let to = point(toX, toY)
             var events: [(offset: Double, event: Event)] = [(0, .touch(.began, from))]
@@ -593,7 +633,7 @@ public final class UIAutomationSession {
                 events.append((duration / 1000 * Double(f), .touch(.moved, p)))
             }
             events.append((duration / 1000, .touch(.ended, to)))
-            begin(Input(name: "swipe", events: events, verify: verify))
+            begin(Input(name: "swipe", events: events, verify: verify, settle: settle))
         case .type(let text, let verify):
             guard window.firstResponder is UIKeyInput else {
                 finishCommand(ExitCode.failed, "type: nothing has keyboard focus (tap a text field first)")
