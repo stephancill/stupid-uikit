@@ -785,3 +785,103 @@ public final class DispatchGroup: @unchecked Sendable {
         return result
     }
 }
+
+// MARK: - DispatchWorkItem
+
+/// libdispatch's `DispatchWorkItem`: a block that can be submitted to a queue
+/// or performed directly, cancelled before it starts, waited on and observed.
+/// As in libdispatch, `cancel()` makes later executions return immediately and
+/// never interrupts one already running; a cancelled item's notifications
+/// still run when it is performed. `qos` and `flags` are accepted and, like
+/// queue QoS in this portable Dispatch, do not change scheduling.
+public final class DispatchWorkItem: @unchecked Sendable {
+    private struct State {
+        var cancelled = false
+        var finished = false
+        var waiters: [DispatchSemaphore] = []
+        var notifications: [(DispatchQueue, @Sendable () -> Void)] = []
+    }
+
+    private let block: () -> Void
+    private let state = Mutex(State())
+
+    public init(
+        qos: DispatchQoS = .unspecified,
+        flags: DispatchWorkItemFlags = [],
+        block: @escaping () -> Void
+    ) {
+        _ = qos
+        _ = flags
+        self.block = block
+    }
+
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    public func cancel() { state.withLock { $0.cancelled = true } }
+
+    public func perform() {
+        if !isCancelled { block() }
+        let completed = state.withLock { state -> State in
+            state.finished = true
+            let completed = state
+            state.waiters = []
+            state.notifications = []
+            return completed
+        }
+        for waiter in completed.waiters { waiter.signal() }
+        for (queue, work) in completed.notifications { queue.async(execute: work) }
+    }
+
+    public func wait() {
+        _ = wait(timeout: .distantFuture)
+    }
+
+    public func wait(timeout: DispatchTime) -> DispatchTimeoutResult {
+        let waiter = DispatchSemaphore(value: 0)
+        let finished = state.withLock { state in
+            if state.finished { return true }
+            state.waiters.append(waiter)
+            return false
+        }
+        if finished { return .success }
+        let result = waiter.wait(timeout: timeout)
+        if result == .timedOut {
+            state.withLock { $0.waiters.removeAll { $0 === waiter } }
+        }
+        return result
+    }
+
+    public func notify(
+        qos: DispatchQoS = .unspecified,
+        flags: DispatchWorkItemFlags = [],
+        queue: DispatchQueue,
+        execute work: @escaping @Sendable () -> Void
+    ) {
+        _ = qos
+        _ = flags
+        let finished = state.withLock { state in
+            if state.finished { return true }
+            state.notifications.append((queue, work))
+            return false
+        }
+        if finished { queue.async(execute: work) }
+    }
+
+    public func notify(queue: DispatchQueue, execute item: DispatchWorkItem) {
+        notify(queue: queue) { item.perform() }
+    }
+}
+
+extension DispatchQueue {
+    public func async(execute workItem: DispatchWorkItem) {
+        async { workItem.perform() }
+    }
+
+    public func asyncAfter(deadline: DispatchTime, execute workItem: DispatchWorkItem) {
+        asyncAfter(deadline: deadline) { workItem.perform() }
+    }
+
+    public func sync(execute workItem: DispatchWorkItem) {
+        sync { workItem.perform() }
+    }
+}

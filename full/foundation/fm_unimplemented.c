@@ -68,6 +68,42 @@ int strncasecmp_l(const char *a, const char *b, unsigned long n, void *loc)
     return 0;
 }
 
+/* mktemp(3): replace the template's trailing X's so that it names a path that
+ * does not exist when checked.  swift-foundation's atomic Data write
+ * (createTemporaryFile) is the caller: it opens the name with O_CREAT|O_EXCL
+ * and asks for a new one on EEXIST, so mktemp's own race is handled upstream,
+ * exactly as with libSystem's.  The letters come from a per-process counter
+ * mixed with the pid and the template address (no randomness source is
+ * assumed); mktemp promises uniqueness at check time, not unpredictability.
+ * stupid social writes its caches with `.atomic` at launch. */
+extern int access(const char *, int);
+extern int getpid(void);
+extern int *__error(void);
+
+char *mktemp(char *template_)
+{
+    static const char alphabet[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    static unsigned long long counter;
+    unsigned long n = 0, xs = 0;
+    while (template_[n]) n++;
+    while (xs < n && template_[n - 1 - xs] == 'X') xs++;
+    if (xs == 0) { *__error() = 22; /* EINVAL */ return template_; }
+    for (int attempt = 0; attempt < 1 << 16; attempt++) {
+        unsigned long long v = (++counter) * 0x9E3779B97F4A7C15ull
+            ^ ((unsigned long long)getpid() << 32)
+            ^ (unsigned long long)(unsigned long)template_;
+        for (unsigned long i = 0; i < xs; i++) {
+            template_[n - xs + i] = alphabet[v % 62];
+            v = v / 62 ^ (v * 0x2545F4914F6CDD1Dull);
+        }
+        if (access(template_, 0 /* F_OK */) != 0) return template_;
+    }
+    *__error() = 17; /* EEXIST */
+    template_[0] = 0;
+    return template_;
+}
+
 /* ---- DELEGATED ---------------------------------------------------------- */
 
 /* Platform.copyMemoryPages (Platform.swift:63) reads:
@@ -90,7 +126,6 @@ MR_STUB(confstr)
 MR_STUB(fchmod)
 MR_STUB(getattrlist)
 MR_STUB(link)
-MR_STUB(mktemp)
 MR_STUB(sysctlbyname)
 MR_STUB(utimes)
 #ifndef OPEN_FOUNDATION_UUID_COMPAT
