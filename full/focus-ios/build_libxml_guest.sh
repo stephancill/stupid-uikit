@@ -10,6 +10,20 @@ if [ ! -f "$archive" ]; then
 fi
 echo "276130602d12fe484ecc03447ee5e759d0465558fbc9d6bd144e3745306ebf0e  $archive" | sha256sum -c -
 if [ ! -d "$XML/libxml2-2.9.13" ]; then tar -xf "$archive" -C "$XML"; fi
+# A CMake build directory only stays valid for the compiler and source
+# directory it was configured with. When a later run resolves clang-18
+# elsewhere (scripts/x86/phase2.sh puts /usr/lib/llvm-18/bin first, a direct
+# run does not), CMake deletes its cache and reconfigures WITHOUT the -D
+# options below (measured: "Could NOT find LibLZMA" with LIBXML2_WITH_LZMA=OFF
+# on the command line); a moved checkout fails outright ("CMakeCache.txt
+# directory ... is different"). Start that build directory over instead.
+cc=$(command -v clang-18) || { echo "build_libxml_guest: clang-18 is not on PATH" >&2; exit 2; }
+if [ -f "$XML/build/CMakeCache.txt" ] && {
+    ! grep -Fxq "CMAKE_C_COMPILER:STRING=$cc" "$XML/build/CMakeCache.txt" \
+        || ! grep -Fxq "CMAKE_HOME_DIRECTORY:INTERNAL=$XML/libxml2-2.9.13" "$XML/build/CMakeCache.txt"
+}; then
+    rm -rf -- "$XML/build"
+fi
 cmake -S "$XML/libxml2-2.9.13" -B "$XML/build" -G Ninja \
     -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=clang-18 \
     -DCMAKE_C_COMPILER_TARGET="$TARGET" -DCMAKE_OSX_SYSROOT="$SYS" \
