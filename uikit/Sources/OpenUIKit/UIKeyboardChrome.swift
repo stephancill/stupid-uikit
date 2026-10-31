@@ -61,6 +61,23 @@ import struct CoreGraphics.CGSize
 import Foundation
 #endif
 
+/// How text input reaches the app. `.software` (the default, what the
+/// measured gates pin): a focused text input raises the drawn software
+/// keyboard, which takes its own touches and covers the bottom of the
+/// screen (enclosing scroll views inset by its overlap). `.hardware`: a
+/// hardware keyboard is attached, as in an iOS Simulator with "Connect
+/// Hardware Keyboard" (the default there, and how `stupidsim type` feeds
+/// keys): focus, caret and key input are unchanged, no keyboard is drawn
+/// and nothing is inset for it. Host-requested only.
+public enum OpenUIKitKeyboard: Sendable {
+    case software
+    case hardware
+}
+
+extension OpenUIKitRuntime {
+    public static var keyboard: OpenUIKitKeyboard = .software
+}
+
 @preconcurrency @MainActor
 public enum _UIKeyboardChrome {
     /// SE default keyboard + QuickType. MEASURED Forms t1200 / kbprobe
@@ -116,8 +133,10 @@ public enum _UIKeyboardChrome {
     }
 
     /// Show or hide the keyboard window for `window`'s first responder.
+    /// With a hardware keyboard (`OpenUIKitRuntime.keyboard == .hardware`)
+    /// iOS shows no software keyboard and text input still takes focus.
     static func sync(from window: UIWindow) {
-        guard isIOS else {
+        guard isIOS, OpenUIKitRuntime.keyboard == .software else {
             attached?.isHidden = true
             return
         }

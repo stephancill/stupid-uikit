@@ -162,7 +162,8 @@ private final class _SwiftUIMenuControl: UIButton {
 }
 
 @MainActor
-private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
+private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate, _SwiftUIRetainedEditor {
+    var lastPlacement = 0
     var setText: (@MainActor (String) -> Void)?
     var getPresented: (@MainActor () -> Bool)?
     var setPresented: (@MainActor (Bool) -> Void)?
@@ -181,6 +182,20 @@ private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
     func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
         _ = searchBar
         if getPresented?() == false { setPresented?(true) }
+    }
+
+    /// Applies `isPresented` to a placed (possibly reused) bar: true
+    /// focuses the field with its cancel button, false ends the search.
+    func syncPresentation() {
+        guard window != nil, let presented = getPresented?() else { return }
+        let focused = searchTextField.isFirstResponder
+        if presented, !focused {
+            setShowsCancelButton(true, animated: false)
+            _ = becomeFirstResponder()
+        } else if !presented, focused {
+            _ = searchTextField.resignFirstResponder()
+            setShowsCancelButton(false, animated: false)
+        }
     }
 
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
@@ -214,7 +229,8 @@ private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
 /// the top of the safe area (just under the navigation bar), over content that
 /// was given `drawerHeight` more top safe area. Touches elsewhere pass through.
 @MainActor
-private final class _SwiftUISearchDrawerView: _SwiftUIPassthroughView {
+private final class _SwiftUISearchDrawerView: _SwiftUIPassthroughView, _SwiftUIRetainedEditor {
+    var lastPlacement = 0
     static let drawerHeight: CGFloat = 54
     let searchBar = _SwiftUISearchBar(frame: .zero)
 
@@ -239,10 +255,58 @@ private final class _SwiftUISearchDrawerView: _SwiftUIPassthroughView {
     }
 }
 
+/// A UIKit editor the SwiftUI renderer keeps across hosting rebuilds
+/// (`_OpenTextInputState`): the hosting view parks it while it rebuilds
+/// when it holds focus, and `_syncFocus` applies the input's focus binding.
 @MainActor
-private final class _SwiftUITextField: UITextField {
+private protocol _SwiftUIRetainedEditor: UIView {
+    /// `_SwiftUIEditorPlacement.count` when this editor was last placed.
+    var lastPlacement: Int { get set }
+}
+
+/// Which retained editors a layout placed: every placement takes the next
+/// number, so a hosting view can tell whether the editor it parked was put
+/// back (nested hosting views lay out during placement too).
+@MainActor
+private enum _SwiftUIEditorPlacement {
+    static var count = 0
+
+    static func didPlace(_ editor: some _SwiftUIRetainedEditor) {
+        count += 1
+        editor.lastPlacement = count
+    }
+}
+
+@MainActor
+private final class _SwiftUITextField: UITextField, _SwiftUIRetainedEditor {
+    var lastPlacement = 0
     var getFocus: (@MainActor () -> Bool)?
     var setFocus: (@MainActor (Bool) -> Void)?
+    var setText: (@MainActor (String) -> Void)?
+    var submit: (@MainActor () -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // Installed once: the field is reused across evaluations and its
+        // closures replaced, so the targets read the current ones.
+        addTarget(for: .editingChanged) { control, _ in
+            guard let field = control as? _SwiftUITextField else { return }
+            field.setText?(field.text ?? "")
+        }
+        addTarget(for: .editingDidBegin) { control, _ in
+            (control as? _SwiftUITextField)?.setFocus?(true)
+        }
+        addTarget(for: .editingDidEnd) { control, _ in
+            (control as? _SwiftUITextField)?.setFocus?(false)
+        }
+        addTarget(for: .primaryActionTriggered) { control, _ in
+            (control as? _SwiftUITextField)?.submit?()
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -252,8 +316,22 @@ private final class _SwiftUITextField: UITextField {
     }
 }
 
+/// Applies a focus binding (`.focused`, `searchable(isPresented:)`) to a
+/// placed editor: true focuses it, false ends its editing. Without a
+/// binding the user's own focus is left alone.
 @MainActor
-private final class _SwiftUITextView: UITextView, UITextViewDelegate {
+private func _syncFocus(of responder: UIResponder, wants: Bool?) {
+    guard let wants else { return }
+    if wants, !responder.isFirstResponder {
+        _ = responder.becomeFirstResponder()
+    } else if !wants, responder.isFirstResponder {
+        _ = responder.resignFirstResponder()
+    }
+}
+
+@MainActor
+private final class _SwiftUITextView: UITextView, UITextViewDelegate, _SwiftUIRetainedEditor {
+    var lastPlacement = 0
     var getFocus: (@MainActor () -> Bool)?
     var setFocus: (@MainActor (Bool) -> Void)?
     var setText: (@MainActor (String) -> Void)?
@@ -2306,10 +2384,19 @@ private final class _SwiftUIHostingView: UIView {
         // UIViewRepresentable receives one real mount callback rather than a
         // callback on every SwiftUI layout pass.
         let representedViews = _openContainedViews(in: node)
-        let representedIdentities = Set(representedViews.map(ObjectIdentifier.init))
+        var representedIdentities = Set(representedViews.map(ObjectIdentifier.init))
         for representedView in representedViews where representedView.superview !== self {
             addSubview(representedView)
         }
+        // The same for the retained text editor that has keyboard focus:
+        // it stays in the window (and first responder) while the wrappers
+        // around it are rebuilt, and placement puts it back.
+        let focusedEditor = focusedRetainedEditor()
+        if let focusedEditor {
+            if focusedEditor.superview !== self { addSubview(focusedEditor) }
+            representedIdentities.insert(ObjectIdentifier(focusedEditor))
+        }
+        let placementMark = _SwiftUIEditorPlacement.count
         for child in subviews
         where !representedIdentities.contains(ObjectIdentifier(child)) {
             child.removeFromSuperview()
@@ -2333,8 +2420,30 @@ private final class _SwiftUIHostingView: UIView {
                 safe, extendedTo: bounds, edges: _ViewRenderer.safeAreaEdgesExtended(by: node))
         }
         _ViewRenderer.place(node, in: rect, on: self, environment: environment)
+        if let focusedEditor, focusedEditor.lastPlacement <= placementMark {
+            // The focused input is no longer in the view: it stops editing.
+            _openResignFocus(in: focusedEditor)
+            focusedEditor.removeFromSuperview()
+        }
         _finishRebuildingSubviews()
         didCompleteLayout?()
+    }
+
+    /// The outermost retained editor this hosting view placed that holds
+    /// the window's first responder (a drawer search field's editor is the
+    /// drawer around its bar). Nil when focus is elsewhere or belongs to a
+    /// nested hosting view.
+    private func focusedRetainedEditor() -> (any _SwiftUIRetainedEditor)? {
+        guard let responder = window?.firstResponder as? UIView,
+              responder.isDescendant(of: self) else { return nil }
+        var candidate: (any _SwiftUIRetainedEditor)?
+        var current: UIView? = responder
+        while let view = current, view !== self {
+            if view is _SwiftUIHostingView { return nil }
+            if let editor = view as? any _SwiftUIRetainedEditor { candidate = editor }
+            current = view.superview
+        }
+        return candidate
     }
 
     override var intrinsicContentSize: CGSize {
@@ -3747,9 +3856,14 @@ private enum _ViewRenderer {
                 environment: environment
             )
         case .textField(let title, let text, let isSecure, let axis, let setText):
+            let retained = node.retainedTextInput
             if axis == .vertical && !isSecure {
-                let editor = _SwiftUITextView(frame: rect)
-                editor.text = text
+                let editor = retained?.editor as? _SwiftUITextView ?? _SwiftUITextView(frame: rect)
+                retained?.editor = editor
+                editor.frame = rect
+                // Assigning text resets the selection: only when the binding
+                // differs from what the user typed.
+                if editor.text != text { editor.text = text }
                 editor.font = (environment.font ?? .body).resolve(weight: environment.weight)
                 editor.textColor = environment.foregroundColor?.resolve() ?? .label
                 editor.backgroundColor = .clear
@@ -3772,12 +3886,24 @@ private enum _ViewRenderer {
                 editor.setText = setText
                 editor.submit = environment.submitAction
                 surface.addSubview(editor)
+                _SwiftUIEditorPlacement.didPlace(editor)
+                _syncFocus(of: editor, wants: environment.focus?.get())
                 return
             }
-            let field = _SwiftUITextField(frame: rect)
+            let field: _SwiftUITextField
+            if let existing = retained?.editor as? _SwiftUITextField,
+               existing.isSecureTextEntry == isSecure {
+                field = existing
+            } else {
+                field = _SwiftUITextField(frame: rect)
+                retained?.editor = field
+            }
+            field.frame = rect
             field.borderStyle = .roundedRect
-            field.placeholder = title
-            field.text = text
+            if field.placeholder != title { field.placeholder = title }
+            // Assigning text moves the caret to the end: only when the
+            // binding differs from what the user typed.
+            if field.text != text { field.text = text }
             field.isSecureTextEntry = isSecure
             field.textContentType = environment.textContentType
             field.autocapitalizationType = environment.autocapitalizationType
@@ -3789,24 +3915,11 @@ private enum _ViewRenderer {
                 : "SwiftUI.TextField"
             field.getFocus = environment.focus?.get
             field.setFocus = environment.focus?.set
-            field.addTarget(for: .editingChanged) { control, _ in
-                guard let field = control as? UITextField else { return }
-                setText(field.text ?? "")
-            }
-            field.addTarget(for: .editingDidBegin) { control, _ in
-                guard let field = control as? _SwiftUITextField else { return }
-                field.setFocus?(true)
-            }
-            field.addTarget(for: .editingDidEnd) { control, _ in
-                guard let field = control as? _SwiftUITextField else { return }
-                field.setFocus?(false)
-            }
-            if let submitAction = environment.submitAction {
-                field.addTarget(for: .primaryActionTriggered) { _, _ in
-                    submitAction()
-                }
-            }
+            field.setText = setText
+            field.submit = environment.submitAction
             surface.addSubview(field)
+            _SwiftUIEditorPlacement.didPlace(field)
+            _syncFocus(of: field, wants: environment.focus?.get())
         case .picker(let label, let options, let selection, let setSelection):
             if environment.usesSegmentedPickerStyle {
                 let segmented = UISegmentedControl(items: options.map {
@@ -4726,12 +4839,23 @@ private enum _ViewRenderer {
                     top: _SwiftUISearchDrawerView.drawerHeight, left: 0, bottom: 0, right: 0)
                 surface.addSubview(contentHost)
                 place(content, in: contentHost.bounds, on: contentHost, environment: environment)
-                let drawer = _SwiftUISearchDrawerView(frame: rect)
-                drawer.searchBar.text = configuration.getText()
-                drawer.searchBar.placeholder = configuration.prompt
+                let drawer = configuration.retained?.editor as? _SwiftUISearchDrawerView
+                    ?? _SwiftUISearchDrawerView(frame: rect)
+                configuration.retained?.editor = drawer
+                drawer.frame = rect
+                let text = configuration.getText()
+                if drawer.searchBar.text != text { drawer.searchBar.text = text }
+                if drawer.searchBar.placeholder != configuration.prompt {
+                    drawer.searchBar.placeholder = configuration.prompt
+                }
                 drawer.searchBar.setText = configuration.setText
+                drawer.searchBar.getPresented = configuration.getPresented
+                drawer.searchBar.setPresented = configuration.setPresented
+                drawer.searchBar.submit = environment.searchSubmitAction
                 drawer.searchBar.accessibilityIdentifier = "SwiftUI.Searchable"
                 surface.addSubview(drawer)
+                _SwiftUIEditorPlacement.didPlace(drawer)
+                drawer.searchBar.syncPresentation()
             case .searchable(let configuration):
                 if let owner = _openBottomSearchOwner(for: surface, placement: configuration.placement) {
                     // iOS 26+ iPhone: `.automatic` docks the field at the
@@ -4759,16 +4883,19 @@ private enum _ViewRenderer {
                 let searchHeight = isToolbar
                     ? 0
                     : min(UISearchBar.standardHeight, max(0, rect.height))
-                let search = _SwiftUISearchBar(
-                    frame: CGRect(
-                        x: rect.minX,
-                        y: rect.minY,
-                        width: rect.width,
-                        height: isToolbar ? 0 : searchHeight
-                    )
+                let searchFrame = CGRect(
+                    x: rect.minX,
+                    y: rect.minY,
+                    width: rect.width,
+                    height: isToolbar ? 0 : searchHeight
                 )
-                search.text = configuration.getText()
-                search.placeholder = configuration.prompt
+                let search = configuration.retained?.editor as? _SwiftUISearchBar
+                    ?? _SwiftUISearchBar(frame: searchFrame)
+                configuration.retained?.editor = search
+                search.frame = searchFrame
+                let text = configuration.getText()
+                if search.text != text { search.text = text }
+                if search.placeholder != configuration.prompt { search.placeholder = configuration.prompt }
                 search.setText = configuration.setText
                 search.getPresented = configuration.getPresented
                 search.setPresented = configuration.setPresented
@@ -4777,6 +4904,8 @@ private enum _ViewRenderer {
                 search.searchBarStyle = isToolbar
                     ? .minimal : .default
                 surface.addSubview(search)
+                _SwiftUIEditorPlacement.didPlace(search)
+                search.syncPresentation()
                 place(
                     content,
                     in: CGRect(

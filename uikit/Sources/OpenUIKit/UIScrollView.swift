@@ -550,7 +550,8 @@ open class UIScrollView: UIView {
     }
 
     final var iOSKeyboardAvoidanceBottom: CGFloat {
-        guard OpenUIKitRuntime.systemFontCut == .iOS else { return 0 }
+        guard OpenUIKitRuntime.systemFontCut == .iOS,
+              OpenUIKitRuntime.keyboard == .software else { return 0 }
         guard let responder = window?.firstResponder else { return 0 }
         guard responder is UIKeyInput else { return 0 }
         // The editor itself is often a UIScrollView (UITextView). The

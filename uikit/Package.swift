@@ -691,6 +691,9 @@ let conformanceTargets: [Target] = [
     // rigid HStack children and the navigation-bar drawer search field.
     .executableTarget(name: "swiftuichatsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "swiftuilistrestprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for SwiftUI text input across hosting rebuilds
+    // (docs/SWIFTUI_TEXT_INPUT.md): TextField, @FocusState, searchable.
+    .executableTarget(name: "swiftuitextinputprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for shape masks (docs/SHAPE_MASKS.md): CAShapeLayer in
     // both compositors and SwiftUI `.mask { shape }`.
     .executableTarget(name: "swiftuishapemaskprobe", dependencies: ["SwiftUI", "OpenUIKit"]),

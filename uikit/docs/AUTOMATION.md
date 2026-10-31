@@ -28,6 +28,9 @@ after each step, with no window system. It is generic: any app hosted by the Swi
     and after the input, exit 2 when the pixels are identical.
   - the caret is held solid (`UITextInputState.solidHold = .infinity`) so frames don't depend on
     the blink phase.
+  - `type` and `key` need a focused input (exit 1 "nothing has keyboard focus" otherwise) and
+    fail (exit 1, "keyboard focus was lost after N of M keys") when focus goes away part-way
+    instead of dropping the remaining keys; see "Text input" below.
   - sources: `.script([String])` (run in order, end after the last) or
     `.controlDirectory(path)` (live; see below).
 - `UIAutomationTree` — the accessibility tree iOS would expose, in `stupidsim ui-tree`'s shape:
@@ -69,6 +72,23 @@ Known differences from the iOS 27 simulator: SF Symbol images have no Apple labe
 descriptions are not available; the id carries the name), the navigation bar's large title is a
 Heading where iOS 27 sometimes reports an empty `Group id=<title>` "Nav bar", and element order is
 view order (iOS sorts some containers geometrically).
+
+## Text input
+
+Tap a field, then `type` / `key`, as with `stupidsim`. Keys go to the window's first responder
+through `UIWindow.sendText` / `sendKey`, the same path the drawn keyboard's keys take.
+
+- SwiftUI text inputs (`TextField`, `SecureField`, `searchable` fields) keep one UIKit editor at
+  their graph identity, so the field a tap focused stays focused while every typed character
+  rebuilds the hosting view (`SWIFTUI_TEXT_INPUT.md`); `@FocusState` / `.focused` and
+  `searchable(isPresented:)` move focus as in SwiftUI.
+- Keyboard: `OpenUIKitRuntime.keyboard`. The iOS Simulator `stupidsim` drives has a hardware
+  keyboard connected by default, so no software keyboard shows and nothing moves for one; a host
+  comparing with `stupidsim` sets `.hardware` (stupid-app-preview's harness does, `SSG_KEYBOARD`).
+  The default `.software` draws OpenUIKit's measured software keyboard (iPhone SE, iOS 26.1),
+  which takes its own touches, insets enclosing scroll views and appears in screenshots.
+- `--verify` on `type` / `key` compares rendered frames, so a key that changes nothing (backspace
+  in an empty field) exits 2.
 
 ## Live control protocol
 

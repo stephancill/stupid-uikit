@@ -564,7 +564,7 @@ public struct _OpenTextField: _OpenView {
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        _OpenViewNode(
+        let node = _OpenViewNode(
             .textField(
                 title: title,
                 text: text.wrappedValue,
@@ -573,6 +573,8 @@ public struct _OpenTextField: _OpenView {
                 setText: { text.wrappedValue = $0 }
             )
         )
+        node.retainedTextInput = _OpenGraphContext.textInputState(role: .textField)
+        return node
     }
 }
 
@@ -587,7 +589,7 @@ public struct _OpenSecureField: _OpenView {
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        _OpenViewNode(
+        let node = _OpenViewNode(
             .textField(
                 title: title,
                 text: text.wrappedValue,
@@ -596,6 +598,8 @@ public struct _OpenSecureField: _OpenView {
                 setText: { text.wrappedValue = $0 }
             )
         )
+        node.retainedTextInput = _OpenGraphContext.textInputState(role: .textField)
+        return node
     }
 }
 

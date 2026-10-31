@@ -55,6 +55,9 @@ public final class _OpenViewNode {
     /// A List's retained per-identity state (its scroll offset survives the
     /// hosting view rebuilding the list's scroll view). Nil otherwise.
     var retainedScrollState: _OpenLazyStackState?
+    /// A TextField's or SecureField's retained editor
+    /// (`_OpenTextInputState`). Nil otherwise.
+    var retainedTextInput: _OpenTextInputState?
 
     init(_ kind: _OpenViewNodeKind) {
         self.kind = kind
@@ -332,6 +335,9 @@ struct _OpenSearchConfiguration {
     /// search writes it back.
     var getPresented: (@MainActor () -> Bool)? = nil
     var setPresented: (@MainActor (Bool) -> Void)? = nil
+    /// The field's retained editor (`_OpenTextInputState`), set when the
+    /// modifier is evaluated in a graph host.
+    var retained: _OpenTextInputState? = nil
 }
 
 struct _OpenPreferenceRecord {
@@ -3041,7 +3047,12 @@ public struct _OpenModifiedContent<Content: _OpenView>: _OpenView {
         let contentNode = _OpenGraphContext.withStructuralScope(.modifiedContent) {
             content._makeOpenUIKitNode()
         }
-        let resolvedModifier = modifier.resolve()
+        var resolvedModifier = modifier.resolve()
+        if case .searchable(var search) = resolvedModifier {
+            // The search field's editor, retained at this modifier's identity.
+            search.retained = _OpenGraphContext.textInputState(role: .search)
+            resolvedModifier = .searchable(search)
+        }
         if case .pageTabViewStyle(let indexDisplayMode) = resolvedModifier {
             return _openApplyingPageTabViewStyle(
                 contentNode,
@@ -3781,9 +3792,15 @@ public extension _OpenView {
             modification: .focus(
                 get: { binding.wrappedValue == value },
                 set: { focused in
-                    let next: Value? = focused ? value : nil
-                    guard binding.wrappedValue != next else { return }
-                    binding.wrappedValue = next
+                    // Losing focus clears the binding only while it still
+                    // names this field: focus may already have moved on.
+                    if focused {
+                        guard binding.wrappedValue != value else { return }
+                        binding.wrappedValue = value
+                    } else {
+                        guard binding.wrappedValue == value else { return }
+                        binding.wrappedValue = nil
+                    }
                 }
             )
         )

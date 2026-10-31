@@ -1044,6 +1044,8 @@ final class _OpenGraphHost {
     private var activeLazyStackKeys: Set<_OpenGraphIdentity> = []
     private var geometryReaderStates: [_OpenGraphIdentity: _OpenGeometryReaderState] = [:]
     private var activeGeometryReaderKeys: Set<_OpenGraphIdentity> = []
+    private var textInputStates: [_OpenTextInputKey: _OpenTextInputState] = [:]
+    private var activeTextInputKeys: Set<_OpenTextInputKey> = []
     /// Per evaluation: each lazy stack's `.forEachContent` path and the
     /// element IDs still in its data. State below an unbuilt element of
     /// these survives the stale-state sweep.
@@ -1101,6 +1103,7 @@ final class _OpenGraphHost {
         activeTaskKeys.removeAll(keepingCapacity: true)
         activeLazyStackKeys.removeAll(keepingCapacity: true)
         activeGeometryReaderKeys.removeAll(keepingCapacity: true)
+        activeTextInputKeys.removeAll(keepingCapacity: true)
         lazyElementRetention.removeAll(keepingCapacity: true)
         postEvaluationActions.removeAll(keepingCapacity: true)
         path.removeAll(keepingCapacity: true)
@@ -1191,6 +1194,16 @@ final class _OpenGraphHost {
         for key in staleLazyStackKeys {
             lazyStackStates.removeValue(forKey: key)
         }
+        let staleTextInputKeys = textInputStates.keys.filter {
+            !activeTextInputKeys.contains($0) && !isRetainedByLazyStack($0.viewPath)
+        }
+        for key in staleTextInputKeys {
+            // The input left the view: it no longer edits (after the
+            // evaluation, since resigning writes focus bindings back).
+            if let retired = textInputStates.removeValue(forKey: key) {
+                postEvaluationActions.append { retired.retire() }
+            }
+        }
         isEvaluating = false
         let actions = postEvaluationActions
         postEvaluationActions.removeAll(keepingCapacity: true)
@@ -1255,6 +1268,17 @@ final class _OpenGraphHost {
             self?.scheduleInvalidation()
         }
         lazyStackStates[identity] = created
+        return created
+    }
+
+    /// The retained editor state of the text input (TextField, SecureField,
+    /// a `searchable` field) at the current path.
+    func textInputState(role: _OpenTextInputKey.Role) -> _OpenTextInputState {
+        let key = _OpenTextInputKey(viewPath: path, role: role)
+        activeTextInputKeys.insert(key)
+        if let existing = textInputStates[key] { return existing }
+        let created = _OpenTextInputState()
+        textInputStates[key] = created
         return created
     }
 
@@ -1879,6 +1903,47 @@ final class _OpenGraphHost {
     }
 }
 
+struct _OpenTextInputKey: Hashable {
+    enum Role: Hashable {
+        case textField
+        case search
+    }
+
+    fileprivate let viewPath: [_OpenGraphPathComponent]
+    let role: Role
+}
+
+/// A text input's UIKit editor, retained at the input's graph identity.
+///
+/// The hosting view rebuilds its UIView hierarchy whenever it lays out, so
+/// an editor made per layout lost first-responder status, its selection and
+/// any marked text on the next state change (every typed character is one).
+/// SwiftUI keeps one platform editor per text input for as long as the input
+/// stays in the view; the renderer reuses `editor` while it is the same kind
+/// of view and the hosting view keeps a focused editor in the window while
+/// it rebuilds (`_SwiftUIHostingView.layoutSubviews`).
+@MainActor
+final class _OpenTextInputState {
+    var editor: UIView?
+
+    /// The input left the view tree: end its editing session as UIKit does
+    /// when a focused field is removed.
+    func retire() {
+        guard let editor else { return }
+        self.editor = nil
+        _openResignFocus(in: editor)
+    }
+}
+
+/// Resigns the first responder when it is `view` or inside it.
+@MainActor
+func _openResignFocus(in view: UIView) {
+    guard let window = view.window,
+          let responder = window.firstResponder as? UIView,
+          responder.isDescendant(of: view) else { return }
+    _ = responder.resignFirstResponder()
+}
+
 @MainActor
 enum _OpenGraphContext {
     private static var currentHost: _OpenGraphHost?
@@ -1948,6 +2013,12 @@ enum _OpenGraphContext {
 
     static func lazyStackState() -> _OpenLazyStackState? {
         currentHost?.lazyStackState()
+    }
+
+    /// The text input at the current path's retained editor state, or nil
+    /// outside a graph host (the input then gets a new editor per layout).
+    static func textInputState(role: _OpenTextInputKey.Role) -> _OpenTextInputState? {
+        currentHost?.textInputState(role: role)
     }
 
     static func retainLazyElementState(identifiers: Set<AnyHashable>) {

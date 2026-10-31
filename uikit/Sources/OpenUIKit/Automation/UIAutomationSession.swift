@@ -401,8 +401,9 @@ public final class UIAutomationSession {
         case .input(var input):
             window.layoutIfNeeded()
             if input.start == nil { input.start = time }
-            deliver(&input, window: window, time: time)
-            if input.next >= input.events.count {
+            if let lost = deliver(&input, window: window, time: time) {
+                finishCommand(ExitCode.failed, lost)
+            } else if input.next >= input.events.count {
                 if !input.settle {
                     finishCommand(ExitCode.ok, "")
                 } else if input.verify {
@@ -700,13 +701,23 @@ public final class UIAutomationSession {
     /// A touch-down and a lift each end the turn they are delivered in (the
     /// lift waits for the next turn when moves came first), so the app lays
     /// out and the recognizers see time pass between phases, as on a device.
-    private func deliver(_ input: inout Input, window: UIWindow, time: Double) {
-        guard let start = input.start else { return }
+    /// Returns the failure when keyboard focus went away before a key was
+    /// delivered (the earlier keys took effect; later ones would be dropped).
+    private func deliver(_ input: inout Input, window: UIWindow, time: Double) -> String? {
+        guard let start = input.start else { return nil }
         var deliveredThisTurn = 0
         while input.next < input.events.count, start + input.events[input.next].offset <= time {
             let event = input.events[input.next].event
             if case .touch(let phase, _) = event, phase == .ended || phase == .cancelled, deliveredThisTurn > 0 {
-                return
+                return nil
+            }
+            switch event {
+            case .text where !(window.firstResponder is UIKeyInput), .key where window.firstResponder == nil:
+                let keys = input.events.count
+                return "\(input.name): keyboard focus was lost after \(input.next) of \(keys) key\(keys == 1 ? "" : "s")"
+                    + " (the focused input left the screen or resigned; tap a text field again)"
+            default:
+                break
             }
             let timestamp = Swift.min(time, Swift.max(lastEventTime, start + input.events[input.next].offset))
             lastEventTime = timestamp
@@ -721,13 +732,14 @@ public final class UIAutomationSession {
                     }
                     log("automation: touch \(phase) at \(point) t=\(timestamp) view=\(touch?.view.map { "\(type(of: $0))" } ?? "none") recognizers=\(recognizers)")
                 }
-                if phase != .moved { return }
+                if phase != .moved { return nil }
             case .text(let text):
                 window.sendText(text, timestamp: timestamp)
             case .key(let key):
                 window.sendKey(key, timestamp: timestamp)
             }
         }
+        return nil
     }
 
     private var lastEventTime = -Double.infinity
