@@ -499,8 +499,14 @@ final class _UITransitionCoordinator: UIViewControllerTransitionCoordinator {
     }
 
     func attach(_ controllers: UIViewController?...) {
-        for vc in controllers {
-            guard let vc else { continue }
+        // Indexed, not `for vc in controllers`: on the x86_64 iOS-simulator
+        // guest (machorun, macOS-built Swift runtime) the IndexingIterator
+        // over [UIViewController?] returned 0x2 for an element, which
+        // objc_retain faulted on (MEASURED stupid social: the first
+        // navigation push crashed here). Subscripting yields one Optional
+        // level and avoids the double-optional `next()` result.
+        for index in controllers.indices {
+            guard let vc = controllers[index] else { continue }
             vc._transitionCoordinator = self
             if !attached.contains(where: { $0 === vc }) { attached.append(vc) }
         }

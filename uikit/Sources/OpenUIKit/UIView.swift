@@ -606,6 +606,9 @@ open class CALayer: NSObject {
 
     public final func needsLayout() -> Bool { _needsLayout }
 
+    /// See `UIView._finishRebuildingSubviews()`.
+    final func _clearNeedsLayout() { _needsLayout = false }
+
     /// Runs the nearest dirty ancestor first, then every dirty descendant.
     /// This mirrors the observable Core Animation contract while remaining
     /// synchronous and deterministic for portable hosts.
@@ -1468,6 +1471,19 @@ open class UIView: UIResponder, CALayerDelegate {
     public final func setNeedsLayout() {
         needsLayout = true
         layer.setNeedsLayout()
+    }
+
+    /// For a view whose `layoutSubviews` rebuilds its subviews from a model
+    /// (the SwiftUI layer's hosting view): adding and removing those
+    /// subviews marks the view for layout again, so without this every
+    /// `layoutIfNeeded` rebuilt the whole hierarchy — on every host turn of
+    /// a SwiftUI app, recreating views (and re-running the presentation
+    /// hosts' push/present side effects) while nothing changed. Call at the
+    /// end of that `layoutSubviews`; the rebuilt subviews still lay out in
+    /// the same pass.
+    public final func _finishRebuildingSubviews() {
+        needsLayout = false
+        layer._clearNeedsLayout()
     }
 
     /// Schedule the receiver's update-constraints callback for the next

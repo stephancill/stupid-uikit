@@ -2015,6 +2015,7 @@ private final class _SwiftUIHostingView: UIView {
         clipsToBounds = false
         layer.cornerRadius = 0
         _ViewRenderer.place(node, in: bounds, on: self, environment: renderEnvironment)
+        _finishRebuildingSubviews()
         didCompleteLayout?()
     }
 
@@ -3550,6 +3551,7 @@ private enum _ViewRenderer {
             control.isOpaque = false
             control.backgroundColor = .clear
             control.accessibilityIdentifier = "SwiftUI.NavigationLink"
+            control._automationAccessibility = _UIAutomationAccessibility(role: .button)
             control.isEnabled = environment.isEnabled
             control.addTarget(for: .touchUpInside) { [weak control] _, _ in
                 guard let control,
@@ -4135,6 +4137,8 @@ private enum _ViewRenderer {
                 accessibilityHost.isAccessibilityElement = children != .contain
                 accessibilityHost.accessibilityElementsHidden = children != .contain
                 accessibilityHost.accessibilityIdentifier = "SwiftUI.AccessibilityElement"
+                accessibilityHost._automationAccessibility = _UIAutomationAccessibility(
+                    children: children == .combine ? .combine : children == .ignore ? .ignore : .contain)
                 surface.addSubview(accessibilityHost)
                 place(content, in: accessibilityHost.bounds, on: accessibilityHost,
                       environment: environment)
@@ -4144,24 +4148,29 @@ private enum _ViewRenderer {
             case .accessibilityLabel(let label):
                 let host = _openAccessibilityHost(frame: rect, identifier: "Label")
                 host.accessibilityLabel = label
+                host._automationAccessibility = _UIAutomationAccessibility(label: label)
                 surface.addSubview(host)
                 place(content, in: host.bounds, on: host, environment: environment)
                 _openMergeAccessibility(from: host, into: host)
             case .accessibilityHint(let hint):
                 let host = _openAccessibilityHost(frame: rect, identifier: "Hint")
                 host.accessibilityHint = hint
+                host._automationAccessibility = _UIAutomationAccessibility(hint: hint)
                 surface.addSubview(host)
                 place(content, in: host.bounds, on: host, environment: environment)
                 _openMergeAccessibility(from: host, into: host)
             case .accessibilityValue(let value):
                 let host = _openAccessibilityHost(frame: rect, identifier: "Value")
                 host.accessibilityValue = value
+                host._automationAccessibility = _UIAutomationAccessibility(value: value)
                 surface.addSubview(host)
                 place(content, in: host.bounds, on: host, environment: environment)
                 _openMergeAccessibility(from: host, into: host)
             case .accessibilityTraits(let traits):
                 let host = _openAccessibilityHost(frame: rect, identifier: "Traits")
                 host.accessibilityTraits.formUnion(_openUIKitTraits(traits))
+                host._automationAccessibility = _UIAutomationAccessibility(
+                    addedTraits: _openUIKitTraits(traits))
                 surface.addSubview(host)
                 place(content, in: host.bounds, on: host, environment: environment)
                 _openMergeAccessibility(from: host, into: host)
@@ -4173,6 +4182,8 @@ private enum _ViewRenderer {
                 host.accessibilityIdentifier = name.map { "SwiftUI.AccessibilityAction.\($0)" }
                     ?? "SwiftUI.AccessibilityAction.default"
                 host.accessibilityHint = name
+                // An action is not an element of its own on iOS.
+                host._automationAccessibility = _UIAutomationAccessibility()
                 host.addTarget(for: .primaryActionTriggered) { _, _ in action() }
                 surface.addSubview(host)
                 place(content, in: host.bounds, on: host, environment: environment)
@@ -4268,6 +4279,7 @@ private enum _ViewRenderer {
             case .accessibilityIdentifier(let identifier):
                 let host = _SwiftUIPassthroughView(frame: rect)
                 host.accessibilityIdentifier = identifier
+                host._automationAccessibility = _UIAutomationAccessibility(identifier: identifier)
                 surface.addSubview(host)
                 place(content, in: host.bounds, on: host, environment: environment)
             case .alert(let configuration):
@@ -5485,6 +5497,7 @@ private enum _ViewRenderer {
                 )
             }
             symbol.accessibilityIdentifier = "SwiftUI.Image.systemName.\(name)"
+            symbol._automationAccessibility = _UIAutomationAccessibility(role: .image, identifier: name)
             surface.addSubview(symbol)
         case .named(let name, let bundle):
             let raw = UIImage(named: name, in: bundle, compatibleWith: nil)
@@ -5497,6 +5510,9 @@ private enum _ViewRenderer {
                 ? .scaleAspectFit
                 : .scaleAspectFill
             imageView.accessibilityIdentifier = "SwiftUI.Image.named.\(name)"
+            // SwiftUI labels a named image with its name.
+            imageView._automationAccessibility = _UIAutomationAccessibility(
+                role: .image, label: name, identifier: name)
             surface.addSubview(imageView)
         case .uiImage(let image):
             let rendered = environment.foregroundColor.map { color in
@@ -5508,6 +5524,7 @@ private enum _ViewRenderer {
                 ? .scaleAspectFit
                 : .scaleAspectFill
             imageView.accessibilityIdentifier = "SwiftUI.Image.uiImage"
+            imageView._automationAccessibility = _UIAutomationAccessibility(role: .image)
             surface.addSubview(imageView)
         }
     }

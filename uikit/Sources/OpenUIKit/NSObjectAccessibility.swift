@@ -79,6 +79,9 @@ struct AccessibilityState {
     var customActionsBlock: (() -> [UIAccessibilityCustomAction]?)?
     var customRotors: [UIAccessibilityCustomRotor]?
     var customRotorsBlock: (() -> [UIAccessibilityCustomRotor]?)?
+    /// What a framework layered on UIKit (the SwiftUI layer) says this view
+    /// means to the accessibility tree (Automation/UIAutomationTree.swift).
+    var automation: _UIAutomationAccessibility?
 }
 
 /// Per-object accessibility storage for a root class the port does not own.
