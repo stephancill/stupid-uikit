@@ -695,6 +695,8 @@ let conformanceTargets: [Target] = [
     // Native gate for SwiftUI text metrics on the iOS cut
     // (docs/SWIFTUI_TEXT_METRICS.md).
     .executableTarget(name: "swiftuitextmetricsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for the root-screen residuals pass (docs/ROOT_SCREEN_RESIDUALS.md).
+    .executableTarget(name: "rootresidualsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",
                       dependencies: ["OpenUIKit", "OpenUIKitC", "CPortableIO"],
                       linkerSettings: [.linkedLibrary("m", .when(platforms: [.linux]))]),
