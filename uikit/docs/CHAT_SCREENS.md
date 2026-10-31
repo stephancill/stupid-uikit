@@ -60,3 +60,6 @@ swift64 from agent in; `swiftuichatsprobe` keeps a page-view-controller swipe ch
   rectangle instead of the glass capsule.
 - The bottom scroll-edge pocket under the composer engages at rest when the list is not exactly at
   its maximum offset.
+
+The group-chat measurement, custom-emoji, glass capsule and composer-pocket gaps above are
+addressed in `GROUP_CHAT.md`.

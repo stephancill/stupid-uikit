@@ -709,6 +709,10 @@ let conformanceTargets: [Target] = [
     // Native gate for colour emoji in text layout and drawing
     // (docs/COLOR_EMOJI.md).
     .executableTarget(name: "coloremojiprobe", dependencies: ["OpenUIKit"]),
+    // Native gate for stupid social's group chat (docs/GROUP_CHAT.md): stack
+    // views mixing frame- and constraint-sized content, attachment lines,
+    // original-colour button images, scroll-edge pocket engagement.
+    .executableTarget(name: "groupchatprobe", dependencies: ["OpenUIKit"]),
     // Native gate for SwiftUI full-screen covers and the screenshot status
     // bar's appearance (docs/SWIFTUI_FULL_SCREEN_COVER.md).
     .executableTarget(name: "swiftuifullscreencoverprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
