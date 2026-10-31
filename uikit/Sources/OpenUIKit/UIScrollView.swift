@@ -459,7 +459,11 @@ open class UIScrollView: UIView {
     }
 
     public final var contentSize: CGSize = .zero {
-        didSet { if contentSize != oldValue { setNeedsLayout() } }
+        didSet {
+            guard contentSize != oldValue else { return }
+            setNeedsLayout()
+            _OpenUIKitKeyValueObserving.didChange?(self, "contentSize", oldValue, contentSize)
+        }
     }
     public final var contentInset: UIEdgeInsets = .zero {
         didSet {
@@ -810,6 +814,8 @@ open class UIScrollView: UIView {
         didSet {
             if bounds.origin != oldValue.origin {
                 _boundsOriginDidChange(from: oldValue)
+                _OpenUIKitKeyValueObserving.didChange?(
+                    self, "contentOffset", oldValue.origin, bounds.origin)
             }
         }
     }

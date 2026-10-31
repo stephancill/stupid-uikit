@@ -351,6 +351,19 @@ extension UIView {
         _applySafeArea(insets)
     }
 
+    /// Extra safe area this view adds for its subtree, as a view controller's
+    /// `additionalSafeAreaInsets` does for its root view. Not UIKit API: the
+    /// SwiftUI layer uses it where SwiftUI grows a container's safe area
+    /// without a controller (a `.navigationBarDrawer` search field).
+    public var _openAdditionalSafeAreaInsets: UIEdgeInsets {
+        get { _additionalSafeAreaInsets }
+        set {
+            guard newValue != _additionalSafeAreaInsets else { return }
+            _additionalSafeAreaInsets = newValue
+            setNeedsLayout()
+        }
+    }
+
     /// This view's own insets, if it is a propagation root (a window, or a
     /// view a host/fixture set them on). `nil` means "inherit".
     var _safeAreaRootInsets: UIEdgeInsets? { _ownSafeAreaInsets }

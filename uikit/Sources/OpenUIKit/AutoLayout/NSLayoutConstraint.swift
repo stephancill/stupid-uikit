@@ -295,6 +295,18 @@ extension UIView {
     /// UIKit gets this out of the solver; OpenUIKit's UIStackView is a
     /// frame-based layout that does not take part in one, so it reads the
     /// number directly (Sources/OpenUIKit/UIStackView.swift, M14).
+    /// `height == width * multiplier + constant` on this view itself (an
+    /// aspect-ratio constraint), as (multiplier, constant).
+    func _heightToWidthRatioConstraint() -> (multiplier: CGFloat, constant: CGFloat)? {
+        for c in _installedConstraints
+        where c.firstItem === self && c.secondItem === self && c.relation == .equal
+            && c.firstAttribute == .height && c.secondAttribute == .width
+            && c.priority.rawValue >= UILayoutPriority.defaultHigh.rawValue {
+            return (c.multiplier, c.constant)
+        }
+        return nil
+    }
+
     func _explicitSizeConstraint(_ attribute: NSLayoutConstraint.Attribute) -> CGFloat? {
         var best: CGFloat?
         for c in _installedConstraints

@@ -969,18 +969,35 @@ open class UICollectionView: UIScrollView {
         // configure (estimated 52). preferredLayoutAttributesFitting is not
         // wired through UICollectionView yet, so we sample the configured
         // cell here and invalidate once the fitted height disagrees.
-        if let layout = collectionViewLayout as? UICollectionViewCompositionalLayout,
-           let listCfg = layout._storedListConfiguration {
+        if let layout = collectionViewLayout as? UICollectionViewCompositionalLayout {
             var changed = false
             for a in attributes where a.representedElementKind == nil {
-                guard let cell = visibleViews[a.elementKey] as? UICollectionViewListCell else {
+                guard let listCfg = layout._listConfiguration(forSection: a.indexPath.section),
+                      let cell = visibleViews[a.elementKey] as? UICollectionViewListCell else {
                     continue
                 }
                 var h = cell.preferredHeight(forWidth: a.frame.width)
-                if a.indexPath.item == 0 {
+                if a.indexPath.item == 0, !layout._hasEstimatedHeader(inSection: a.indexPath.section),
+                   layout.layoutAttributesForSupplementaryView(
+                       ofKind: UICollectionView.elementKindSectionHeader, at: a.indexPath) == nil {
                     h += UICollectionViewListCell.headerTopPadding(for: listCfg.appearance)
                 }
                 if layout._noteFittedListHeight(h, at: a.indexPath) {
+                    changed = true
+                }
+            }
+            // Estimated list headers (`headerMode = .supplementary`, or a
+            // provider's estimated boundary header) size to their
+            // constraints, as UIKit's preferredLayoutAttributesFitting does.
+            for a in attributes where a.representedElementKind == UICollectionView.elementKindSectionHeader {
+                guard layout._hasEstimatedHeader(inSection: a.indexPath.section),
+                      let view = visibleViews[a.elementKey] else { continue }
+                let fitted = view.constraintFittingSize(
+                    CGSize(width: a.frame.width, height: 0),
+                    withHorizontalFittingPriority: .required,
+                    verticalFittingPriority: .fittingSizeLevel)
+                if let fitted, fitted.height > 0,
+                   layout._noteFittedHeaderHeight(fitted.height, inSection: a.indexPath.section) {
                     changed = true
                 }
             }

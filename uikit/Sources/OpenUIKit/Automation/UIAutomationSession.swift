@@ -617,6 +617,9 @@ public final class UIAutomationSession {
             begin(Input(name: "key", events: events, verify: verify))
         case .snapshot(let name):
             let base = name.hasPrefix("/") ? name : configuration.outputDirectory + "/" + name
+            // The tree reads frames: lay out first, as the render does, so a
+            // view positioned in layoutSubviews is where the PNG shows it.
+            window.layoutIfNeeded()
             let tree = UIAutomationTree.snapshot(of: window, applicationLabel: configuration.applicationLabel)
             write(Array(UIAutomationTree.text(tree).utf8), to: base + ".tree.txt")
             write(Array(UIAutomationTree.json(tree).utf8), to: base + ".tree.json")
@@ -627,6 +630,7 @@ public final class UIAutomationSession {
             write(render(window, scale: configuration.scale).pngData(), to: path)
             finishCommand(ExitCode.ok, path + "\n")
         case .uiTree(let json, let labelled, let path):
+            window.layoutIfNeeded()
             let tree = UIAutomationTree.snapshot(of: window, applicationLabel: configuration.applicationLabel)
             let text = json ? UIAutomationTree.json(tree) : UIAutomationTree.text(tree, labelled: labelled)
             if let path {

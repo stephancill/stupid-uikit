@@ -161,8 +161,61 @@ open class UIStackView: UIView {
         if let w = view._explicitSizeConstraint(.width) { s.width = Swift.max(s.width, w) }
         if let h = view._explicitSizeConstraint(.height) { s.height = Swift.max(s.height, h) }
         applyIOSConstrainedSubviewFloor(to: &s, of: view)
-        wrapIOSMultilineLabel(view, wrapWidth: bounds.width, size: &s)
+        applyIOSConstraintFitting(to: &s, of: view)
+        wrapIOSMultilineLabel(view, wrapWidth: arrangedWidth(bounds.width), size: &s)
         return s
+    }
+
+    /// A plain arranged view whose own subviews' constraints decide its size
+    /// (a UIVisualEffectView whose contentView holds a pinned stack, say)
+    /// contributes that Auto Layout fitting size on the axes it has no
+    /// intrinsic metric for, as UIKit's constraint-based stack measures it.
+    /// MEASURED iOS 27 simulator, iPhone 16e (stupid social's chat composer):
+    /// the glass "Message" pill is 4 + 36 + 4 = 44 pt tall in a bottom-pinned
+    /// vertical stack; a frame-based measure gave it the 0 pt it started at
+    /// and the stack never grew. iOS cut only, so Catalyst stack goldens stay
+    /// exact.
+    private static var fittingArrangedView = false
+
+    private func applyIOSConstraintFitting(to s: inout CGSize, of view: UIView) {
+        guard OpenUIKitRuntime.systemFontCut == .iOS else { return }
+        // An aspect-ratio constraint (`height == width * k`, a chat photo)
+        // makes the height follow the width the stack gives it.
+        if let ratio = view._heightToWidthRatioConstraint() {
+            let fillsWidth = axis == .vertical && alignment == .fill && bounds.width > 0
+            let width = view._explicitSizeConstraint(.width) ?? (fillsWidth ? arrangedWidth(bounds.width) : s.width)
+            s.height = max(s.height, width * ratio.multiplier + ratio.constant)
+        }
+        // The fitting solve lays the view out, which can ask this stack for
+        // its intrinsic size again: measure once, not recursively.
+        guard !(view is UIStackView),
+              !view.subviews.isEmpty, !UIStackView.fittingArrangedView else { return }
+        UIStackView.fittingArrangedView = true
+        defer { UIStackView.fittingArrangedView = false }
+        // Only the height is fitted, at a known width: the stack's own width
+        // (a filling vertical stack), an explicit width, or the width the
+        // view already has. A view whose height is explicit keeps it (a text
+        // view with a height constraint must not wrap its placeholder at a
+        // collapsed width and grow).
+        let intrinsic = view.intrinsicContentSize
+        guard intrinsic.height == UIView.noIntrinsicMetric,
+              view._explicitSizeConstraint(.height) == nil else { return }
+        let width: CGFloat
+        if axis == .vertical && alignment == .fill && bounds.width > 0 {
+            width = arrangedWidth(bounds.width)
+        } else if let explicit = view._explicitSizeConstraint(.width) {
+            width = explicit
+        } else if view.bounds.width > 0 {
+            width = view.bounds.width
+        } else {
+            return
+        }
+        // The engine's fitting solve alone: `constraintFittingSize` also lays
+        // the hierarchy out, which re-enters the enclosing solve.
+        guard let fitted = LayoutEngine.fittingSize(
+            root: view, target: CGSize(width: width, height: 0),
+            freeWidth: false, freeHeight: true) else { return }
+        s.height = max(s.height, fitted.height)
     }
 
     /// Extra axis length from a plain arranged view whose SUBVIEWS have
@@ -239,7 +292,8 @@ open class UIStackView: UIView {
         if let w = view._explicitSizeConstraint(.width) { s.width = max(s.width, w) }
         if let h = view._explicitSizeConstraint(.height) { s.height = max(s.height, h) }
         applyIOSConstrainedSubviewFloor(to: &s, of: view)
-        wrapIOSMultilineLabel(view, wrapWidth: bounds.width, size: &s)
+        applyIOSConstraintFitting(to: &s, of: view)
+        wrapIOSMultilineLabel(view, wrapWidth: arrangedWidth(bounds.width), size: &s)
         return s
     }
 
@@ -288,8 +342,7 @@ open class UIStackView: UIView {
         var crossMax: CGFloat = 0
         let wrapWidth: CGFloat = {
             guard OpenUIKitRuntime.systemFontCut == .iOS, axis == .vertical else { return 0 }
-            if size.width > 0 { return size.width }
-            return bounds.width
+            return arrangedWidth(size.width > 0 ? size.width : bounds.width)
         }()
         for view in visible {
             var natural = naturalFittingSize(of: view)
@@ -314,6 +367,17 @@ open class UIStackView: UIView {
         }
         return axis == .horizontal ? CGSize(width: along, height: across)
                                    : CGSize(width: across, height: along)
+    }
+
+    /// The width arranged views get in a vertical stack `width` wide: less
+    /// the layout margins when the arrangement is margin-relative. A wrapping
+    /// label measured at the full width took one line fewer than it is laid
+    /// out with (stupid social's chat bubbles: the stack then compressed the
+    /// sender-name row to nothing to fit the second line).
+    private func arrangedWidth(_ width: CGFloat) -> CGFloat {
+        guard isLayoutMarginsRelativeArrangement, axis == .vertical else { return width }
+        let m = layoutMargins
+        return max(0, width - m.left - m.right)
     }
 
     private func axisLength(_ s: CGSize) -> CGFloat { axis == .horizontal ? s.width : s.height }

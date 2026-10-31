@@ -293,6 +293,16 @@ open class UISearchTextField: UITextField {
     weak var _searchBar: UISearchBar?
     /// Phone bottom-docked search field (Ledger t200 38 pt / landscape 36 pt).
     var _bottomFloating = false
+    /// Stacked under a navigation bar's large title (UIKit's `.stacked`
+    /// placement, SwiftUI's `.navigationBarDrawer`). MEASURED iOS 27
+    /// simulator, iPhone 16e (stupid social Chats, 3x): the capsule is a flat
+    /// `tertiarySystemFill` (239, 239, 240 over white) with no drop shadow,
+    /// and the magnifier is `label` (ink 0); the placeholder stays
+    /// `secondaryLabel` (darkest 132, 132, 136) and the glyph and text
+    /// geometry match the standalone field within 0.5 pt.
+    var _inNavigationBarDrawer = false {
+        didSet { if _inNavigationBarDrawer != oldValue { setNeedsLayout(); setNeedsDisplay() } }
+    }
 
     /// Measured text box: 39.5 pt in from the left, and 14 + 20.5 pt in from
     /// the right once a clear button is present (iOS: 34.333 + a 9.667 pt
@@ -362,10 +372,12 @@ open class UISearchTextField: UITextField {
         super.layoutSubviews()
         guard _UISearchFieldMetrics.isIOS else { return }
         let visible = drawsFieldBackground
+        let shadowed = visible && !_inNavigationBarDrawer
         layer.cornerRadius = visible ? bounds.height / 2 : 0
-        backgroundColor = visible ? _UISearchFieldMetrics.pillFill : nil
-        layer._shadowColorValue = visible ? CanvasColor(red: 0, green: 0, blue: 0, alpha: 1) : nil
-        layer.shadowOpacity = visible ? _UISearchFieldMetrics.shadowOpacity : 0
+        backgroundColor = visible
+            ? (_inNavigationBarDrawer ? .tertiarySystemFill : _UISearchFieldMetrics.pillFill) : nil
+        layer._shadowColorValue = shadowed ? CanvasColor(red: 0, green: 0, blue: 0, alpha: 1) : nil
+        layer.shadowOpacity = shadowed ? _UISearchFieldMetrics.shadowOpacity : 0
         layer.shadowRadius = _UISearchFieldMetrics.shadowRadius
         layer.shadowOffset = _UISearchFieldMetrics.shadowOffset
     }
@@ -387,7 +399,7 @@ open class UISearchTextField: UITextField {
         let box = icon.offsetBy(dx: bounds.minX, dy: bounds.minY)
         let c = CGPoint(x: box.minX + UISearchTextField.ringCenter.x,
                         y: box.minY + UISearchTextField.ringCenter.y)
-        let color = (_tintColor ?? _UISearchFieldMetrics.glyphColor)
+        let color = (_tintColor ?? (_inNavigationBarDrawer ? .label : _UISearchFieldMetrics.glyphColor))
             .resolvedCGColor(with: traitCollection)
         let w = UISearchTextField.strokeWidth
         let mid = UISearchTextField.ringOuterRadius - w / 2
@@ -498,6 +510,14 @@ open class UISearchBar: UIView {
     /// Set by UINavigationController when this bar is the phone
     /// bottom-docked search (Ledger). Field fills the bar; the glass
     /// platter is the parent, so the field does not draw its own pill.
+    /// Not UIKit API: the bar sits in a navigation bar's search drawer
+    /// (`UISearchTextField._inNavigationBarDrawer`). Set by SwiftUI's
+    /// `.searchable(placement: .navigationBarDrawer)`.
+    public var _openInNavigationBarDrawer: Bool {
+        get { searchTextField._inNavigationBarDrawer }
+        set { searchTextField._inNavigationBarDrawer = newValue }
+    }
+
     var _bottomFloating = false {
         didSet {
             searchTextField._bottomFloating = _bottomFloating

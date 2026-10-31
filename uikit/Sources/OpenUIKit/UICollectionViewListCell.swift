@@ -251,13 +251,23 @@ open class UICollectionViewListCell: UICollectionViewCell {
         backgroundColor = nil
     }
 
+    /// The list configuration of the section this cell is in: a
+    /// section-provider layout's `.list(using:)` section, else `init(list:)`'s.
+    var _cellListConfiguration: UICollectionLayoutListConfiguration? {
+        guard let layout = collectionView?.collectionViewLayout as? UICollectionViewCompositionalLayout
+        else { return nil }
+        if let cv = collectionView, let path = cv.indexPath(for: self) {
+            return layout._listConfiguration(forSection: path.section)
+        }
+        return layout._storedListConfiguration
+    }
+
     open func defaultContentConfiguration() -> UIListContentConfiguration {
         .cell()
     }
 
     open func defaultBackgroundConfiguration() -> UIBackgroundConfiguration {
-        if let list = (collectionView?.collectionViewLayout as? UICollectionViewCompositionalLayout)?
-            ._storedListConfiguration {
+        if let list = _cellListConfiguration {
             switch list.appearance {
             case .plain, .sidebarPlain: return .listPlainCell()
             case .grouped, .insetGrouped: return .listGroupedCell()
@@ -413,6 +423,19 @@ open class UICollectionViewListCell: UICollectionViewCell {
                 verticalFittingPriority: .fittingSizeLevel)
             return max(UICollectionViewListCell.defaultRowHeight, fitting.height)
         }
+        // No content configuration: the app filled `contentView` itself and
+        // its constraints size the cell (UIKit's self-sizing list cell; no
+        // 52 pt floor, which belongs to the list content configuration).
+        if !contentView.subviews.isEmpty {
+            contentView.frame = CGRect(x: 0, y: 0, width: contentWidth,
+                                       height: contentView.bounds.height)
+            if let fitting = contentView.constraintFittingSize(
+                CGSize(width: contentWidth, height: 0),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel), fitting.height > 0 {
+                return fitting.height
+            }
+        }
         return UICollectionViewListCell.defaultRowHeight
     }
 
@@ -543,8 +566,7 @@ open class UICollectionViewListCell: UICollectionViewCell {
         // MEASURED collection_list_plain separator, iPhone SE 2x / iOS 26.1:
         // [16, cellBottom-1, 343, 1] (leading 16, trailing 16). With a
         // leading accessory the separator starts at 56 (= 16+40).
-        let list = (collectionView?.collectionViewLayout as? UICollectionViewCompositionalLayout)?
-            ._storedListConfiguration
+        let list = _cellListConfiguration
         let showSep = list?.showsSeparators ?? true
         var last = false
         if let cv = collectionView, let path = cv.indexPath(for: self) {
@@ -563,8 +585,7 @@ open class UICollectionViewListCell: UICollectionViewCell {
     private func applyInsetGroupedCorners() {
         backgroundHost.layer.cornerRadius = 0
         backgroundHost.layer.maskedCorners = ._allKnown
-        guard let list = (collectionView?.collectionViewLayout as? UICollectionViewCompositionalLayout)?
-            ._storedListConfiguration,
+        guard let list = _cellListConfiguration,
               list.appearance == .insetGrouped,
               let cv = collectionView,
               let path = cv.indexPath(for: self) else { return }

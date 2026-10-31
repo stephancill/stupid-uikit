@@ -65,6 +65,9 @@ public final class NSKeyValueObservation: NSObject, @unchecked Sendable {
     fileprivate let identifier: UInt64
     fileprivate let keyPath: AnyKeyPath
     fileprivate let options: NSKeyValueObservingOptions
+    /// The OpenUIKit property this observes when OpenUIKit reports it
+    /// (`_OpenUIKitKeyValueObserving`), matched by name on delivery.
+    fileprivate var openUIKitProperty: String?
     private let handler: (
         AnyObject, _PortableKVOValue?, _PortableKVOValue?, Bool
     ) -> Void
@@ -173,6 +176,14 @@ private final class _PortableKVORegistry: @unchecked Sendable {
             },
             handler: handler
         )
+        #if !FOUNDATION_PROGRESS_HOST
+        if let observable = Object.self as? any _OpenUIKitKeyValueObservable.Type {
+            observation.openUIKitProperty = MainActor.assumeIsolated {
+                _PortableKVORegistry.installOpenUIKitHook()
+                return observable._openUIKitObservedProperty(for: keyPath)
+            }
+        }
+        #endif
         state.withLock { state in
             state.observations[objectIdentifier, default: [:]][identifier] =
                 _WeakProgressObservation(observation)
@@ -226,6 +237,42 @@ private final class _PortableKVORegistry: @unchecked Sendable {
             )
         }
     }
+
+    #if !FOUNDATION_PROGRESS_HOST
+    /// OpenUIKit reports its own property changes by name (it is compiled
+    /// before this facade and cannot call it); deliver them to observations
+    /// that resolved to that name.
+    @MainActor
+    private static func installOpenUIKitHook() {
+        guard _OpenUIKitKeyValueObserving.didChange == nil else { return }
+        _OpenUIKitKeyValueObserving.didChange = { object, property, old, new in
+            _PortableKVORegistry.shared.deliver(
+                object: object, openUIKitProperty: property,
+                           oldValue: old, newValue: new)
+        }
+    }
+
+    func deliver(
+        object: AnyObject, openUIKitProperty property: String,
+        oldValue: Any, newValue: Any
+    ) {
+        let objectIdentifier = ObjectIdentifier(object)
+        let matching = state.withLock { state -> [NSKeyValueObservation] in
+            guard let values = state.observations[objectIdentifier] else {
+                return []
+            }
+            return values.values.compactMap(\.value)
+                .filter { $0.owner === object && $0.openUIKitProperty == property }
+                .sorted { $0.identifier < $1.identifier }
+        }
+        guard !matching.isEmpty else { return }
+        let old = _PortableKVOValue(oldValue)
+        let new = _PortableKVOValue(newValue)
+        for observation in matching {
+            observation.deliver(object: object, old: old, new: new, isPrior: false)
+        }
+    }
+    #endif
 
     private func remove(
         objectIdentifier: ObjectIdentifier, identifier: UInt64

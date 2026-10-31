@@ -210,6 +210,35 @@ private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
     }
 }
 
+/// `.searchable(placement: .navigationBarDrawer)`: the search bar sits at
+/// the top of the safe area (just under the navigation bar), over content that
+/// was given `drawerHeight` more top safe area. Touches elsewhere pass through.
+@MainActor
+private final class _SwiftUISearchDrawerView: _SwiftUIPassthroughView {
+    static let drawerHeight: CGFloat = 54
+    let searchBar = _SwiftUISearchBar(frame: .zero)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // UISearchBar insets its field 8 pt; the drawer field spans 16...374.
+        searchBar.frame = CGRect(x: 8, y: 0, width: max(0, frame.width - 16),
+                                 height: UISearchBar.standardHeight)
+        searchBar._openInNavigationBarDrawer = true
+        addSubview(searchBar)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        searchBar.frame = CGRect(x: 8, y: safeAreaInsets.top,
+                                 width: max(0, bounds.width - 16),
+                                 height: UISearchBar.standardHeight)
+    }
+}
+
 @MainActor
 private final class _SwiftUITextField: UITextField {
     var getFocus: (@MainActor () -> Bool)?
@@ -611,9 +640,32 @@ private final class _SwiftUIPresentationContainerController: UIViewController,
         let dismiss = DismissAction { [dismissBridge] in dismissBridge.dismiss() }
         contentController.rootView = configuration.makeDestination(dismiss)
         contentController.loadViewIfNeeded()
-        title = contentController.title
-        navigationItem.hidesBackButton = contentController.navigationItem.hidesBackButton
+        mirrorContentNavigationItem()
+    }
+
+    /// The pushed destination's bar shows this container's item, so it
+    /// carries everything the hosted view's SwiftUI chrome put on the hosting
+    /// controller's item: title, `navigationBarTitleDisplayMode` (as
+    /// `largeTitleDisplayMode`), a principal `titleView` and bar items.
+    /// Re-run whenever the hosted view re-evaluates its chrome.
+    func mirrorContentNavigationItem() {
+        let source = contentController.navigationItem
+        let item = navigationItem
+        if title != contentController.title { title = contentController.title }
+        if item.hidesBackButton != source.hidesBackButton { item.hidesBackButton = source.hidesBackButton }
+        if item.subtitle != source.subtitle { item.subtitle = source.subtitle }
+        if item.largeTitleDisplayMode != source.largeTitleDisplayMode {
+            item.largeTitleDisplayMode = source.largeTitleDisplayMode
+        }
+        if item.titleView !== source.titleView { item.titleView = source.titleView }
+        if !_openSameItems(item.leftBarButtonItems, source.leftBarButtonItems) {
+            item.leftBarButtonItems = source.leftBarButtonItems
+        }
+        if !_openSameItems(item.rightBarButtonItems, source.rightBarButtonItems) {
+            item.rightBarButtonItems = source.rightBarButtonItems
+        }
         toolbarItems = contentController.toolbarItems
+        (parent as? _SwiftUINavigationStackController)?._applyVisibleChrome()
     }
 
     override func loadView() {
@@ -628,9 +680,7 @@ private final class _SwiftUIPresentationContainerController: UIViewController,
         contentController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         container.addSubview(contentController.view)
         contentController.didMove(toParent: self)
-        title = contentController.title
-        navigationItem.hidesBackButton = contentController.navigationItem.hidesBackButton
-        toolbarItems = contentController.toolbarItems
+        mirrorContentNavigationItem()
     }
 
     override func viewDidLayoutSubviews() {
@@ -661,6 +711,12 @@ private final class _SwiftUIPresentationContainerController: UIViewController,
         _ = presentationController
         finishDismissal()
     }
+}
+
+@MainActor
+private func _openSameItems(_ a: [UIBarButtonItem]?, _ b: [UIBarButtonItem]?) -> Bool {
+    let a = a ?? [], b = b ?? []
+    return a.count == b.count && zip(a, b).allSatisfy { $0 === $1 }
 }
 
 @MainActor
@@ -1269,10 +1325,32 @@ final class _SwiftUINavigationStackController: UINavigationController,
     ) {
         _ = navigationController
         guard let destination = viewController as? _SwiftUINavigationNodeController else {
+            applyPresentedDestinationTitleMode(viewController)
             return
         }
         setNavigationBarHidden(destination.configuration.barHidden, animated: animated)
         navigationBar.prefersLargeTitles = displaysLargeTitle(for: destination)
+    }
+
+    func _applyVisibleChrome() {
+        guard let top = topViewController, top is _SwiftUIPresentationContainerController else { return }
+        applyPresentedDestinationTitleMode(top)
+    }
+
+    /// A destination pushed by `navigationDestination(isPresented:)` /
+    /// `(item:)` is a presentation container, not a path node: its
+    /// `navigationBarTitleDisplayMode` arrives as the item's
+    /// `largeTitleDisplayMode` (`.inline` keeps the bar inline, as SwiftUI
+    /// does for stupid social's chat screens). `.automatic` keeps the mode of
+    /// the screen below.
+    private func applyPresentedDestinationTitleMode(_ viewController: UIViewController) {
+        guard OpenUIKitRuntime.systemFontCut == .iOS,
+              viewController is _SwiftUIPresentationContainerController else { return }
+        switch viewController.navigationItem.largeTitleDisplayMode {
+        case .never: navigationBar.prefersLargeTitles = false
+        case .always: navigationBar.prefersLargeTitles = true
+        case .automatic: break
+        }
     }
 
     func navigationController(
@@ -1307,6 +1385,7 @@ final class _SwiftUINavigationStackController: UINavigationController,
 
     private func applyVisibleConfiguration(animated: Bool) {
         guard let controller = topViewController as? _SwiftUINavigationNodeController else {
+            if let top = topViewController { applyPresentedDestinationTitleMode(top) }
             return
         }
         setNavigationBarHidden(controller.configuration.barHidden, animated: animated)
@@ -1755,6 +1834,17 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
             navigationItem.hidesBackButton = configuration.backButtonHidden
         }
         appliedRootBackButtonHidden = configuration.backButtonHidden
+        if OpenUIKitRuntime.systemFontCut == .iOS {
+            let mode: UINavigationItem.LargeTitleDisplayMode
+            switch configuration.titleDisplayMode {
+            case .inline: mode = .never
+            case .large: mode = .always
+            case .automatic: mode = .automatic
+            }
+            if navigationItem.largeTitleDisplayMode != mode {
+                navigationItem.largeTitleDisplayMode = mode
+            }
+        }
         let hasChrome = configuration.toolbar != nil || configuration.searchIsToolbar
         if hasChrome || appliedSwiftUINavigationChrome {
             navigationChromeTitleHost = _openApplyNavigationChrome(
@@ -1765,6 +1855,7 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
             )
             appliedSwiftUINavigationChrome = hasChrome
         }
+        (parent as? _SwiftUIPresentationContainerController)?.mirrorContentNavigationItem()
         return node
     }
 
@@ -2493,28 +2584,8 @@ private enum _ViewRenderer {
                 let sizes = children.map {
                     measure($0, proposed: proposed, environment: environment)
                 }
-                var widths = sizes.map(\.width)
-                let spacerIndices = children.indices.filter { _isSpacer(children[$0]) }
-                let fixedWidth = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
-                    spacerIndices.contains(entry.offset) ? partial : partial + entry.element
-                }
-                var overflow = max(0, fixedWidth + gap * CGFloat(max(0, children.count - 1)) - proposed.width)
-                let compressionOrder = children.indices.sorted { lhs, rhs in
-                    let lhsPriority = _layoutPriority(children[lhs])
-                    let rhsPriority = _layoutPriority(children[rhs])
-                    if lhsPriority == rhsPriority { return lhs < rhs }
-                    return lhsPriority < rhsPriority
-                }
-                for index in compressionOrder where overflow > 0 && _containsText(children[index]) {
-                    let reduction = min(widths[index], overflow)
-                    widths[index] -= reduction
-                    overflow -= reduction
-                }
-                for index in compressionOrder where overflow > 0 && !spacerIndices.contains(index) {
-                    let reduction = min(widths[index], overflow)
-                    widths[index] -= reduction
-                    overflow -= reduction
-                }
+                let widths = _hStackCompressedWidths(
+                    children, sizes: sizes, spacing: gap, available: proposed.width)
                 var width = gap * CGFloat(max(0, children.count - 1))
                 var height: CGFloat = 0
                 for index in children.indices {
@@ -4565,6 +4636,27 @@ private enum _ViewRenderer {
                 // Consumed by `placeList` when it creates the physical row
                 // boundary. Outside a list it is layout-transparent.
                 place(content, in: rect, on: surface, environment: environment)
+            case .searchable(let configuration)
+            where configuration.placement == .navigationBarDrawer
+                && OpenUIKitRuntime.systemFontCut == .iOS:
+                // `.navigationBarDrawer` stacks the field in the navigation
+                // bar under the (large) title: the bar grows and the content
+                // keeps its full frame with that much more top safe area, so
+                // a List's first row starts below the field. MEASURED iOS 27
+                // simulator, iPhone 16e (stupid social Chats): field
+                // [16, 153, 358, 44] under a large title ending at 153, first
+                // row at 207 — a 54 pt drawer (44 pt field + 10 pt below).
+                let contentHost = _SwiftUIPassthroughView(frame: rect)
+                contentHost._openAdditionalSafeAreaInsets = UIEdgeInsets(
+                    top: _SwiftUISearchDrawerView.drawerHeight, left: 0, bottom: 0, right: 0)
+                surface.addSubview(contentHost)
+                place(content, in: contentHost.bounds, on: contentHost, environment: environment)
+                let drawer = _SwiftUISearchDrawerView(frame: rect)
+                drawer.searchBar.text = configuration.getText()
+                drawer.searchBar.placeholder = configuration.prompt
+                drawer.searchBar.setText = configuration.setText
+                drawer.searchBar.accessibilityIdentifier = "SwiftUI.Searchable"
+                surface.addSubview(drawer)
             case .searchable(let configuration):
                 if let owner = _openBottomSearchOwner(for: surface, placement: configuration.placement) {
                     // iOS 26+ iPhone: `.automatic` docks the field at the
@@ -4702,6 +4794,7 @@ private enum _ViewRenderer {
                 let pan = UIPanGestureRecognizer { recognizer in
                     withExtendedLifetime(gate) {}
                     guard let pan = recognizer as? UIPanGestureRecognizer else { return }
+                    _ = gate
                     let translation = pan.translation(in: host)
                     let x = min(0, max(-actionWidth, translation.x))
                     actionHost.isHidden = x == 0 && pan.state != .began && pan.state != .changed
@@ -5689,36 +5782,9 @@ private enum _ViewRenderer {
             measure($0, proposed: rect.size, environment: environment)
         }
         let spacerIndices = children.indices.filter { _isSpacer(children[$0]) }
-        var widths = sizes.map(\.width)
-        let fixedWidth = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
-            spacerIndices.contains(entry.offset) ? partial : partial + entry.element
-        }
+        let widths = _hStackCompressedWidths(
+            children, sizes: sizes, spacing: spacing, available: rect.width)
         let gaps = spacing * CGFloat(max(0, children.count - 1))
-        var overflow = max(0, fixedWidth + gaps - rect.width)
-        let compressionOrder = children.indices.sorted { lhs, rhs in
-            let lhsPriority = _layoutPriority(children[lhs])
-            let rhsPriority = _layoutPriority(children[rhs])
-            if lhsPriority == rhsPriority { return lhs < rhs }
-            return lhsPriority < rhsPriority
-        }
-        // Text is SwiftUI's compressible participant in Focus's title / spacer
-        // / icon row.  Give it the short width and let UILabel honor the
-        // minimumScaleFactor before sacrificing the trailing icon. Explicit
-        // layout priority protects higher-priority title/content groups until
-        // every lower-priority peer has yielded its available width.
-        for index in compressionOrder where overflow > 0 && _containsText(children[index]) {
-            let reduction = min(widths[index], overflow)
-            widths[index] -= reduction
-            overflow -= reduction
-        }
-        // A malformed or extremely small proposal can still over-constrain
-        // non-text leaves.  Clamp them in source order rather than emitting
-        // negative frames or placing later children beyond the padded edge.
-        for index in compressionOrder where overflow > 0 && !spacerIndices.contains(index) {
-            let reduction = min(widths[index], overflow)
-            widths[index] -= reduction
-            overflow -= reduction
-        }
         let compressedFixedWidth = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
             spacerIndices.contains(entry.offset) ? partial : partial + entry.element
         }
@@ -6263,6 +6329,74 @@ private enum _ViewRenderer {
         }
     }
 
+    /// The widths an HStack gives its children when their natural widths
+    /// (`sizes`, measured at the full proposal) overflow `available`.
+    ///
+    /// Text is SwiftUI's compressible participant in Focus's title / spacer
+    /// / icon row.  Give it the short width and let UILabel honor the
+    /// minimumScaleFactor before sacrificing the trailing icon. Explicit
+    /// layout priority protects higher-priority title/content groups until
+    /// every lower-priority peer has yielded its available width.
+    ///
+    /// A child whose width a `.frame(width:)` fixes (an initials avatar with
+    /// its Text, say) is rigid: SwiftUI sizes the least flexible children
+    /// first, so it keeps its width and the flexible peers absorb the
+    /// overflow; a `Spacer(minLength:)` keeps its minimum the same way.
+    /// MEASURED iOS 27 simulator, iPhone 16e, stupid social Chats: the 48 pt
+    /// avatar of a row with a two-line preview keeps 48 pt, and the preview
+    /// wraps 8 pt before the unread pill (`Spacer(minLength: 8)`).
+    private static func _hStackCompressedWidths(
+        _ children: [_OpenViewNode],
+        sizes: [CGSize],
+        spacing: CGFloat,
+        available: CGFloat
+    ) -> [CGFloat] {
+        let spacerIndices = children.indices.filter { _isSpacer(children[$0]) }
+        var widths = sizes.map(\.width)
+        let fixedWidth = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
+            spacerIndices.contains(entry.offset) ? partial : partial + entry.element
+        }
+        let spacerMinimum = spacerIndices.reduce(CGFloat.zero) { $0 + sizes[$1].width }
+        let gaps = spacing * CGFloat(max(0, children.count - 1))
+        var overflow = max(0, fixedWidth + spacerMinimum + gaps - available)
+        let compressionOrder = children.indices.sorted { lhs, rhs in
+            let lhsPriority = _layoutPriority(children[lhs])
+            let rhsPriority = _layoutPriority(children[rhs])
+            if lhsPriority == rhsPriority { return lhs < rhs }
+            return lhsPriority < rhsPriority
+        }
+        let rigid = children.map(_hasFixedWidth)
+        for index in compressionOrder
+        where overflow > 0 && !rigid[index] && _containsText(children[index]) {
+            let reduction = min(widths[index], overflow)
+            widths[index] -= reduction
+            overflow -= reduction
+        }
+        for index in compressionOrder
+        where overflow > 0 && !rigid[index] && !spacerIndices.contains(index) {
+            let reduction = min(widths[index], overflow)
+            widths[index] -= reduction
+            overflow -= reduction
+        }
+        // A malformed or extremely small proposal can still over-constrain
+        // rigid leaves.  Clamp them in source order rather than emitting
+        // negative frames or placing later children beyond the padded edge.
+        for index in compressionOrder where overflow > 0 && !spacerIndices.contains(index) {
+            let reduction = min(widths[index], overflow)
+            widths[index] -= reduction
+            overflow -= reduction
+        }
+        return widths
+    }
+
+    /// A `.frame(width:)` (any height) in the node's modifier chain: SwiftUI
+    /// gives such a view exactly that width whatever it is proposed.
+    private static func _hasFixedWidth(_ node: _OpenViewNode) -> Bool {
+        guard case .modified(let content, let modification) = node.kind else { return false }
+        if case .frame(let width, _, _) = modification, width != nil { return true }
+        return _hasFixedWidth(content)
+    }
+
     private static func _layoutPriority(_ node: _OpenViewNode) -> Double {
         switch node.kind {
         case .modified(_, .layoutPriority(let value)):
@@ -6481,3 +6615,4 @@ private final class _SystemSymbolView: UIView {
         canvas.stroke(path, color: color, lineWidth: lineWidth)
     }
 }
+

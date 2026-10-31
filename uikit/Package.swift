@@ -686,6 +686,10 @@ let conformanceTargets: [Target] = [
     // Native gate for iOS navigation chrome parity (docs/SWIFTUI_NAV_CHROME.md):
     // large titles, ToolbarItemGroup platters, device safe area, status bar.
     .executableTarget(name: "swiftuinavchromeprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for the Chats side of stupid social (docs/CHAT_SCREENS.md):
+    // pager swipes over rows with swipe actions, scroll-view KVO reports,
+    // rigid HStack children and the navigation-bar drawer search field.
+    .executableTarget(name: "swiftuichatsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for shape masks (docs/SHAPE_MASKS.md): CAShapeLayer in
     // both compositors and SwiftUI `.mask { shape }`.
     .executableTarget(name: "swiftuishapemaskprobe", dependencies: ["SwiftUI", "OpenUIKit"]),

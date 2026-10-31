@@ -13,7 +13,8 @@
  * Three categories only:
  *
  *   IMPLEMENTED   the answer is defined and machine-independent, so it is
- *                 simply computed: abs, labs, strncasecmp_l in the C locale.
+ *                 simply computed: abs, labs, strncasecmp_l in the C locale,
+ *                 mktemp, and fchmod through /proc/self/fd on the Linux host.
  *   DELEGATED     the caller ALREADY has a designed fallback for failure, so
  *                 the honest answer is to report failure and let upstream take
  *                 the path it wrote for exactly this: vm_copy.
@@ -104,6 +105,27 @@ char *mktemp(char *template_)
     return template_;
 }
 
+/* fchmod(2): machorun's libSystem re-exports chmod but not fchmod
+ * (machorun/docs/UNIMPLEMENTED.md). On the Linux host a descriptor's file is
+ * reachable as /proc/self/fd/N, and chmod follows that link to the open file
+ * itself (even after a rename), which is what fchmod changes. swift-foundation
+ * calls it after an atomic write replaces an existing file, to keep its mode
+ * (stupid social rewrites its caches when the home pager pages to Chats). */
+extern int chmod(const char *, unsigned short);
+int fchmod(int fd, unsigned short mode)
+{
+    char p[32] = "/proc/self/fd/";
+    char digits[12];
+    int k = 0;
+    unsigned int v = (unsigned int)fd;
+    if (fd < 0) { *__error() = 9; /* EBADF */ return -1; }
+    do { digits[k++] = (char)('0' + v % 10); v /= 10; } while (v);
+    int o = 14;
+    while (k) p[o++] = digits[--k];
+    p[o] = 0;
+    return chmod(p, mode);
+}
+
 /* ---- DELEGATED ---------------------------------------------------------- */
 
 /* Platform.copyMemoryPages (Platform.swift:63) reads:
@@ -123,7 +145,6 @@ int vm_copy(unsigned int task, unsigned long src, unsigned long size, unsigned l
 
 MR_STUB(chflags)
 MR_STUB(confstr)
-MR_STUB(fchmod)
 MR_STUB(getattrlist)
 MR_STUB(link)
 MR_STUB(sysctlbyname)

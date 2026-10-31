@@ -68,10 +68,14 @@ enum LayoutEngine {
         guard !constraints.isEmpty else { return nil }
         var request = FittingRequest(target: target, freeWidth: freeWidth,
                                      freeHeight: freeHeight)
+        // Reentrant: a stack measuring a constraint-sized arranged view
+        // (UIStackView.applyIOSConstraintFitting) fits it in the middle of
+        // an enclosing solve, which may itself be a fitting solve.
+        let enclosing = fitting
         fitting = request
         solve(root: root, constraints: constraints)
         request.solved = fitting?.solved ?? .zero
-        fitting = nil
+        fitting = enclosing
         return request.solved
     }
 
@@ -378,6 +382,34 @@ enum LayoutEngine {
                                 .equal)
                 } else {
                     let sup = sup!
+                    if v is _UIVisualEffectContentView,
+                       let container = v.superview,
+                       v.autoresizingMask.contains([.flexibleWidth, .flexibleHeight]) {
+                        // UIKit translates the effect view's contentView
+                        // autoresizing mask (flexible size, fixed margins)
+                        // into constraints, so constraints inside the content
+                        // view size the effect view itself: stupid social's
+                        // glass composer pill and date capsules have no other
+                        // height. A fixed frame here pinned them at zero.
+                        let b = container.bounds
+                        let margins = UIEdgeInsets(top: f.minY - b.minY, left: f.minX - b.minX,
+                                                   bottom: b.maxY - f.maxY, right: b.maxX - f.maxX)
+                        var ex = Cassowary.Expression(vv.left, constant: -Double(margins.left))
+                        ex.add(sup.left, -1)
+                        addRequired(ex, .equal)
+                        var ey = Cassowary.Expression(vv.top, constant: -Double(margins.top))
+                        ey.add(sup.top, -1)
+                        addRequired(ey, .equal)
+                        var ew = Cassowary.Expression(vv.width,
+                                                      constant: Double(margins.left + margins.right))
+                        ew.add(sup.width, -1)
+                        addRequired(ew, .equal)
+                        var eh = Cassowary.Expression(vv.height,
+                                                      constant: Double(margins.top + margins.bottom))
+                        eh.add(sup.height, -1)
+                        addRequired(eh, .equal)
+                        continue
+                    }
                     var ex = Cassowary.Expression(vv.left, constant: -Double(f.origin.x))
                     ex.add(sup.left, -1)
                     addRequired(ex, .equal)

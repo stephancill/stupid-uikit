@@ -494,6 +494,12 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
         var orthogonalOffset: CGFloat
         var items: [Placed]
         var supplementaries: [Placed]
+        /// The section's `NSCollectionLayoutSection.list(using:)`
+        /// configuration, so a section-provider layout self-sizes its list
+        /// sections as `init(list:)` does.
+        var list: UICollectionLayoutListConfiguration? = nil
+        /// The list header's layout size was estimated (self-sizing).
+        var estimatedHeader = false
     }
 
     private var sections: [SectionCache] = []
@@ -506,6 +512,27 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
 
     private var fittedListHeights: [IndexPath: CGFloat] = [:]
     private var fittedListWidth: CGFloat = -1
+    /// Self-sized heights of estimated boundary headers, by section.
+    private var fittedHeaderHeights: [Int: CGFloat] = [:]
+
+    /// The list configuration of section `section` as last prepared, from
+    /// `init(list:)` or a section provider's `.list(using:)` section.
+    final func _listConfiguration(forSection section: Int) -> UICollectionLayoutListConfiguration? {
+        guard section >= 0, section < sections.count else { return _storedListConfiguration }
+        return sections[section].list ?? _storedListConfiguration
+    }
+
+    /// Whether section `section`'s boundary header is self-sizing.
+    final func _hasEstimatedHeader(inSection section: Int) -> Bool {
+        section >= 0 && section < sections.count && sections[section].estimatedHeader
+    }
+
+    func _noteFittedHeaderHeight(_ height: CGFloat, inSection section: Int) -> Bool {
+        let h = snap(height)
+        if fittedHeaderHeights[section] == h { return false }
+        fittedHeaderHeights[section] = h
+        return true
+    }
 
     func _noteFittedListHeight(_ height: CGFloat, at indexPath: IndexPath) -> Bool {
         let h = snap(height)
@@ -560,6 +587,7 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
         preparedBoundsSize = cv.bounds.size
         if cv.bounds.width != fittedListWidth {
             fittedListHeights.removeAll()
+            fittedHeaderHeights.removeAll()
             fittedListWidth = cv.bounds.width
         }
         let container = NSCollectionLayoutContainer(contentSize: cv.bounds.size,
@@ -623,6 +651,9 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
                                     containerWidth: spec.supplementariesFollowContentInsets ? contentW : containerW,
                                     containerHeight: env.container.effectiveContentSize.height)
             headerHeight = hSize.height
+            if header.layoutSize.heightDimension.isEstimated, let fitted = fittedHeaderHeights[index] {
+                headerHeight = fitted
+            }
             let hx: CGFloat = spec.supplementariesFollowContentInsets ? physicalLeading : 0
             let hw = spec.supplementariesFollowContentInsets ? contentW : containerW
             headerPlaced = Placed(
@@ -651,7 +682,9 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
                 let path = IndexPath(item: i, section: index)
                 var h = fittedListHeights[path]
                     ?? UICollectionViewListCell.estimatedRowHeight(for: listCfg.appearance)
-                if fittedListHeights[path] == nil, i == 0 {
+                // A section with its own header has no first-row padding:
+                // the header heads the section instead.
+                if fittedListHeights[path] == nil, i == 0, headerPlaced == nil {
                     h += UICollectionViewListCell.headerTopPadding(for: listCfg.appearance)
                 }
                 h = snap(h)
@@ -713,6 +746,11 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
             orthogonalOffset: 0,
             items: [],
             supplementaries: [])
+        cache.list = spec._listConfiguration
+        cache.estimatedHeader = spec.boundarySupplementaryItems.contains {
+            ($0.alignment == .top || $0.alignment == .topLeading || $0.alignment == .topTrailing)
+                && $0.layoutSize.heightDimension.isEstimated
+        }
 
         if let headerPlaced {
             var h = headerPlaced
