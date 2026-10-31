@@ -51,6 +51,10 @@ public struct _OpenContentUnavailableView<LabelContent: _OpenView,
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
+        if OpenUIKitRuntime.systemFontCut == .iOS,
+           let parts = (label as? _OpenContentUnavailableLabelParts)?._contentUnavailableParts() {
+            return _iOSNode(icon: parts.icon, title: parts.title, iconHeight: parts.iconHeight)
+        }
         var children: [_OpenViewNode] = [_OpenViewNode(.spacer(minLength: 0))]
         children.append(
             _OpenGraphContext.withStructuralScope(.sectionHeader) {
@@ -75,6 +79,90 @@ public struct _OpenContentUnavailableView<LabelContent: _OpenView,
         return _OpenViewNode(
             .vStack(children: children, alignment: .center, spacing: 12)
         )
+    }
+}
+
+// iOS layout of a ContentUnavailableView whose label is a `Label`: the
+// symbol above the title, the description under it, all centred. MEASURED
+// stupid social's Search empty state, iPhone 16e @3x / iOS 27.0 (stupidsim
+// frames and ink): label element [123.83, 245.67, 142.33 x 86] = the symbol
+// (ink 38.33 x 38.67, secondary) then the title (title2 bold, frame bottom
+// 331.67); description [87, 334.67, 216 x 49] = two title3 lines in
+// secondary, 3 pt under the title. In its 320 pt list row the content sits
+// 26.67 pt above centre (row centre 328, content 245.67...383.67): iOS
+// keeps that much empty space below the description (the actions region).
+extension _OpenContentUnavailableView {
+    static var iOSSymbolPointSize: CGFloat { 42 }
+    static var iOSSymbolHeight: CGFloat { 39 }
+    /// 19.33 pt from the symbol's ink to the title's frame on iOS; the
+    /// guest's title2 line box puts its ink ~0.7 pt higher, hence 20.
+    static var iOSSymbolTitleGap: CGFloat { 20 }
+    static var iOSTitleDescriptionGap: CGFloat { 3 }
+    static var iOSBottomSpace: CGFloat { 26 + 2.0 / 3.0 }
+
+    func _iOSNode(icon: _OpenAnyView, title: _OpenAnyView, iconHeight: CGFloat?) -> _OpenViewNode {
+        var children: [_OpenViewNode] = [_OpenViewNode(.spacer(minLength: 0))]
+        children.append(
+            _OpenGraphContext.withStructuralScope(.sectionHeader) {
+                VStack(spacing: 0) {
+                    icon
+                        .font(.system(size: Self.iOSSymbolPointSize))
+                        .foregroundStyle(.secondary)
+                        .frame(height: iconHeight ?? Self.iOSSymbolHeight)
+                        // Decorative: the element is the title (iOS).
+                        .accessibilityHidden(true)
+                        .padding(.bottom, Self.iOSSymbolTitleGap)
+                    title
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                }
+                .accessibilityElement(children: .combine)
+                ._makeOpenUIKitNode()
+            }
+        )
+        if let description {
+            children.append(
+                _OpenGraphContext.withStructuralScope(.sectionContent) {
+                    description
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, Self.iOSTitleDescriptionGap)
+                        ._makeOpenUIKitNode()
+                }
+            )
+        }
+        if let actions {
+            children.append(
+                _OpenGraphContext.withStructuralScope(.sectionFooter) {
+                    actions._makeOpenUIKitNode()
+                }
+            )
+        }
+        children.append(Color.clear.frame(height: Self.iOSBottomSpace)._makeOpenUIKitNode())
+        children.append(_OpenViewNode(.spacer(minLength: 0)))
+        return _OpenViewNode(.vStack(children: children, alignment: .center, spacing: 0))
+    }
+}
+
+/// A `Label`'s title and icon, for layouts that arrange them themselves.
+@MainActor
+protocol _OpenContentUnavailableLabelParts {
+    func _contentUnavailableParts() -> (icon: _OpenAnyView, title: _OpenAnyView, iconHeight: CGFloat?)
+}
+
+extension _OpenLabel: _OpenContentUnavailableLabelParts {
+    func _contentUnavailableParts() -> (icon: _OpenAnyView, title: _OpenAnyView, iconHeight: CGFloat?) {
+        // A symbol the renderer draws by hand fills ~93 % of its box; size
+        // the box so its ink is the measured 38.33 x 38.67.
+        if let image = icon as? _OpenImage, case .system(let name) = image.source,
+           _openSymbolIsHandDrawn(name) {
+            let height: CGFloat = 41.5
+            let sized = image.resizable().scaledToFit()
+                .frame(width: height * 38.33 / 38.67, height: height)
+            return (_OpenAnyView(sized), _OpenAnyView(title), height)
+        }
+        return (_OpenAnyView(icon), _OpenAnyView(title), nil)
     }
 }
 
@@ -670,11 +758,13 @@ public struct _OpenLabeledContent<Label: _OpenView, Content: _OpenView>: _OpenVi
     }
 
     public var body: some _OpenView {
+        // One accessibility element ("Network, X"), as on iOS.
         HStack {
             label
             Spacer()
             content.foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -145,6 +145,9 @@ public final class UIImage: NSObject {
     /// The `systemName` this image was created with. Tab-bar chrome uses it
     /// to pick the filled sibling (clock → clock.fill) under the iOS cut.
     var _systemSymbolName: String?
+    /// `_systemSymbolName` for the SwiftUI layer (it compares toolbar items
+    /// across evaluations).
+    public var _openSystemSymbolName: String? { _systemSymbolName }
 
     /// Whether this image was created from the supported system-symbol
     /// provider. The flag is semantic metadata and is preserved by UIImage's
