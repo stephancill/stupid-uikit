@@ -555,6 +555,45 @@ if vendor_is_inrepo "$W" uikit "$UIKIT"; then
 fi
 assert_vendor_tree "$W" uikit "$UIKIT" "$EXPECTED_UIKIT_TREE" OpenUIKit
 assert_vendor_tree "$W" machorun "$MACHORUN" "$EXPECTED_INREPO_MACHORUN_TREE" machorun
+# BUILD THE IN-REPO MACHORUN USERLAND WHEN ITS SOURCES MOVED. The guest root
+# below is staged from machorun's built products (darwin/usr/lib, build/
+# machorun), which are git-ignored; nothing else in this pipeline built them,
+# so a tree that pulled a machorun/darwin/src change kept staging the old
+# libSystem (measured 2026-10-31: MACHORUN_WALL_CLOCK_START merged, the staged
+# libSystem.real predated it, and the pinned guest clock was silently absent).
+# Content-keyed through machorun's own stamps (scripts/check_stale.sh, written
+# by scripts/build.sh after each successful build): an artefact counts as
+# current only when its recorded input hash equals its sources' hash now; an
+# mtime-only "ok" (no stamp) is rebuilt once, which records the stamp.
+# External MACHORUN checkouts are the caller's to build.
+if vendor_is_inrepo "$W" machorun "$MACHORUN"; then
+    _mr_stale=$(bash "$MACHORUN/scripts/check_stale.sh" 2>&1 || true)
+    _mr_current() {
+        # Fixed-string fields, not a regex: "libc++" would be one.
+        printf '%s\n' "$_mr_stale" | awk -v art="$1" \
+            '$1 == art && $2 == "ok" && $3 == "sources" && $4 == "unchanged" { found = 1 } END { exit !found }'
+    }
+    if ! _mr_current build/machorun; then
+        echo "== machorun: loader sources changed (or unstamped); scripts/build.sh loader"
+        (cd "$MACHORUN" && bash scripts/build.sh loader)
+    fi
+    if ! _mr_current darwin/usr/lib/libSystem.B.dylib \
+        || ! _mr_current darwin/usr/lib/libc++.1.dylib \
+        || ! _mr_current darwin/usr/lib/libc++abi.dylib; then
+        echo "== machorun: darwin userland sources changed (or unstamped); scripts/build.sh darwin + tbd"
+        (cd "$MACHORUN" && bash scripts/build.sh darwin && bash scripts/build.sh tbd)
+    fi
+    _mr_stale=$(bash "$MACHORUN/scripts/check_stale.sh" 2>&1 || true)
+    for _mr_art in build/machorun darwin/usr/lib/libSystem.B.dylib darwin/usr/lib/libc++.1.dylib \
+        darwin/usr/lib/libc++abi.dylib; do
+        _mr_current "$_mr_art" || {
+            printf '%s\n' "$_mr_stale" >&2
+            echo "build_full: machorun $_mr_art is still not current after rebuilding it" >&2
+            exit 2
+        }
+    done
+    echo "   machorun loader + darwin userland current (content stamps)"
+fi
 SWIFT_CORE_RUNTIME_SOURCE=${SWIFT_CORE_RUNTIME_SOURCE:-$MACHORUN/darwin/usr/lib/swift/libswiftCore.dylib}
 SWIFT_CORE_RUNTIME_EXPECTED_SHA256=${SWIFT_CORE_RUNTIME_EXPECTED_SHA256:-}
 # REFUSE WITHOUT THE MOUNT, rather than silently building half a root.
@@ -616,6 +655,14 @@ base_runtime_key() {
     local f
     set -- "$MACHORUN/build/machorun" \
         "$BASE_RUNTIME_SOURCE/darwin/usr/lib/libswiftcompat.dylib"
+    # The machorun dylibs copied below (libc++abi, libobjc, ...) are part of
+    # the key too: a rebuilt one must restage, not only a moved loader.
+    for f in "$MACHORUN/darwin/usr/lib/"*.dylib; do
+        case "$(basename "$f")" in
+            libquartz.dylib|libSystem.B.dylib|libc++.1.dylib) continue ;;
+        esac
+        set -- "$@" "$f"
+    done
     for f in "$BASE_RUNTIME_SOURCE/darwin/usr/lib/swift/"*.dylib; do
         [ -e "$f" ] || continue
         [ "$(basename "$f")" = libswiftCore.dylib ] && continue

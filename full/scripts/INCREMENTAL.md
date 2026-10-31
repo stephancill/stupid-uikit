@@ -67,6 +67,17 @@ marker is still removed first and written last.
 input>)`, `pass (<why not memoized>)` or `fail`; the build ends with a
 `build_full: incremental steps hit=… miss=…` summary.
 
+## machorun's loader and userland
+
+The guest root is staged from machorun's built products (`machorun/build/machorun`,
+`machorun/darwin/usr/lib`), which are git-ignored. For the in-repo machorun, build_full asks
+`machorun/scripts/check_stale.sh` first: the loader and the darwin userland (libSystem.B, libc++.1,
+libc++abi) count as current only when the input hash `scripts/build.sh` recorded equals the hash of
+their sources now. Otherwise, or with no stamp, it runs `scripts/build.sh loader` or
+`scripts/build.sh darwin` + `tbd`, and stops if they are still not current. Before this, a pulled
+`machorun/darwin/src` change (the pinned guest clock) staged the old libSystem silently. libobjc
+and libquartz are not rebuilt here (`scripts/build.sh objc4` / `quartz`).
+
 ## Parallel work (always on)
 
 * FoundationInternationalization's 474 ICU translation units (one alone takes
