@@ -959,7 +959,8 @@ open class UIView: UIResponder, CALayerDelegate {
     final func _iosGlassPath(in bounds: CGRect) -> Path {
         if let sheet = self as? _UIPageSheetView { return sheet._sheetGlassPath(in: bounds) }
         return UIRenderer.layerRoundedRect(bounds, cornerRadius: layer.cornerRadius,
-                                           maskedCorners: layer.maskedCorners)
+                                           maskedCorners: layer.maskedCorners,
+                                           cornerRadii: layer._cornerRadii)
     }
     /// Hit-testing / touch delivery opt-out. UIKit defaults: true for
     /// UIView/controls, false for UILabel and UIImageView.

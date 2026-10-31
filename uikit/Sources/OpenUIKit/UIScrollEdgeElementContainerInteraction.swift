@@ -180,10 +180,17 @@ open class UIScrollEdgeElementContainerInteraction: NSObject, UIInteraction {
             pocketView.isHard = hard
             pocketView.setNeedsDisplay()
         }
-        let offset = scroll.contentOffset
+        // Engaged while content is under the container: past its inner edge
+        // by more than half a point. Not "off the rest offset": a chat that
+        // rests a fraction short of its maximum offset with its last message
+        // above the composer has nothing under it, and iOS 27 shows no
+        // pocket there (stupid social's chat, simulator). At a Signal-style
+        // rest (inset by the container) both rules agree.
+        let threshold: CGFloat = 0.5
+        let contentBottom = scroll.contentSize.height
         let engaged = edge == .top
-            ? offset.y > scroll.minContentOffset.y + 0.5
-            : offset.y < scroll.maxContentOffset.y - 0.5
+            ? band.maxY > threshold && contentBottom > band.minY
+            : contentBottom > band.minY + threshold && band.maxY > 0
         pocketView.isHidden = !engaged
         scroll.bringSubviewToFront(pocketView)
         scroll._frontIndicatorsOverPockets()

@@ -892,8 +892,8 @@ extension OpenUIKitRuntime {
 /// (see `_UIBarMetrics.platterRimWidth`). Light appearance only: the dark
 /// rim is not measured.
 @preconcurrency @MainActor
-final class _UIBarPlatterRimView: UIView {
-    override init(frame: CGRect) {
+public final class _UIBarPlatterRimView: UIView {
+    public override init(frame: CGRect) {
         super.init(frame: frame)
         isOpaque = false
         backgroundColor = .clear
@@ -902,7 +902,7 @@ final class _UIBarPlatterRimView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not decodable") }
+    public required init?(coder: NSCoder) { fatalError("not decodable") }
 
     /// The rim lies OUTSIDE the platter's outline: its view is the platter's
     /// bounds grown by the rim width, and it draws its own outer band.
@@ -911,17 +911,17 @@ final class _UIBarPlatterRimView: UIView {
     /// at 46), i.e. the band [15.5, 16] pt; the glass fill starts at 16. The
     /// toolbar capsule's band is likewise [266.83, 267.33] / [374, 374.5],
     /// so its frame is [267.33, 374] (106.67 wide, trailing margin 16).
-    static func frame(around platterBounds: CGRect) -> CGRect {
+    public static func frame(around platterBounds: CGRect) -> CGRect {
         let w = _UIBarMetrics.platterRimWidth
         return platterBounds.insetBy(dx: -w, dy: -w)
     }
 
-    static func applies(to platter: UIView) -> Bool {
+    public static func applies(to platter: UIView) -> Bool {
         OpenUIKitRuntime.chromeRelease == .iOS27 && platter._usesIOSGlass
             && platter.traitCollection.userInterfaceStyle != .dark
     }
 
-    override func drawContent(in canvas: Canvas, bounds: CGRect) {
+    public override func drawContent(in canvas: Canvas, bounds: CGRect) {
         let w = _UIBarMetrics.platterRimWidth
         let r = min(bounds.width, bounds.height) / 2
         guard r > w, bounds.width >= bounds.height else { return }
@@ -939,6 +939,64 @@ final class _UIBarPlatterRimView: UIView {
             start: CGPoint(x: bounds.minX, y: bounds.midY),
             end: CGPoint(x: bounds.maxX, y: bounds.midY), in: bounds)
         canvas.restore()
+    }
+
+    /// The rim around any rounded rectangle (`radius` clamped to a capsule):
+    /// the 0.5 pt band just outside `platterBounds`, with the same
+    /// horizontal side-to-flat gradient as a bar platter's.
+    static func drawRim(in canvas: Canvas, around platterBounds: CGRect, radius: CGFloat) {
+        let w = _UIBarMetrics.platterRimWidth
+        let r = max(0, min(radius, min(platterBounds.width, platterBounds.height) / 2))
+        let outer = frame(around: platterBounds)
+        var band = roundedOutline(outer, radius: r + w, clockwise: true)
+        band.elements += roundedOutline(platterBounds, radius: r, clockwise: false).elements
+        let side = CanvasColor(red: 0, green: 0, blue: 0, alpha: _UIBarMetrics.platterRimSideAlpha)
+        let flat = CanvasColor(red: 0, green: 0, blue: 0, alpha: _UIBarMetrics.platterRimFlatAlpha)
+        let end = min(0.5, (r + w) / outer.width)
+        canvas.save()
+        canvas.clip(to: band)
+        canvas.drawLinearGradient(
+            colors: [side, flat, flat, side], locations: [0, end, 1 - end, 1],
+            start: CGPoint(x: outer.minX, y: outer.midY),
+            end: CGPoint(x: outer.maxX, y: outer.midY), in: outer)
+        canvas.restore()
+    }
+
+    /// A rounded rectangle as lines and quarter arcs, clockwise on screen
+    /// (y down) from the top edge's left end, or the same outline reversed.
+    static func roundedOutline(_ rect: CGRect, radius r: CGFloat, clockwise: Bool) -> Path {
+        let k = r * 0.5522847498
+        let (x0, x1, y0, y1) = (rect.minX, rect.maxX, rect.minY, rect.maxY)
+        // (end point, curve controls or nil for a line), clockwise.
+        let segments: [(CGPoint, (CGPoint, CGPoint)?)] = [
+            (CGPoint(x: x1 - r, y: y0), nil),
+            (CGPoint(x: x1, y: y0 + r), (CGPoint(x: x1 - r + k, y: y0), CGPoint(x: x1, y: y0 + r - k))),
+            (CGPoint(x: x1, y: y1 - r), nil),
+            (CGPoint(x: x1 - r, y: y1), (CGPoint(x: x1, y: y1 - r + k), CGPoint(x: x1 - r + k, y: y1))),
+            (CGPoint(x: x0 + r, y: y1), nil),
+            (CGPoint(x: x0, y: y1 - r), (CGPoint(x: x0 + r - k, y: y1), CGPoint(x: x0, y: y1 - r + k))),
+            (CGPoint(x: x0, y: y0 + r), nil),
+            (CGPoint(x: x0 + r, y: y0), (CGPoint(x: x0, y: y0 + r - k), CGPoint(x: x0 + r - k, y: y0))),
+        ]
+        let start = CGPoint(x: x0 + r, y: y0)
+        var path = Path()
+        path.move(to: start)
+        if clockwise {
+            for (p, controls) in segments {
+                if let (c1, c2) = controls { path.addCurve(to: p, control1: c1, control2: c2) }
+                else { path.addLine(to: p) }
+            }
+        } else {
+            // Walk back: each segment from its end to the previous end,
+            // with its controls swapped.
+            for i in stride(from: segments.count - 1, through: 0, by: -1) {
+                let target = i > 0 ? segments[i - 1].0 : start
+                if let (c1, c2) = segments[i].1 { path.addCurve(to: target, control1: c2, control2: c1) }
+                else { path.addLine(to: target) }
+            }
+        }
+        path.close()
+        return path
     }
 
     /// A horizontal capsule (width >= height) as lines and quarter arcs.

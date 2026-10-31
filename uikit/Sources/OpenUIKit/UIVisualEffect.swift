@@ -868,6 +868,10 @@ open class UIVisualEffectView: UIView, _UIViewSubviewAdmission {
     func _canvasBackdropConfiguration(
         for backdrop: _UIVisualEffectBackdropView
     ) -> CanvasBackdropFilterConfiguration? {
+        // A glass platter applies its material on its own layer
+        // (`_UIGlassMaterial`), clipped to its corners; the backdrop view
+        // must not paint a second, square copy.
+        guard !_isIOSGlassPlatter else { return nil }
         guard backdrop === backdropView,
               let filters = backdrop.layer.filters,
               !filters.isEmpty
@@ -999,7 +1003,50 @@ open class UIVisualEffectView: UIView, _UIViewSubviewAdmission {
         if let storedContentView, storedContentView.superview === self {
             bringSubviewToFront(storedContentView)
         }
+        _updateIOSGlassPlatter()
         setNeedsDisplay()
+    }
+
+    // MARK: iOS 27 glass platter
+
+    /// True while this view draws as an iOS 27 glass platter: an untinted
+    /// `UIGlassEffect` on the iOS cut under the iOS 27 chrome.
+    private(set) var _isIOSGlassPlatter = false
+
+    /// A `UIGlassEffect` view on iOS 27 is the same light glass as the bar
+    /// platters: the measured material clipped to the view's corners
+    /// (`cornerConfiguration` or `layer.cornerRadius`), the grey rim just
+    /// outside its outline and the light platter shadow. MEASURED iOS 27.0
+    /// simulator, iPhone 16e @3x (stupid social's chat): the "Today" date
+    /// capsule (radius 13, 25.67 pt tall) and the composer pill (radius 22)
+    /// show a grey rim darkest at their left and right extremes (177 and
+    /// 221 over white at 3x), a near-white interior and a faint shadow
+    /// below; the guest drew a flat, square 251 rectangle. A tinted glass
+    /// keeps the tinted backdrop filter (not measured as a platter).
+    private func _updateIOSGlassPlatter() {
+        let platter = OpenUIKitRuntime.systemFontCut == .iOS
+            && OpenUIKitRuntime.chromeRelease == .iOS27
+            && (effect as? UIGlassEffect).map { $0.tintColor == nil } == true
+        guard platter != _isIOSGlassPlatter else { return }
+        _isIOSGlassPlatter = platter
+        _usesIOSGlass = platter
+        if platter {
+            layer._shadowColorValue = CanvasColor(red: 0, green: 0, blue: 0, alpha: 1)
+            layer.shadowOpacity = _UIBarMetrics.platterShadowOpacity
+            layer.shadowRadius = _UIBarMetrics.shadowRadius
+            layer.shadowOffset = _UIBarMetrics.shadowOffset
+        } else {
+            layer.shadowOpacity = 0
+        }
+    }
+
+    /// The rim (light only), outside the outline like `_UIBarPlatterRimView`.
+    open override func drawContent(in canvas: Canvas, bounds: CGRect) {
+        super.drawContent(in: canvas, bounds: bounds)
+        guard _isIOSGlassPlatter, traitCollection.userInterfaceStyle != .dark,
+              bounds.width > 0, bounds.height > 0 else { return }
+        let radius = layer._cornerRadii?.maxRadius ?? layer.cornerRadius
+        _UIBarPlatterRimView.drawRim(in: canvas, around: bounds, radius: radius)
     }
 
     /// Native UIKit raises NSInternalInconsistencyException for this API and

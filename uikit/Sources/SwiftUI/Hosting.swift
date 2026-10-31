@@ -4695,8 +4695,19 @@ private enum _ViewRenderer {
                         proposed: rect.size,
                         environment: environment
                     )
+                    // iOS 27: a principal toolbar item's glass is the bar's
+                    // 44 pt platter height, centred on the 36 pt title host
+                    // (MEASURED iPhone 16e @3x, iOS 27.0, stupid social's
+                    // chat title pill: glass [47, 91] like the back button,
+                    // rim just outside; its content, 42 pt with padding, is
+                    // centred in it). The guest had sized it to the content
+                    // with its vertical padding collapsed (34.67 pt).
+                    let principalPlatter = environment.collapsesToolbarVerticalPadding
+                        && OpenUIKitRuntime.chromeRelease == .iOS27
+                    let glassHeight = principalPlatter
+                        ? max(measured.height, _UIBarMetrics.platterHeight) : measured.height
                     let glassRect = alignedRect(
-                        size: CGSize(width: measured.width, height: measured.height),
+                        size: CGSize(width: measured.width, height: glassHeight),
                         in: rect,
                         alignment: .center
                     )
@@ -4711,6 +4722,11 @@ private enum _ViewRenderer {
                     glass.layer.shadowOffset = _UIBarMetrics.shadowOffset
                     glass.accessibilityIdentifier = "SwiftUI.GlassEffect"
                     surface.addSubview(glass)
+                    if _UIBarPlatterRimView.applies(to: glass) {
+                        let rim = _UIBarPlatterRimView()
+                        rim.frame = _UIBarPlatterRimView.frame(around: glass.bounds)
+                        glass.addSubview(rim)
+                    }
                     place(content, in: glass.bounds, on: glass, environment: environment)
                 } else {
                     let effectView = UIVisualEffectView(
