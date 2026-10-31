@@ -26,8 +26,10 @@ public enum ImageCodec {
         guard width > 0, height > 0 else { return nil }
         let bitmap = Bitmap(width: width, height: height)
         let count = width * height * 4
+        // One bulk copy: the guest compiles OpenUIKit without optimisation, where a per-byte loop
+        // costs seconds for a photo-sized image (4.7M bounds-checked subscripts at 1080x1080).
         bitmap.pixels.withUnsafeMutableBufferPointer { dst in
-            for i in 0..<count { dst[i] = px[i] }
+            dst.baseAddress!.update(from: px, count: count)
         }
         return bitmap
     }
