@@ -119,6 +119,31 @@ struct SeparatedToolbarStack: View {
         check(false, "grouped toolbar installed no trailing items")
     }
 
+    // 2b. iOS 27 chrome: the magnifier is a symbol image item like the gear,
+    //     each grouped item is a UIKit image item (image + 2 x 11), the rim
+    //     lies 0.5 pt outside the shared platter (docs/ROOT_SCREEN_RESIDUALS.md).
+    OpenUIKitRuntime.chromeRelease = .iOS27
+    let grouped27 = UIHostingController(rootView: GroupedToolbarStack())
+    if let nav = navigation(grouped27), let items = nav.topViewController?.navigationItem.rightBarButtonItems {
+        check(items.count == 2 && items.allSatisfy { $0.image?.isSymbolImage == true && $0._sharesSwiftUISymbolPlatter },
+              "iOS 27: both group items are symbol image items")
+        let views = nav.navigationBar.rightItemViews
+        let widths = views.map { $0.frame.width }
+        let expected = views.map { max(22, $0.contentSize.width) + 22 }
+        check(views.count == 2 && zip(widths, expected).allSatisfy { near($0, $1) },
+              "iOS 27: item width is image + 22: \(widths) vs \(expected)")
+        check(views.count == 2 && near(views[0].frame.maxX, 390 - 16) && near(views[0].frame.minX - views[1].frame.maxX, 8),
+              "iOS 27: trailing margin 16, gap 8")
+        let platters = nav.navigationBar.sharedPlatterViews
+        check(platters.count == 1 && near(platters[0].frame.width, widths.reduce(8, +)),
+              "iOS 27: platter spans the items: \(platters.map(\.frame))")
+        check(platters.count == 1 && platters[0].rim.frame == platters[0].bounds.insetBy(dx: -0.5, dy: -0.5)
+              && !platters[0].rim.isHidden, "iOS 27: rim 0.5 pt outside the platter")
+    } else {
+        check(false, "iOS 27 grouped toolbar installed no trailing items")
+    }
+    OpenUIKitRuntime.chromeRelease = .iOS26
+
     // 3. A ToolbarSpacer separates runs: two isolated 44 pt platters.
     let separated = UIHostingController(rootView: SeparatedToolbarStack())
     if let nav = navigation(separated), let items = nav.topViewController?.navigationItem.rightBarButtonItems {
@@ -144,7 +169,7 @@ struct SeparatedToolbarStack: View {
     check(window.subviews.last === bar, "status bar is topmost")
     check(window._installScreenshotStatusBar() === bar, "installing again reuses the bar")
 
-    withExtendedLifetime((grouped, separated, window)) {}
+    withExtendedLifetime((grouped, grouped27, separated, window)) {}
 }
 
 let failures = MainActor.assumeIsolated { () -> Int in

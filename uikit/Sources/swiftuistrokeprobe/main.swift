@@ -296,7 +296,7 @@ enum Compositor: String, CaseIterable { case renderPass, layers }
     }
     OpenUIKitRuntime.openSymbolFallback = false
 
-    // 9. The iOS 27 platter rim: 0.5 pt inside the capsule, darkest at the ends.
+    // 9. The iOS 27 platter rim: 0.5 pt outside the capsule, darkest at the ends.
     OpenUIKitRuntime.systemFontCut = .iOS
     CanvasBackendSelection.current = .quartz
     for release in [OpenUIKitChromeRelease.iOS26, .iOS27] {
@@ -310,7 +310,8 @@ enum Compositor: String, CaseIterable { case renderPass, layers }
             check(platter.layer.shadowOpacity == _UIBarMetrics.shadowOpacity, "rim: iOS 26 shadow unchanged")
             continue
         }
-        check(!rim.isHidden && rim.frame == platter.bounds, "rim: shown over the iOS 27 platter")
+        check(!rim.isHidden && rim.frame == platter.bounds.insetBy(dx: -0.5, dy: -0.5),
+              "rim: shown around the iOS 27 platter, 0.5 pt outside it: \(rim.frame)")
         check(platter.layer.shadowOpacity == _UIBarMetrics.iOS27ShadowOpacity, "rim: iOS 27 shadow is lighter")
         let b = render(rim, .renderPass)
         let side = Int(pixel(b, 0, 21.75)[3]), flat = Int(pixel(b, 54, 0)[3])

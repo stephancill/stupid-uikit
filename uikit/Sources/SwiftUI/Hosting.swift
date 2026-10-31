@@ -1304,7 +1304,7 @@ private func _openFirstButtonAction(
 private func _openImageBarButtonItem(from node: _OpenViewNode) -> UIBarButtonItem? {
     guard let name = _openFirstSystemImageName(in: node) else { return nil }
     let item: UIBarButtonItem
-    if name == "magnifyingglass" {
+    if name == "magnifyingglass", OpenUIKitRuntime.chromeRelease != .iOS27 {
         item = UIBarButtonItem(barButtonSystemItem: .search, target: nil, action: nil)
     } else if OpenUIKitRuntime.systemFontCut == .iOS {
         // MEASURED HackersRowMetrics / realapp_hackers_feed_light,
@@ -1314,6 +1314,10 @@ private func _openImageBarButtonItem(from node: _OpenViewNode) -> UIBarButtonIte
         // alignment box is 27.333 x 27, not the blank custom symbol's
         // 44 x 44. Use the existing oracle mask through UIKit's image
         // item path; unsupported symbols keep their custom view.
+        // iOS 27 (chromeRelease .iOS27): magnifyingglass takes this path
+        // too. MEASURED stupid social's toolbar, iPhone 16e @3x / iOS 27.0:
+        // its ink is 21 x 21 pt, the weight of this 17 / medium / large
+        // symbol, not the lighter 20.33 x 18.67 `.search` bar stamp.
         let configuration = UIImage.SymbolConfiguration(
             pointSize: 17, weight: .medium, scale: .large)
         guard let image = UIImage(systemName: name, withConfiguration: configuration)

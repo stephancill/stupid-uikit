@@ -56,6 +56,10 @@ same column moved from [14, 492, 38, 516] to [14.5, 492.5, 37.5, 515.5] (iOS [14
 
 ## iOS 27 platter rim
 
+Corrected in `ROOT_SCREEN_RESIDUALS.md`: the rim is a 0.5 pt band just *outside* the platter's
+outline (a lone 44 pt button shows it at [15.5, 16] pt), so the toolbar capsule's frame is
+106.67 pt wide at the 16 pt margin, not 108. The colours and shadow below stand.
+
 `OpenUIKitRuntime.chromeRelease` (`.iOS26` default, `.iOS27`): the iOS 27 glass platter (shared
 toolbar platters and glass item platters, light appearance) draws a 0.5 pt rim inside its
 outline, black at 0.30 at the capsule's left and right extremes and 0.10 along the straight

@@ -460,8 +460,25 @@ public enum _UIBarMetrics {
     /// platter on either side — that is an 8 pt gap between the views.
     public static let groupedImageGap: CGFloat = 8
     /// Item-view width of a SwiftUI toolbar symbol in a shared-platter run
-    /// (see `UIBarButtonItem._sharesSwiftUISymbolPlatter`).
+    /// (see `UIBarButtonItem._sharesSwiftUISymbolPlatter`) on the iOS 26
+    /// chrome. On the iOS 27 chrome the items are sized like UIKit image
+    /// items instead (`iOS27GroupedSymbolWidth`).
     public static let swiftUIGroupedSymbolWidth: CGFloat = 50
+    /// iOS 27 (`OpenUIKitRuntime.chromeRelease == .iOS27`): a SwiftUI
+    /// symbol in a shared-platter run is as wide as a UIKit image item,
+    /// `max(22, image width) + 2 × 11`. MEASURED stupid social's
+    /// two-symbol ToolbarItemGroup, iPhone 16e @3x / iOS 27.0: the platter
+    /// frame is [267.33, 47, 106.67, 44] (its rim lies outside it,
+    /// `_UIBarPlatterRimView.frame`), trailing margin 16. The magnifier's
+    /// 17 / medium / large image is 25.67 pt wide (harvested 3x mask, ink
+    /// centred in it), so its item is [267.33, 315] and its ink centre
+    /// 291.17: exactly the reference's. Equal 49.33 pt items put that ink
+    /// at 292.33. The gear's item then ends at 374 with its ink centre at
+    /// the reference's 348.33 for a ~29.3 pt image (iOS 27 redrew `gear`;
+    /// its ink is 24.67 wide there, 23.67 in the iOS 26.1 mask).
+    public static func iOS27GroupedSymbolWidth(imageWidth: CGFloat) -> CGFloat {
+        max(imageContentMinWidth, imageWidth) + 2 * imageContentInset
+    }
     /// Gap accounting (measured, `toolbar_basic`): a 12 pt gap separates
     /// consecutive bar items, EXCEPT after a space item — a fixed space of
     /// 40 pt shows up as 12 + 40 before the next item, and the item after a
@@ -501,11 +518,11 @@ public enum _UIBarMetrics {
         OpenUIKitRuntime.chromeRelease == .iOS27 ? iOS27ShadowOpacity : shadowOpacity
     }
 
-    /// iOS 27 draws a thin grey rim just inside a glass platter's outline,
+    /// iOS 27 draws a thin grey rim just outside a glass platter's outline,
     /// darkest where the outline is vertical. MEASURED stupid social's
-    /// toolbar capsule (108 x 44 pt), iPhone 16e @3x / iOS 27.0, light, over
-    /// white: a 0.5 pt line inside the edge; at the capsule's left/right
-    /// extremes it darkens the 250 glass to 175 (black at 0.30), along the
+    /// toolbar capsule (106.67 x 44 pt), iPhone 16e @3x / iOS 27.0, light, over
+    /// white: a 0.5 pt line outside the edge (`_UIBarPlatterRimView.frame`); at the
+    /// capsule's left/right extremes it darkens the 250 glass to 175 (black at 0.30), along the
     /// straight top and bottom edges by about 25 (black at 0.10). Between
     /// them it follows the outline normal's horizontal component, which on
     /// a semicircular end is linear in x — one horizontal gradient.
@@ -700,6 +717,10 @@ final class _UIBarButtonItemView: UIControl {
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         if OpenUIKitRuntime.systemFontCut == .iOS, item._sharesSwiftUISymbolPlatter {
+            if OpenUIKitRuntime.chromeRelease == .iOS27, contentSize.width > 0 {
+                return CGSize(width: _UIBarMetrics.iOS27GroupedSymbolWidth(imageWidth: contentSize.width),
+                              height: platterHeight)
+            }
             return CGSize(width: _UIBarMetrics.swiftUIGroupedSymbolWidth, height: platterHeight)
         }
         if item.customView != nil {
@@ -750,7 +771,7 @@ final class _UIBarButtonItemView: UIControl {
             || !showsPlatter || !appliesRefraction || _platterHiddenByGroup
         platter.sendSubviewToBack(refractionHost)   // under the content
         if rim.superview !== platter { platter.addSubview(rim) }
-        rim.frame = platter.bounds
+        rim.frame = _UIBarPlatterRimView.frame(around: platter.bounds)
         rim.isHidden = !_UIBarPlatterRimView.applies(to: platter)
         if let cv = item.customView {
             if cv.superview !== self { addSubview(cv) }
@@ -842,7 +863,7 @@ final class _UIBarSharedPlatterView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.shadowOpacity = _UIBarMetrics.platterShadowOpacity
-        rim.frame = bounds
+        rim.frame = _UIBarPlatterRimView.frame(around: bounds)
         rim.isHidden = !_UIBarPlatterRimView.applies(to: self)
         refractionHost.frame = bounds
         refractionBand.frame = CGRect(x: 0, y: 0, width: bounds.width,
@@ -867,7 +888,7 @@ extension OpenUIKitRuntime {
     public static var chromeRelease: OpenUIKitChromeRelease = .iOS26
 }
 
-/// The grey rim iOS 27 draws just inside a glass platter's capsule outline
+/// The grey rim iOS 27 draws just outside a glass platter's capsule outline
 /// (see `_UIBarMetrics.platterRimWidth`). Light appearance only: the dark
 /// rim is not measured.
 @preconcurrency @MainActor
@@ -883,6 +904,18 @@ final class _UIBarPlatterRimView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decodable") }
 
+    /// The rim lies OUTSIDE the platter's outline: its view is the platter's
+    /// bounds grown by the rim width, and it draws its own outer band.
+    /// MEASURED (iPhone 16e @3x, iOS 27.0): a lone 44 pt back button at
+    /// x 16 shows its full-strength rim pixel at 47 (and a half-covered one
+    /// at 46), i.e. the band [15.5, 16] pt; the glass fill starts at 16. The
+    /// toolbar capsule's band is likewise [266.83, 267.33] / [374, 374.5],
+    /// so its frame is [267.33, 374] (106.67 wide, trailing margin 16).
+    static func frame(around platterBounds: CGRect) -> CGRect {
+        let w = _UIBarMetrics.platterRimWidth
+        return platterBounds.insetBy(dx: -w, dy: -w)
+    }
+
     static func applies(to platter: UIView) -> Bool {
         OpenUIKitRuntime.chromeRelease == .iOS27 && platter._usesIOSGlass
             && platter.traitCollection.userInterfaceStyle != .dark
@@ -892,7 +925,7 @@ final class _UIBarPlatterRimView: UIView {
         let w = _UIBarMetrics.platterRimWidth
         let r = min(bounds.width, bounds.height) / 2
         guard r > w, bounds.width >= bounds.height else { return }
-        // The 0.5 pt band inside the capsule: the outline clockwise, the
+        // The 0.5 pt band inside the rim view (outside the platter): the outline clockwise, the
         // inset outline counter-clockwise (nonzero leaves the inside out).
         var band = Self.capsule(bounds, clockwise: true)
         band.elements += Self.capsule(bounds.insetBy(dx: w, dy: w), clockwise: false).elements

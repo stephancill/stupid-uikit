@@ -48,6 +48,11 @@ large-title zone, 16 pt side margin, 8 pt grouped gap) are UIKit's measured iOS 
 match the iOS 27 screenshot to within 1 pt. The 50 pt grouped SwiftUI item width and the status
 bar geometry are measured on iOS 27 only.
 
+Revised in `ROOT_SCREEN_RESIDUALS.md`: the iOS 27 rim lies outside the platter, so the reference
+capsule is a 106.67 pt frame at the 16 pt margin; on the iOS 27 chrome grouped SwiftUI symbols are
+UIKit image items (image width + 22) and `magnifyingglass` is a symbol image item, not the `.search`
+stamp. The iOS 26 chrome keeps the 50 pt items.
+
 ## Verification
 
 - `swift run swiftuinavchromeprobe` (uikit package, native): display modes, ToolbarItemGroup
