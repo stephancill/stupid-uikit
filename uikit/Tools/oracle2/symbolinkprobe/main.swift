@@ -1,5 +1,6 @@
 // SymbolInkProbe on REAL iOS: harvests per-symbol coverage masks from real
-// UIKit on the iOS 26 simulator, in the shape Resources/symbol_ink_ios.json
+// UIKit on the iOS simulator (iOS 26.1 originally; iOS 27.0 overlay since
+// 2026-10-31, docs/SYMBOL_INK_IOS27.md), in the shape Resources/symbol_ink_ios.json
 // carries (key "name|pointSize|weight|scale|phase" -> {pw, ph, w, h, ox, oy, m}).
 //
 // Method (same as the tab-bar harvest, docs/agent_reports/symbols-tabbar.md):
@@ -12,6 +13,12 @@
 // Also dumps live UIImageView.preferredSymbolConfiguration from a tab bar,
 // a nav-bar button, and an unconfigured UIImageView, plus each
 // UIImage.configuration, so the configuration table is measured, not guessed.
+//
+// Lifecycle: iOS 27 traps at launch in
+// UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption for an app
+// without scene lifecycle, so the probe declares a UIApplicationSceneManifest
+// (SymbolInkProbe-Info.plist) whose delegate, SymbolInkProbeSceneDelegate,
+// builds the window on its UIWindowScene and runs the harvest (as inkprobe).
 //
 // Output: <Documents>/symbol_ink_ios.json, symbol_configs.json, then DONE.
 // Run: scripts/symbol_ink_probe_sim.sh <outdir>
@@ -240,11 +247,29 @@ func harvestOne(name: String, configuration: UIImage.SymbolConfiguration?,
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
-    var window: UIWindow?
-
     func application(_ app: UIApplication,
                      didFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let w = UIWindow(frame: UIScreen.main.bounds)
+        true
+    }
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let c = UISceneConfiguration(name: "Default", sessionRole: connectingSceneSession.role)
+        c.delegateClass = SymbolInkProbeSceneDelegate.self
+        return c
+    }
+}
+
+@objc(SymbolInkProbeSceneDelegate)
+final class SymbolInkProbeSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = scene as? UIWindowScene else {
+            fatalError("symbolinkprobe: not a UIWindowScene")
+        }
+        let w = UIWindow(windowScene: windowScene)
         window = w
         let vc = UIViewController()
         w.rootViewController = vc
@@ -451,8 +476,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             "version": 2,
             "calibration": "label-opaque",
             "device": UIDevice.current.systemVersion,
+            "deviceModel": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? UIDevice.current.model,
+            "deviceName": ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] ?? "",
+            "runtimeBuild": ProcessInfo.processInfo.environment["SIMULATOR_RUNTIME_BUILD_VERSION"] ?? "",
             "scale": Int(inkScale),
-            "probe": "symbolinkprobe UIImageView(image: UIImage(systemName:withConfiguration:)); UIColor.label over opaque white; coverage=255-gray; keys name|pointSize|weight|scale|phase; SE 2x / iPhone 16 3x / iOS 26.1",
+            "probe": "symbolinkprobe UIImageView(image: UIImage(systemName:withConfiguration:)); UIColor.label over opaque white; coverage=255-gray; keys name|pointSize|weight|scale|phase; \(UIDevice.current.systemName) \(UIDevice.current.systemVersion) at \(Int(inkScale))x",
             "configurations": configs.map { ["key": $0.key, "label": $0.label] },
             "names": present,
             "missingNames": missingNames,
@@ -463,7 +491,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         try! data.write(to: URL(fileURLWithPath: "\(docsDir)/symbol_ink_ios.json"))
         try! "ok".write(toFile: docsDir + "/DONE", atomically: true, encoding: .utf8)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
-        return true
     }
 }
 

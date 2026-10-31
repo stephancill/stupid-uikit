@@ -1,6 +1,7 @@
 // Native gate for the root-screen residuals pass (docs/ROOT_SCREEN_RESIDUALS.md).
 //
 //   swift run rootresidualsprobe     exits 0 when every check passes
+//   (run from uikit/: the symbol checks read Sources/OpenUIKit/Resources)
 import Foundation
 @testable import OpenUIKit
 @testable import SwiftUI
@@ -95,10 +96,62 @@ nonisolated func nonisolatedSecondary() -> _OpenHierarchicalShapeStyle { pickSty
     check(nonisolatedSecondary().level == .secondary, "generic .secondary is the hierarchical secondary")
 }
 
+// iOS 27 symbol ink overlay (docs/SYMBOL_INK_IOS27.md): the iOS 27 chrome
+// draws the overlay's names from the iOS 27.0 harvest; the iOS 26 chrome and
+// names outside the overlay keep the iOS 26.1 masks.
+@MainActor func symbolInkRelease() {
+    let savedRelease = OpenUIKitRuntime.chromeRelease
+    let savedScale = OpenUIKitRuntime.imageScreenScale
+    let savedCut = OpenUIKitRuntime.systemFontCut
+    defer {
+        OpenUIKitRuntime.chromeRelease = savedRelease
+        OpenUIKitRuntime.imageScreenScale = savedScale
+        OpenUIKitRuntime.systemFontCut = savedCut
+    }
+    OpenUIKitRuntime.systemFontCut = .iOS
+    let toolbar = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .large)
+    func image(_ name: String, _ release: OpenUIKitChromeRelease, _ scale: CGFloat,
+               _ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
+        OpenUIKitRuntime.chromeRelease = release
+        OpenUIKitRuntime.imageScreenScale = scale
+        return configuration.map { UIImage(systemName: name, withConfiguration: $0) }
+            ?? UIImage(systemName: name)
+    }
+    func px(_ image: UIImage?) -> [Int] {
+        guard let b = image?.bitmap else { return [] }
+        return [b.width, b.height]
+    }
+    func inkWidth(_ image: UIImage?) -> Int {
+        guard let b = image?.bitmap else { return 0 }
+        var lo = b.width, hi = -1
+        for y in 0..<b.height { for x in 0..<b.width where b.pixels[(y * b.width + x) * 4 + 3] > 0 {
+            lo = min(lo, x); hi = max(hi, x)
+        } }
+        return hi - lo + 1
+    }
+    // gear 17|medium|large: iOS 26.1 83 px (27.67 pt) at 3x, ink 71; iOS 27.0 87 px (29 pt), ink 75.
+    check(px(image("gear", .iOS26, 3, toolbar)) == [83, 83] && inkWidth(image("gear", .iOS26, 3, toolbar)) == 71,
+          "iOS 26 chrome: gear 3x is the iOS 26.1 mask: \(px(image("gear", .iOS26, 3, toolbar)))")
+    check(px(image("gear", .iOS27, 3, toolbar)) == [87, 87] && inkWidth(image("gear", .iOS27, 3, toolbar)) == 75,
+          "iOS 27 chrome: gear 3x is the iOS 27.0 mask: \(px(image("gear", .iOS27, 3, toolbar)))")
+    check(px(image("gear", .iOS26, 2, toolbar)) == [56, 55] && px(image("gear", .iOS27, 2, toolbar)) == [58, 58],
+          "gear 2x: iOS 26.1 56 x 55, iOS 27.0 58 x 58")
+    check(image("magnifyingglass", .iOS27, 3, toolbar)?.size == CGSize(width: 77.0 / 3, height: 76.0 / 3),
+          "iOS 27 chrome: magnifier 17|medium|large is 25.67 x 25.33 pt")
+    // 17|regular|unspecified: iOS 27 grew the alignment box 2 px at 3x.
+    check(px(image("chevron.right", .iOS26, 3)) == [38, 50] && px(image("chevron.right", .iOS27, 3)) == [38, 52],
+          "unconfigured chevron.right 3x: iOS 26.1 38 x 50, iOS 27.0 38 x 52")
+    // A harvested name outside the overlay draws the iOS 26.1 mask on both chromes.
+    let house26 = image("house", .iOS26, 3, toolbar)?.bitmap.pixels
+    let house27 = image("house", .iOS27, 3, toolbar)?.bitmap.pixels
+    check(house26 != nil && house26 == house27, "house (not in the overlay) is identical on both chromes")
+}
+
 let failures = MainActor.assumeIsolated { () -> Int in
     shapeStyleStatics()
     imageVariants()
     hierarchicalStyles()
+    symbolInkRelease()
     return Probe.failures
 }
 print(failures == 0 ? "ROOT_RESIDUALS_PROBE=PASS" : "ROOT_RESIDUALS_PROBE=FAIL (\(failures))")
