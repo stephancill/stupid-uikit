@@ -1808,11 +1808,91 @@ HIDDEN int mr_linux_clock_id(int darwin_id)
     }
 }
 
+/* ------------------------------------------------- the guest's wall clock
+ *
+ * MACHORUN_WALL_CLOCK_START=<unix seconds>[.<fraction, up to 9 digits>] starts
+ * the guest's wall clock (CLOCK_REALTIME, clock_gettime_nsec_np(REALTIME),
+ * gettimeofday, time) at that instant when the libSystem bootstrap runs; from
+ * there it advances with the host's realtime clock, as a device whose clock was
+ * set to that instant would. It is a constant offset, so intervals between
+ * wall-clock reads are the host's, and every monotonic clock (CLOCK_MONOTONIC,
+ * UPTIME_RAW, mach_absolute_time, mach_continuous_time) is untouched:
+ * animations, timers and dispatch deadlines keep the host's pace. Unset, the
+ * offset is zero (the host's wall clock). Anything else in the variable is
+ * fatal rather than ignored.
+ *
+ * The one place a guest wall-clock instant crosses to glibc as an absolute
+ * value is pthread_cond_timedwait's deadline (libsystem.c), which converts it
+ * back with mr_wall_to_host. Dispatch wall-time deadlines are turned into
+ * relative delays in the guest (full/shims/concpatch.c) and so stay
+ * consistent. Host-side ELF bridges keep the host's clock; none of them reads
+ * "now" on the guest's behalf. File timestamps (stat, utimes) stay the host's. */
+static int64_t mr_wall_offset_ns;
+
+static int64_t mr_host_realtime_ns(void)
+{
+    struct { long sec, nsec; } ts = { 0, 0 };
+    if (glibc_clock_gettime(L_CLOCK_REALTIME, &ts) != 0) mr_bail("clock_gettime(CLOCK_REALTIME) failed");
+    return (int64_t)ts.sec * 1000000000ll + (int64_t)ts.nsec;
+}
+
+HIDDEN void mr_init_wall_clock(void)
+{
+    const char *start = glibc_getenv("MACHORUN_WALL_CLOCK_START");
+    if (!start) return;
+    const char *p = start;
+    int64_t sec = 0, nsec = 0;
+    int digits = 0;
+    while (*p >= '0' && *p <= '9') {
+        if (++digits > 12) mr_bail2("MACHORUN_WALL_CLOCK_START is out of range", start);
+        sec = sec * 10 + (*p++ - '0');
+    }
+    if (digits == 0) mr_bail2("MACHORUN_WALL_CLOCK_START must be <unix seconds>[.<fraction>]", start);
+    if (*p == '.') {
+        int64_t scale = 100000000ll;
+        p++;
+        digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            if (++digits > 9) mr_bail2("MACHORUN_WALL_CLOCK_START has more than 9 fractional digits", start);
+            nsec += (*p++ - '0') * scale;
+            scale /= 10;
+        }
+        if (digits == 0) mr_bail2("MACHORUN_WALL_CLOCK_START must be <unix seconds>[.<fraction>]", start);
+    }
+    if (*p != '\0') mr_bail2("MACHORUN_WALL_CLOCK_START must be <unix seconds>[.<fraction>]", start);
+    mr_wall_offset_ns = sec * 1000000000ll + nsec - mr_host_realtime_ns();
+}
+
+static void mr_shift_timespec(void *ts, int64_t by)
+{
+    struct { long sec, nsec; } *t = ts;
+    int64_t ns = (int64_t)t->sec * 1000000000ll + (int64_t)t->nsec + by;
+    t->sec = (long)(ns / 1000000000ll);
+    t->nsec = (long)(ns % 1000000000ll);
+    if (t->nsec < 0) { t->nsec += 1000000000l; t->sec -= 1; }
+}
+
+/* A guest CLOCK_REALTIME timespec as the host's instant (into `host`). */
+HIDDEN const void *mr_wall_to_host(const void *guest, void *host)
+{
+    if (!mr_wall_offset_ns || !guest) return guest;
+    glibc_memcpy(host, guest, 16);
+    mr_shift_timespec(host, -mr_wall_offset_ns);
+    return host;
+}
+
+static int64_t mr_guest_realtime_ns(void)
+{
+    return mr_host_realtime_ns() + mr_wall_offset_ns;
+}
+
 /* struct timespec and struct timeval have identical layouts on both systems
  * (measured: 16 bytes each, {long,long}), so only the clock id is translated. */
 EXPORT int clock_gettime(int clk, void *ts)
 {
-    return MR_ERRNO_CALL(glibc_clock_gettime(mr_linux_clock_id(clk), ts));
+    int rc = MR_ERRNO_CALL(glibc_clock_gettime(mr_linux_clock_id(clk), ts));
+    if (rc == 0 && clk == D_CLOCK_REALTIME && mr_wall_offset_ns) mr_shift_timespec(ts, mr_wall_offset_ns);
+    return rc;
 }
 
 /* CLOCK_* disagree (Darwin CLOCK_MONOTONIC is 6, Linux's is 1 — Darwin 6 is
@@ -1827,10 +1907,31 @@ EXPORT uint64_t clock_gettime_nsec_np(int clk)
 {
     struct { long sec, nsec; } ts = { 0, 0 };
     if (glibc_clock_gettime(mr_linux_clock_id(clk), &ts) != 0) return 0;
+    if (clk == D_CLOCK_REALTIME && mr_wall_offset_ns) mr_shift_timespec(&ts, mr_wall_offset_ns);
     return (uint64_t)ts.sec * 1000000000ull + (uint64_t)ts.nsec;
 }
 
-EXPORT int gettimeofday(void *tv, void *tz) { return MR_ERRNO_CALL(glibc_gettimeofday(tv, tz)); }
+EXPORT int gettimeofday(void *tv, void *tz)
+{
+    int rc = MR_ERRNO_CALL(glibc_gettimeofday(tv, tz));
+    if (rc != 0 || !tv || !mr_wall_offset_ns) return rc;
+    /* Recomputed from one realtime read so seconds and microseconds agree.
+     * tv_usec is the low half of glibc's long on both layouts. */
+    int64_t ns = mr_guest_realtime_ns();
+    struct { long sec; long usec; } *out = tv;
+    out->sec = (long)(ns / 1000000000ll);
+    out->usec = (long)((ns % 1000000000ll) / 1000);
+    return 0;
+}
+
+EXPORT time_t time(time_t *t)
+{
+    if (!mr_wall_offset_ns) return glibc_time(t);
+    time_t now = (time_t)(mr_guest_realtime_ns() / 1000000000ll);
+    if (t) *t = now;
+    return now;
+}
+
 EXPORT int nanosleep(const void *req, void *rem) { return MR_ERRNO_CALL(glibc_nanosleep(req, rem)); }
 EXPORT unsigned sleep(unsigned s) { return glibc_sleep(s); }
 

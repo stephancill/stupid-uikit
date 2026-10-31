@@ -63,3 +63,10 @@ with its own golden review.
 | `SSG_LOCALE=en_GB` | en_GB | en-GB | 21:59 | 21:59 | 31/10 | 2 hours ago |
 | `SSG_LOCALE=en_US SSG_HOUR_CYCLE=24` | en_US | en-US | 21:59 | 21:59 | 10/31 | 2 hours ago |
 | `SSG_LOCALE=de_DE` | de_DE | de-DE | 21:59 | 21:59 | 31.10. | vor 2 Stunden |
+
+## Time zone and wall clock
+
+The guest's time zone is the process's `TZ` (the harness's `SSG_TZ`), else the host's; its wall
+clock can start at a chosen instant (`SSG_NOW`, machorun's `MACHORUN_WALL_CLOCK_START`). See
+`GUEST_CLOCK.md`. Like the locale, neither is assumed: reference comparisons pass the reference
+machine's values at run time.

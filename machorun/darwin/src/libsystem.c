@@ -102,6 +102,8 @@ EXPORT void __machorun_libsystem_bootstrap(int argc, char **argv, char **envp, c
      * so a guest may read them without ever calling tzset(). Establish them
      * once here rather than leaving zeros that would read as UTC. */
     tzset();
+    /* Before any guest code reads the wall clock (posix.c). */
+    mr_init_wall_clock();
     /* Before any guest thread exists, so pthread_main_np has a truth to compare
      * against rather than a zero that would make every thread look like main. */
     mr_record_main_thread();
@@ -1296,7 +1298,7 @@ EXPORT int putenv(char *string)
     mr_sync_environ();
     return rc;
 }
-FWD(time_t, time, (time_t *t), (t))
+/* time() is in posix.c with the guest's wall clock. */
 FWD(int, fileno, (void *f), (f))
 FWDE(int, fseek, (void *f, long o, int w), (f, o, w))
 FWDE(long, ftell, (void *f), (f))
@@ -1794,8 +1796,12 @@ EXPORT int pthread_cond_timedwait(void *cond, void *mutex, const void *abstime)
     void *c = cond_glibc(cond);
     if (!c) return 12;
     /* struct timespec is 16 bytes with the same field offsets on both -- pinned
-     * in sdk/tests/glibc_abi_probe.c -- so it crosses unchanged. */
-    return mr_pthread_rc(glibc_pthread_cond_timedwait(c, adopt(mutex, DARWIN_MUTEX_SIG, 0), abstime));
+     * in sdk/tests/glibc_abi_probe.c -- so it crosses unchanged, apart from the
+     * guest wall clock's offset (posix.c, MACHORUN_WALL_CLOCK_START): the
+     * deadline is a guest CLOCK_REALTIME instant and glibc waits on the host's. */
+    long host[2];
+    return mr_pthread_rc(glibc_pthread_cond_timedwait(c, adopt(mutex, DARWIN_MUTEX_SIG, 0),
+                                                      mr_wall_to_host(abstime, host)));
 }
 
 EXPORT int pthread_cond_signal(void *cond)

@@ -406,6 +406,8 @@ extern int glibc_pthread_setspecific(unsigned, const void *) GLIBCSYM(pthread_se
 
 HIDDEN void mr_say(const char *s);
 HIDDEN void mr_record_main_thread(void);
+HIDDEN void mr_init_wall_clock(void);                 /* posix.c */
+HIDDEN const void *mr_wall_to_host(const void *guest_ts, void *host_ts);
 HIDDEN __attribute__((noreturn)) void mr_bail(const char *what);
 HIDDEN __attribute__((noreturn)) void mr_bail2(const char *what, const char *detail);
 
