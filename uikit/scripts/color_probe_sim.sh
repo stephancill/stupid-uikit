@@ -2,6 +2,12 @@
 # color_probe_sim.sh <outdir> — build Tools/oracle2/colorprobe for the iOS 26
 # simulator, run it, and collect colorprobe.json (the Auto Layout tie-break
 # oracle; see the probe's header). Same device/runtime as realapp_probe_sim.sh.
+#
+#   SIM_UDID=<udid>     run on this existing simulator (e.g. a temporary one the
+#                       caller created and deletes); otherwise a named
+#                       OpenUIKit-* device is created/reused (SIM_DEVICE below)
+#   SIM_RUNTIME=<id>    runtime for a created device (default: the newest
+#                       installed iOS 26 runtime; tables so far: iOS 26.1, 27.0)
 set -e
 setopt null_glob
 cd "$(dirname "$0")/.."
@@ -24,8 +30,8 @@ else
   DEVNAME="OpenUIKit-Chrome${SIM_DEVICE_SUFFIX:-}"
   DEVTYPE="com.apple.CoreSimulator.SimDeviceType.iPhone-16"
 fi
-RUNTIME=$(xcrun simctl list runtimes | grep -o 'com.apple.CoreSimulator.SimRuntime.iOS-26[0-9-]*' | tail -1)
-UDID=$(xcrun simctl list devices | grep "$DEVNAME" | grep -o '[0-9A-F-]\{36\}' | head -1)
+RUNTIME=${SIM_RUNTIME:-$(xcrun simctl list runtimes | grep -o 'com.apple.CoreSimulator.SimRuntime.iOS-26[0-9-]*' | tail -1)}
+UDID=${SIM_UDID:-$(xcrun simctl list devices | grep "$DEVNAME" | grep -o '[0-9A-F-]\{36\}' | head -1)}
 if [[ -z "$UDID" ]]; then UDID=$(xcrun simctl create "$DEVNAME" "$DEVTYPE" "$RUNTIME"); fi
 STATE=$(xcrun simctl list devices | grep "$UDID" | grep -o '(Booted)' || true)
 if [[ -z "$STATE" ]]; then xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID"; fi
