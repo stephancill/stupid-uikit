@@ -2221,6 +2221,30 @@ What shipped (all oracle-backed): PNG/JPEG decode+encode and
   malformed names, and noncanonical casing return nil. Geometry is recognizable
   and deterministic, but its pixels intentionally do not claim Apple-outline
   fidelity.
+- **Open symbol fallback (opt-in, 2026-10-31).** With
+  `OpenUIKitRuntime.openSymbolFallback` (on when the process environment has
+  `OPENUIKIT_OPEN_SYMBOLS=1`; off by default), SwiftUI `Image(systemName:)` /
+  `Label(systemImage:)` and UIKit `UIImage(systemName:)` draw an MIT-licensed
+  Phosphor Icons 2.1.1 glyph for the 479 SF Symbol names in
+  `uikit/Tools/opensymbols/mapping.tsv` that have no project-authored symbol
+  (UIKit: after the ink-table stamp and the six procedural names; SwiftUI:
+  after the hand-drawn `chevron.right` / `magnifyingglass`). Unmapped names
+  still return nil / draw nothing, and with the flag off every path is
+  unchanged. Glyphs are different drawings of the same ideas, not SF outlines
+  (38 rows are marked approximations, e.g. badges omitted or drawn inline,
+  `arrowshape.turn.up.left` as a thin bent arrow); `.circle` names without a
+  Phosphor equivalent are a ring/disc composite. Rendering is monochrome in
+  the resolved foreground colour (hierarchical/palette/multicolor are
+  monochrome) and not weight-aware (regular and fill only). Size: names in
+  `symbol_ink_ios.json` use the measured 17 pt alignment box and ink rect
+  scaled by point size / 17; others draw Phosphor's 208-unit circle as SF's
+  17 pt circle ink (1.0 × point size) with 2/17 × 1/17 pt padding per side.
+  SwiftUI sizes a mapped symbol from the resolved `.font` point size times the
+  existing `.imageScale` factor (unmapped names keep 18 × 18); UIKit uses the
+  configuration point size and an approximate symbol scale (small 0.783,
+  large 1.29). Numbered symbols (`1.circle.fill` …) are deliberately unmapped:
+  Focus onboarding uses them and its gate pins their current blank render.
+  Licence and provenance: `uikit/THIRD_PARTY_LICENSES/PhosphorIcons*`.
 - `UIImage.SymbolConfiguration` currently implements only finite point size
   (maximum 512) and weight. System-image and public hierarchy-render scales
   are capped at 4; symbol images are capped at 4096 pixels per dimension and
