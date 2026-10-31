@@ -317,6 +317,13 @@
       "path": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
       "sha256": "5c1247acef7f2b8522a31742c76d6adcb5569bacc0be7ceaa4dc39dd252ce895",
       "demanded_by": ["focus-widget", "core-guest-package"]
+    },
+    {
+      "id": "noto-color-emoji",
+      "path": "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+      "sha256": "93cdc4ee9aa40e2afceecc63da0ca05ec7aab4bec991ece51a6b52389f48a477",
+      "pin": "Ubuntu noble fonts-noto-color-emoji=2.047-0ubuntu0.24.04.1 (upstream googlefonts/noto-emoji v2.047, SIL OFL 1.1); OpenUIKit ColorEmoji, uikit/docs/COLOR_EMOJI.md",
+      "demanded_by": ["cursor-cloud"]
     }
   ],
   "host_requirements": [

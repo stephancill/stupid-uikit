@@ -68,6 +68,9 @@ enum AttributedTextLayout {
         /// .labelLineHeight. Set by UITextView so its attributed path stays
         /// identical to its plain path for a single-font string.
         var usesFontLineHeight = false
+        /// Colour emoji clusters (ColorEmoji.roles): n > 0 at a cluster's
+        /// first scalar (n scalars), -1 on the rest; nil without emoji.
+        var emojiRoles: [Int]? = nil
 
         var count: Int { scalars.count }
         func style(_ i: Int) -> Style { styles[styleOf[i]] }
@@ -133,6 +136,7 @@ enum AttributedTextLayout {
             while ri + 1 < runRanges.count && u >= runRanges[ri].1 { ri += 1 }
             out.styleOf[i] = styleCache[Swift.min(ri, styleCache.count - 1)]
         }
+        out.emojiRoles = ColorEmoji.roles(of: out.scalars)
         if let ps = s.length > 0
             ? (s.attributes(at: 0, effectiveRange: nil)[.paragraphStyle] as? NSParagraphStyle)
             : nil {
@@ -171,6 +175,11 @@ enum AttributedTextLayout {
                                          characterIndex: i)
             return b.width
         }
+        if let roles = t.emojiRoles, roles[i] != 0 {
+            // A colour emoji cluster advances once, on its first scalar.
+            guard roles[i] > 0 else { return 0 }
+            return ColorEmoji.advance(of: t.scalars[i..<(i + roles[i])], font: st.font) + st.kern
+        }
         return FontEngine.advance(of: t.scalars[i], font: st.font) + st.kern
     }
 
@@ -179,6 +188,7 @@ enum AttributedTextLayout {
         guard i + 1 < t.count else { return 0 }
         let a = t.style(i), b = t.style(i + 1)
         if a.attachment != nil || b.attachment != nil { return 0 }
+        if let roles = t.emojiRoles, roles[i] != 0 || roles[i + 1] != 0 { return 0 }
         if a.kernSet && a.kern == 0 { return 0 }
         if b.kernSet && b.kern == 0 { return 0 }
         guard a.font == b.font else { return 0 }
@@ -467,13 +477,16 @@ enum AttributedTextLayout {
                 // First word alone does not fit: character-wrap it.
                 var fitEnd = from
                 var end = from
+                // An emoji cluster is one unbreakable character.
+                func step(_ k: Int) -> Int { Swift.max(1, t.emojiRoles?[k] ?? 1) }
                 while end < wordEnd {
-                    if width(t, from: from, to: end + 1) <= maxWidth + eps {
-                        fitEnd = end + 1
-                        end += 1
+                    let e = Swift.min(wordEnd, end + step(end))
+                    if width(t, from: from, to: e) <= maxWidth + eps {
+                        fitEnd = e
+                        end = e
                     } else { break }
                 }
-                if fitEnd == from { fitEnd = from + 1 }
+                if fitEnd == from { fitEnd = Swift.min(t.count, from + step(from)) }
                 return (fitEnd, fitEnd, false)
             } else {
                 break

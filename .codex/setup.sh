@@ -16,7 +16,7 @@ export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
     binutils build-essential ca-certificates clang-18 cmake curl file \
-    fonts-dejavu-core git git-lfs imagemagick jq libc++-18-dev \
+    fonts-dejavu-core fonts-noto-color-emoji=2.047-0ubuntu0.24.04.1 git git-lfs imagemagick jq libc++-18-dev \
     libcurl4-openssl-dev libdigest-sha-perl libedit-dev libfontconfig1-dev \
     libfreetype6-dev libicu-dev libncurses-dev libpng-dev libsdl2-dev \
     libsqlite3-dev libxml2-dev libz3-dev lld-18 llvm-18 ninja-build patchelf \

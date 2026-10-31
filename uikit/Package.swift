@@ -699,6 +699,9 @@ let conformanceTargets: [Target] = [
     // Native gate for SwiftUI text metrics on the iOS cut
     // (docs/SWIFTUI_TEXT_METRICS.md).
     .executableTarget(name: "swiftuitextmetricsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for colour emoji in text layout and drawing
+    // (docs/COLOR_EMOJI.md).
+    .executableTarget(name: "coloremojiprobe", dependencies: ["OpenUIKit"]),
     // Native gate for SwiftUI full-screen covers and the screenshot status
     // bar's appearance (docs/SWIFTUI_FULL_SCREEN_COVER.md).
     .executableTarget(name: "swiftuifullscreencoverprobe", dependencies: ["SwiftUI", "OpenUIKit"]),

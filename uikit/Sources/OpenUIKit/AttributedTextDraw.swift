@@ -156,7 +156,12 @@ extension AttributedTextLayout {
                     k += 1
                     continue
                 }
-                if ch != " " && ch.value != 0x00A0 && ch.value != 0x202F && ch != "\n" && ch.value != 0xFFFC && color.alpha > 0 {
+                if let roles = t.emojiRoles, roles[k] != 0 {
+                    if roles[k] > 0 {
+                        ColorEmoji.draw(t.scalars[k..<(k + roles[k])], penX: x,
+                                        baselineY: baselineY, font: st.font, in: canvas)
+                    }
+                } else if ch != " " && ch.value != 0x00A0 && ch.value != 0x202F && ch != "\n" && ch.value != 0xFFFC && color.alpha > 0 {
                     UILabel.drawGlyph(ch, penX: x, baselineY: baselineY, in: canvas,
                                       font: st.font, dark: dark, color: color,
                                       glyphFont: glyphFont, inkEligible: inkEligible,

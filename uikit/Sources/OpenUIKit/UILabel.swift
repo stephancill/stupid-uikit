@@ -585,6 +585,34 @@ open class UILabel: UIView {
 
         var penX = origin.x
         var prev: Unicode.Scalar? = nil
+        if ColorEmoji.mayContainEmoji(line) {
+            // Colour emoji clusters (ColorEmoji): one emoji advance, drawn
+            // from the colour font, never kerned; every other scalar draws
+            // exactly as in the loop below.
+            for c in line {
+                if ColorEmoji.isEmoji(c) {
+                    ColorEmoji.draw(c.unicodeScalars, penX: penX, baselineY: origin.y,
+                                    font: font, in: canvas)
+                    penX += ColorEmoji.advance(of: c.unicodeScalars, font: font)
+                        + extraAdvance * CGFloat(c.unicodeScalars.count)
+                    prev = nil
+                    continue
+                }
+                for ch in c.unicodeScalars {
+                    if let p = prev { penX += FontEngine.kerning(p, ch, font: font) }
+                    prev = ch
+                    let adv = FontEngine.advance(of: ch, font: font)
+                        + (ch.value == 0x2026 ? 0 : extraAdvance)
+                    defer { penX += adv }
+                    if ch == " " || ch.value == 0x00A0 || ch.value == 0x202F { continue }
+                    drawGlyph(ch, penX: penX, baselineY: origin.y, in: canvas, font: font,
+                              dark: dark, color: color, glyphFont: glyphFont,
+                              inkEligible: inkEligible, famKey: famKey, sizeKey: sizeKey,
+                              devOX: devOX, devBaseY: devBaseY)
+                }
+            }
+            return
+        }
         for ch in line.unicodeScalars {
             if let p = prev { penX += FontEngine.kerning(p, ch, font: font) }
             prev = ch
@@ -671,7 +699,16 @@ open class UILabel: UIView {
         }
         guard let gf = glyphFont else { return }
         let g = gf.glyphIndex(of: ch)
-        if g == 0 { return }
+        if g == 0 {
+            // No font draws this scalar. Default-ignorable and control
+            // scalars (ZWJ, variation selectors, U+FEFF, tabs) draw nothing
+            // on iOS either; anything else would be a silently blank glyph.
+            if ch.properties.isDefaultIgnorableCodePoint || ch.properties.generalCategory == .control {
+                return
+            }
+            ColorEmoji.missingGlyph(ch, font: font)
+            return
+        }
         // CoreText quantizes each glyph's pen position to quarter POINTS
         // with a +1/16pt bias (measured from Catalyst UILabel renders:
         // pos = floor(4x + 0.25)/4 in points), then CoreGraphics
