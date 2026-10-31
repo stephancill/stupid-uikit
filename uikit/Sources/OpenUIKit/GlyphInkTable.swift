@@ -61,7 +61,7 @@ public enum GlyphInkTable {
     private static var cache: [String: GlyphInkMask] = [:]
 
     /// The iOS table (Resources/glyph_ink_ios.json): masks harvested from
-    /// real iOS 26.1 on a 2x device (iPhone SE 3rd gen) by
+    /// real iOS 26.1 (and, for keys added from 2026-10-31, iOS 27.0) on a 2x device (iPhone SE 3rd gen) by
     /// Tools/oracle2/inkprobe (SIM_DEVICE=2x scripts/ink_probe_sim.sh)
     /// through a real UILabel, calibration "opaque" — each mask IS
     /// the coverage of an opaque label colour (no gamma LUT), and oy is
@@ -120,6 +120,25 @@ public enum GlyphInkTable {
     /// **84/84 identical**. Named miss `{w:19, h:24, ox:3, oy:-25}`.
     /// Table **8799 → 9091**. Q stays nil. `glyph_ink.json` /
     /// `glyph_ink_ios_3x.json` untouched.
+    /// (The table held 9148 keys before the next harvest.)
+    /// iOS 27 harvest, 2026-10-31 (docs/SWIFTUI_STYLED_TEXT.md): stupid
+    /// social's root screen (iOS-triple guest, scale 2) logged 84 `I|`
+    /// misses under OPENUIKIT_INK_LOG: bold 17 (feed actor names), bold 34
+    /// (large title), semibold 17 and 12, regular 15 (incl. U+2014) and 11.
+    /// Harvested with the scene-lifecycle probe on a temporary iPhone SE
+    /// (3rd generation, 2x) on the **iOS 27.0 (24A434)** simulator runtime:
+    /// ASCII 33–126 light for `system-bold|17` × 8 phases, `system-bold|34`
+    /// and `system-semibold|17` × F0.0/F0.5, `system-regular|11`,
+    /// `system-regular|15` and `system-semibold|12` × F0.0…F0.75, plus the
+    /// logged keys; 2257 keys, skipped []. Only keys the table lacked were
+    /// merged (**1743**, 655 of them `system-bold|17|light`); the 514 that
+    /// overlap stay the iOS 26.1 masks. MEASURED overlap: geometry (w, h,
+    /// ox, oy) identical on all 514; masks differ by 1/255 on most glyphs
+    /// and by more than 20/255 on 64 (edge pixels, at most 76/255; e.g. A,
+    /// N, 2, #), 4.2 % of pixels changed, ink sums within 1.6 % — iOS 27 rasterises very
+    /// slightly differently, so new keys are iOS 27 data next to iOS 26.1
+    /// data. Repeat harvests on iOS 27 are byte-identical. Table
+    /// **9148 → 10891**.
     private static var iosEntries: [String: JSONValue]? = {
         guard let json = ResourceIO.loadJSONResource("glyph_ink_ios.json"),
               let e = json["entries"]?.objectValue else { return nil }

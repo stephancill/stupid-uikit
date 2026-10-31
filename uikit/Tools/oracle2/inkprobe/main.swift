@@ -1,5 +1,5 @@
 // InkProbe on REAL iOS: harvests per-glyph ink masks from real UIKit on the
-// iOS 26 simulator, in the exact shape Resources/glyph_ink.json carries for
+// iOS simulator (iOS 26.1 originally, iOS 27.0 since 2026-10-31), in the exact shape Resources/glyph_ink.json carries for
 // Mac Catalyst (GlyphInkTable.swift: key "family|size|light/dark|phase|scalar"
 // -> {w, h, ox, oy, m}), so OpenUIKit can draw iOS text from measured data
 // the way it draws Catalyst text.
@@ -9,9 +9,21 @@
 // Catalyst-harvested masks, one pixel lower — no portable model of CoreText's
 // rasterization exists, so the masks are measured, exactly as for Catalyst.
 //
+// Keys: one per line, "family|size|light/dark|tag|scalar", optionally with
+// the "I|" prefix OPENUIKIT_INK_LOG writes (a miss log is a valid keys.txt).
+// The iOS table is looked up with GlyphInkTable.phaseIOS's "F<fraction>"
+// tags (F0.0/F0.25/F0.5/F0.75 below 17 pt, F0.0/F0.5 from 17 pt at 2x);
+// harvest those. The Catalyst tags ("0", "P1", ...) are still accepted.
+//
+// Lifecycle: iOS 27 traps at launch in
+// UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption for an app
+// without scene lifecycle, so the probe declares a UIApplicationSceneManifest
+// (InkProbe-Info.plist) whose delegate, InkProbeSceneDelegate, builds the
+// window on its UIWindowScene and runs the harvest.
+//
 // Method (mirrors the Catalyst harvest's pen model): for every key in the
 // bundled keys.txt, a UILabel showing the single character is placed at
-// x = 20 + phase (phase from GlyphInkTable.phase's table for the size),
+// x = 20 + phase (the tag's pen fraction),
 // y = 20, its natural size; the label is captured at scale 2 in the standard
 // (sRGB) range on an opaque contrast background (white in light, black in
 // dark) with the system label colour; the mask is the coverage
@@ -173,10 +185,26 @@ func captureLabelGlyph(_ text: String, font f: UIFont, penX: CGFloat, dark: Bool
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
-    var window: UIWindow?
     func application(_ app: UIApplication,
                      didFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let w = UIWindow(frame: UIScreen.main.bounds)
+        true
+    }
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let c = UISceneConfiguration(name: "Default", sessionRole: connectingSceneSession.role)
+        c.delegateClass = InkProbeSceneDelegate.self
+        return c
+    }
+}
+
+@objc(InkProbeSceneDelegate)
+final class InkProbeSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = scene as? UIWindowScene else { fatalError("inkprobe: not a UIWindowScene") }
+        let w = UIWindow(windowScene: windowScene)
         window = w
         let vc = UIViewController()
         w.rootViewController = vc
@@ -188,6 +216,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         let keysPath = Bundle.main.path(forResource: "keys", ofType: "txt")!
         let keys = try! String(contentsOfFile: keysPath, encoding: .utf8)
             .split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+            .map { $0.hasPrefix("I|") ? String($0.dropFirst(2)) : $0 }
         var entries: [String: Any] = [:]
         var baselines: [String: Any] = [:]
         var skipped: [String] = []
@@ -263,7 +292,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         try! data.write(to: URL(fileURLWithPath: "\(docsDir)/glyph_ink_ios.json"))
         try! "ok".write(toFile: docsDir + "/DONE", atomically: true, encoding: .utf8)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
-        return true
     }
 }
 

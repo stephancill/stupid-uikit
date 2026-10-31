@@ -85,10 +85,50 @@ format specifiers, e.g. `"\(3.14)"` shows `3.140000` there).
   `Text(AttributedString)` runs and `Text: Equatable` are not implemented.
 - Text-level `foregroundStyle` resolves the style to one colour, like the view
   modifier (gradients draw their first colour).
-- Bold body text under the iOS cut mixes fonts: `glyph_ink_ios.json` has only
-  97 `system-bold|17|light` masks (no `m`, `t`, `h`, …), and a miss draws the
-  outline fallback (DejaVu Sans Bold in the portable bundle) at SF Pro's
-  advances. DejaVu Bold is wider, so runs like "alex_smith" / "amy_stories"
-  look tight or overlapping. Advances and kerning are correct; the fix is
-  harvesting `system-bold|17` ASCII (light + dark, F0.0/F0.5) with
-  `SIM_DEVICE=2x scripts/ink_probe_sim.sh`.
+- Bold text under the iOS cut used to mix fonts: `glyph_ink_ios.json` had
+  only 97 `system-bold|17|light` masks, and a miss drew the outline fallback
+  (DejaVu Sans Bold in the portable bundle) at SF Pro's advances, so runs like
+  "alex_smith" looked tight or overlapping. Harvested 2026-10-31 (below); a
+  font or size outside the table still falls back the same way. Find the keys
+  a screen needs with `OPENUIKIT_INK_LOG` (stupid social: `SSG_INK_LOG`) and
+  feed that log to the probe as its keys file.
+
+## iOS 27 ink harvest (2026-10-31)
+
+- Probe: `Tools/oracle2/inkprobe` adopts the scene lifecycle (iOS 27 traps
+  at launch in `UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`
+  otherwise): `InkProbe-Info.plist` declares a `UIApplicationSceneManifest`
+  whose `InkProbeSceneDelegate` builds the window on its scene and runs the
+  harvest. Keys may carry the `I|` prefix `OPENUIKIT_INK_LOG` writes, so a
+  miss log is a keys file as is. The probe already accepts the runtime's
+  `F<fraction>` tags (`GlyphInkTable.phaseIOS`); harvest those, not the
+  Catalyst `0`/`P1` tags.
+- Script: `scripts/ink_probe_sim.sh` uses the newest installed iOS runtime
+  (`SIM_RUNTIME` overrides) and `SIM_UDID` runs on an existing simulator, e.g.
+  a temporary one the caller creates and deletes:
+
+  ```sh
+  U=$(xcrun simctl create tmp-ink-harvest \
+      com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation \
+      com.apple.CoreSimulator.SimRuntime.iOS-27-0)
+  xcrun simctl boot $U
+  SIM_UDID=$U SIM_DEVICE=2x INK_KEYS=keys.txt scripts/ink_probe_sim.sh out/
+  xcrun simctl shutdown $U; xcrun simctl delete $U
+  ```
+
+- Provenance: iPhone SE (3rd generation), scale 2, iOS 27.0 simulator runtime
+  (build 24A434). Keys: stupid social's root screen logged 84 misses
+  (`system-bold|17` actor names, `system-bold|34` large title,
+  `system-semibold|17` and `|12`, `system-regular|15` incl. U+2014 and `|11`).
+  Harvested ASCII 33–126 light for `system-bold|17` at all 8 F phases,
+  `system-bold|34` and `system-semibold|17` at F0.0/F0.5 (the 2x grid from
+  17 pt), `system-regular|11`, `|15` and `system-semibold|12` at
+  F0.0/F0.25/F0.5/F0.75 (the grid below 17 pt), plus the logged keys:
+  2257 keys, none skipped. Only missing keys were merged: 1743 (655
+  `system-bold|17|light`), table 9148 → 10891; existing keys keep their
+  iOS 26.1 masks.
+- iOS 27 vs 26.1 on the 514 overlapping keys: identical geometry; masks
+  differ by 1/255 on most glyphs and by more than 20/255 on 64 (edge pixels,
+  at most 76/255), 4.2 % of pixels changed, ink sums within 1.6 %. The table therefore mixes two
+  runtimes' rasterisation at that level. Dark-appearance masks for these
+  families were not harvested (the root screen is light).
