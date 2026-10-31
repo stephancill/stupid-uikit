@@ -4658,13 +4658,26 @@ private enum _ViewRenderer {
                 on: rowView,
                 environment: environment
             )
-            if index + 1 < rows.count {
+            if index + 1 < rows.count,
+               _listRowSeparatorVisibility(in: row, edge: .bottom) != .hidden,
+               _listRowSeparatorVisibility(in: rows[index + 1], edge: .top) != .hidden {
+                // iOS cut, plain list: the separator starts at the row's text
+                // (SwiftUI's default `listRowSeparatorLeading`) and stops 16 pt
+                // short of the trailing edge, 1 pt thick, as placeList's
+                // measured plain rows. MEASURED stupid social feed, iPhone 16e
+                // @3x / iOS 27.0 simulator (2026-10-31): x 52...374 pt, 3 px
+                // of (232,232,232) on white (separator 0.12 alpha over white),
+                // with listRowInsets leading 12 + 28 pt icon + 12 pt spacing.
+                let iOSPlain = plain && OpenUIKitRuntime.systemFontCut == .iOS
+                let thickness: CGFloat = iOSPlain ? 1 : 0.5
+                let leading = iOSPlain ? (_rowTextLeading(in: rowView) ?? 16) : 16
+                let trailing: CGFloat = iOSPlain ? 16 : 0
                 let separator = UIView(
                     frame: CGRect(
-                        x: 16,
-                        y: max(0, rowView.bounds.height - 0.5),
-                        width: max(0, rowView.bounds.width - 16),
-                        height: 0.5
+                        x: leading,
+                        y: max(0, rowView.bounds.height - thickness),
+                        width: max(0, rowView.bounds.width - leading - trailing),
+                        height: thickness
                     )
                 )
                 separator.backgroundColor = .separator
@@ -4901,25 +4914,15 @@ private enum _ViewRenderer {
                 in: layout.node,
                 edge: .bottom
             )
-            if index + 1 < rowLayouts.count && separatorVisibility != .hidden {
+            if index + 1 < rowLayouts.count && separatorVisibility != .hidden
+                && _listRowSeparatorVisibility(in: rowLayouts[index + 1].node, edge: .top) != .hidden {
                 let separatorHeight: CGFloat = iOSPlainRowInsets != .zero ? 1 : 0.5
                 var separatorX = rowFrame.minX + 16
                 let trailingPad: CGFloat = iOSPlainRowInsets != .zero
                     ? iOSPlainRowInsets.right : 0
-                if iOSPlainRowInsets != .zero {
-                    var minLabelX = CGFloat.greatestFiniteMagnitude
-                    func walkHost(_ view: UIView, xInRow: CGFloat) {
-                        if view is UILabel {
-                            minLabelX = min(minLabelX, xInRow)
-                        }
-                        for child in view.subviews {
-                            walkHost(child, xInRow: xInRow + child.frame.minX)
-                        }
-                    }
-                    walkHost(rowHost, xInRow: 0)
-                    if minLabelX < 10_000 {
-                        separatorX = rowFrame.minX + minLabelX
-                    }
+                if iOSPlainRowInsets != .zero,
+                   let textLeading = _rowTextLeading(in: rowHost) {
+                    separatorX = rowFrame.minX + textLeading
                 }
                 let separator = UIView(
                     frame: CGRect(
@@ -4936,6 +4939,25 @@ private enum _ViewRenderer {
             }
             y += layout.height
         }
+    }
+
+    /// SwiftUI's default `listRowSeparatorLeading` guide: the leading edge
+    /// of the row's text, i.e. the smallest x of a visible label in the row
+    /// view's coordinates (an icon or avatar before the text leaves the
+    /// separator at the text column). Hidden subtrees (a button's pressed
+    /// copy, unrevealed swipe actions) do not count. Nil without text.
+    static func _rowTextLeading(in row: UIView) -> CGFloat? {
+        var minX = CGFloat.greatestFiniteMagnitude
+        func walk(_ view: UIView, x: CGFloat) {
+            if view is UILabel, view.bounds.width > 0 {
+                minX = min(minX, x)
+            }
+            for child in view.subviews where !child.isHidden {
+                walk(child, x: x + child.frame.minX)
+            }
+        }
+        walk(row, x: 0)
+        return minX < .greatestFiniteMagnitude ? minX : nil
     }
 
     /// Whether a row carries `listRowInsets(_:)` (outermost modifier chain).
