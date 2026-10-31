@@ -169,6 +169,7 @@ open class NSLayoutConstraint: NSObject {
         holder._installedConstraints.append(self)
         _holder = holder
         LayoutEngine.installedConstraintCount += 1
+        LayoutEngine.constraintsChangedSinceSolve = true
         holder.setNeedsLayout()
     }
 
@@ -183,6 +184,7 @@ open class NSLayoutConstraint: NSObject {
         holder._installedConstraints.removeAll { $0 === self }
         _holder = nil
         LayoutEngine.installedConstraintCount -= 1
+        LayoutEngine.constraintsChangedSinceSolve = true
         holder.setNeedsLayout()
     }
 
