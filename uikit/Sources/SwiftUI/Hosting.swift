@@ -2382,7 +2382,8 @@ private enum _ViewRenderer {
                     proposed: CGSize(width: bounded.width, height: selfSizingRowProposalHeight),
                     environment: environment
                 )
-                height += max(defaultFormRowHeight, size.height + rowPadding)
+                let padding = plain && _hasListRowInsets(row) ? 0 : rowPadding
+                height += max(defaultFormRowHeight, size.height + padding)
             }
             let footerHeight: CGFloat = footer == nil ? (plain ? 0 : 12) : 28
             return CGSize(width: bounded.width, height: height + footerHeight)
@@ -2632,7 +2633,7 @@ private enum _ViewRenderer {
                 )
                 let size = measure(content, proposed: inner, environment: environment)
                 return CGSize(width: size.width + horizontal, height: size.height + vertical)
-            case .edgeInsetsPadding(let insets):
+            case .edgeInsetsPadding(let insets), .listRowInsets(let insets):
                 let horizontal = max(0, insets.leading) + max(0, insets.trailing)
                 let vertical = max(0, insets.top) + max(0, insets.bottom)
                 let inner = CGSize(
@@ -3726,7 +3727,7 @@ private enum _ViewRenderer {
                     inset.bottom = 0
                 }
                 place(content, in: rect.inset(by: inset), on: surface, environment: environment)
-            case .edgeInsetsPadding(let insets):
+            case .edgeInsetsPadding(let insets), .listRowInsets(let insets):
                 place(
                     content,
                     in: rect.inset(
@@ -4616,12 +4617,18 @@ private enum _ViewRenderer {
         }
 
         for (index, row) in rows.enumerated() {
+            // In a plain list a row's own listRowInsets replace the default
+            // row insets, as in SwiftUI (the insets are laid out as padding
+            // inside the row node).
+            let rowInsets = plain && _hasListRowInsets(row)
+                ? UIEdgeInsets.zero
+                : UIEdgeInsets(top: rowVerticalInset, left: 16, bottom: rowVerticalInset, right: 16)
             let proposal = CGSize(
-                width: max(0, section.bounds.width - 32),
+                width: max(0, section.bounds.width - rowInsets.left - rowInsets.right),
                 height: selfSizingRowProposalHeight
             )
             let measured = measure(row, proposed: proposal, environment: environment)
-            let height = max(defaultFormRowHeight, measured.height + 2 * rowVerticalInset)
+            let height = max(defaultFormRowHeight, measured.height + rowInsets.top + rowInsets.bottom)
             guard y < section.bounds.height else { break }
             let rowView = UIView(
                 frame: CGRect(
@@ -4636,10 +4643,7 @@ private enum _ViewRenderer {
             section.addSubview(rowView)
             place(
                 row,
-                in: rowView.bounds.inset(
-                    by: UIEdgeInsets(top: rowVerticalInset, left: 16,
-                                     bottom: rowVerticalInset, right: 16)
-                ),
+                in: rowView.bounds.inset(by: rowInsets),
                 on: rowView,
                 environment: environment
             )
@@ -4921,6 +4925,15 @@ private enum _ViewRenderer {
             }
             y += layout.height
         }
+    }
+
+    /// Whether a row carries `listRowInsets(_:)` (outermost modifier chain).
+    static func _hasListRowInsets(_ node: _OpenViewNode) -> Bool {
+        guard case .modified(let content, let modification) = node.kind else {
+            return false
+        }
+        if case .listRowInsets = modification { return true }
+        return _hasListRowInsets(content)
     }
 
     private static func _listRowSeparatorVisibility(

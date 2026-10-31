@@ -331,6 +331,9 @@ enum _OpenViewModification {
     )
     case padding(Edge.Set, CGFloat?)
     case edgeInsetsPadding(EdgeInsets)
+    /// `listRowInsets(_:)`: laid out as edge-insets padding; a plain List's
+    /// Section uses it in place of its default row insets.
+    case listRowInsets(EdgeInsets)
     case background(_OpenViewNode, alignment: Alignment)
     case overlay(_OpenViewNode, alignment: Alignment)
     case mask(_OpenViewNode, alignment: Alignment)
@@ -459,6 +462,9 @@ fileprivate enum _OpenViewModifier {
     )
     case padding(Edge.Set, CGFloat?)
     case edgeInsetsPadding(EdgeInsets)
+    /// `listRowInsets(_:)`: laid out as edge-insets padding; a plain List's
+    /// Section uses it in place of its default row insets.
+    case listRowInsets(EdgeInsets)
     case background(@MainActor () -> _OpenViewNode, alignment: Alignment)
     case overlay(@MainActor () -> _OpenViewNode, alignment: Alignment)
     case mask(@MainActor () -> _OpenViewNode, alignment: Alignment)
@@ -602,6 +608,7 @@ fileprivate enum _OpenViewModifier {
             )
         case .padding(let edges, let length): return .padding(edges, length)
         case .edgeInsetsPadding(let insets): return .edgeInsetsPadding(insets)
+        case .listRowInsets(let insets): return .listRowInsets(insets)
         case .background(let makeNode, let alignment):
             return .background(
                 _OpenGraphContext.withStructuralScope(.background, operation: makeNode),
@@ -4295,7 +4302,7 @@ public extension _OpenView {
         guard let insets else {
             return _OpenModifiedContent(content: self, modification: .effect)
         }
-        return _OpenModifiedContent(content: self, modification: .edgeInsetsPadding(insets))
+        return _OpenModifiedContent(content: self, modification: .listRowInsets(insets))
     }
 
     func tag<Value: Hashable>(_ tag: Value) -> some _OpenView {
