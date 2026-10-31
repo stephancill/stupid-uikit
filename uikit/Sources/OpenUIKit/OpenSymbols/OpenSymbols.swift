@@ -12,8 +12,15 @@
 // Off, every existing symbol path, gate and fail-closed test is unchanged.
 //
 // Geometry: the glyph is drawn monochrome in one colour (hierarchical,
-// palette and multicolor rendering modes are a monochrome approximation)
-// and is not weight-aware (Phosphor regular/fill only). Sizes follow SF
+// palette and multicolor rendering modes are a monochrome approximation).
+// Weight: a symbol drawn at SF semibold or heavier uses Phosphor's bold
+// glyph for names mapped to the regular weight (fill glyphs have one
+// weight), placed by the regular glyph's bounds so its strokes thicken
+// outward as SF's heavier weights do; lighter weights draw regular, and
+// `regular-only` rows in mapping.tsv vendor no bold drawing.
+// MEASURED stupid social feed, iPhone 16e @3x / iOS 27.0 simulator:
+// `chevron.forward` at body semibold has 1.9x the ink of Phosphor's
+// regular caret (bold: 1.5x). Sizes follow SF
 // Symbol metrics:
 // - names in the harvested ink table (Resources/symbol_ink_ios.json) use
 //   their measured 17 pt regular alignment box and ink rect, scaled by
@@ -51,6 +58,9 @@ enum _OpenSymbolComposite {
     case ring
     /// Disc (Phosphor `circle-fill`) with the fill glyph cut out at half size.
     case disc
+    /// The glyph mirrored horizontally about the viewBox centre (an icon
+    /// drawn facing the other way).
+    case mirror
 }
 
 struct _OpenSymbolEntry {
@@ -98,10 +108,24 @@ public enum OpenSymbols {
     /// Glyph paths for `name` placed in `bounds`, which is treated as the
     /// symbol's alignment box (scaled uniformly and centred if its aspect
     /// differs). Fill each path separately with the returned rule.
-    public static func paths(name: String, in bounds: CGRect) -> (paths: [Path], evenOdd: Bool)? {
+    /// Whether a symbol drawn at `weight` uses the bold glyph (semibold
+    /// and heavier; see the file header).
+    public static func usesBoldGlyph(_ weight: UIImage.SymbolWeight) -> Bool {
+        weight.rawValue >= UIImage.SymbolWeight.semibold.rawValue
+    }
+
+    /// `paths(name:in:weight:)` for a font weight (SwiftUI `Image` takes
+    /// its symbol weight from the font).
+    public static func symbolWeight(forFontWeight weight: UIFont.Weight) -> UIImage.SymbolWeight {
+        weight.rawValue >= UIFont.Weight.semibold.rawValue ? .semibold : .regular
+    }
+
+    public static func paths(name: String, in bounds: CGRect,
+                             weight: UIImage.SymbolWeight = .regular) -> (paths: [Path], evenOdd: Bool)? {
         guard bounds.width > 0, bounds.height > 0, bounds.width.isFinite, bounds.height.isFinite,
-              let glyph = glyph(for: name),
+              let regular = glyph(for: name),
               let layout = layout(name: name, pointSize: 17) else { return nil }
+        let drawn = usesBoldGlyph(weight) ? (boldGlyph(for: name) ?? regular) : regular
         let fit = Swift.min(bounds.width / layout.size.width, bounds.height / layout.size.height)
         let boxW = layout.size.width * fit
         let boxH = layout.size.height * fit
@@ -109,20 +133,23 @@ public enum OpenSymbols {
         let originY = bounds.minY + (bounds.height - boxH) / 2
         let ink = CGRect(x: originX + layout.ink.minX * fit, y: originY + layout.ink.minY * fit,
                          width: layout.ink.width * fit, height: layout.ink.height * fit)
-        let g = glyph.bounds
+        // Placed by the REGULAR glyph's bounds: a bold glyph's strokes grow
+        // outward around the same skeleton instead of shrinking it to fit.
+        let g = regular.bounds
         let s = Swift.min(ink.width / g.width, ink.height / g.height)
         let tx = ink.midX - g.midX * s
         let ty = ink.midY - g.midY * s
         let transform = CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: tx, ty: ty)
-        return (glyph.paths.map { $0.applying(transform) }, glyph.evenOdd)
+        return (drawn.paths.map { $0.applying(transform) }, drawn.evenOdd)
     }
 
     /// Fills `name`'s glyph into `bounds` with `color`. Returns false (and
     /// draws nothing) for unmapped names.
     @discardableResult
     public static func draw(name: String, in canvas: Canvas, bounds: CGRect,
-                            color: CanvasColor) -> Bool {
-        guard let placed = paths(name: name, in: bounds) else { return false }
+                            color: CanvasColor,
+                            weight: UIImage.SymbolWeight = .regular) -> Bool {
+        guard let placed = paths(name: name, in: bounds, weight: weight) else { return false }
         for path in placed.paths {
             canvas.fill(path, color: color, evenOdd: placed.evenOdd)
         }
@@ -143,14 +170,38 @@ public enum OpenSymbols {
     static func glyph(for name: String) -> Glyph? {
         if let hit = cache[name] { return hit }
         guard let entry = _OpenSymbolCatalog.entry(name) else { return nil }
+        let glyph = build(entry, bold: false)
+        cache[name] = glyph
+        return glyph
+    }
+
+    /// The bold drawing of a regular-weight entry; nil for fill glyphs and
+    /// disc composites (Phosphor's fill set has one weight).
+    static func boldGlyph(for name: String) -> Glyph? {
+        if let hit = boldCache[name] { return hit }
+        guard let entry = _OpenSymbolCatalog.entry(name),
+              entry.composite != .disc,
+              _OpenSymbolCatalog.pathData(entry.glyph + "-bold") != nil else { return nil }
+        let glyph = build(entry, bold: true)
+        boldCache[name] = glyph
+        return glyph
+    }
+
+    private static var boldCache: [String: Glyph] = [:]
+
+    private static func build(_ entry: _OpenSymbolEntry, bold: Bool) -> Glyph {
+        let suffix = bold ? "-bold" : ""
         let glyph: Glyph
         switch entry.composite {
         case .none:
-            let paths = parsed(entry.glyph)
+            let paths = parsed(entry.glyph + suffix)
+            glyph = Glyph(paths: paths, evenOdd: false, bounds: boundsOf(paths))
+        case .mirror:
+            let paths = parsed(entry.glyph + suffix).map { $0.applying(mirrorAboutCentre) }
             glyph = Glyph(paths: paths, evenOdd: false, bounds: boundsOf(paths))
         case .ring:
-            let ring = parsed("circle")
-            let inner = parsed(entry.glyph).map { $0.applying(halfSizeAboutCentre) }
+            let ring = parsed("circle" + suffix)
+            let inner = parsed(entry.glyph + suffix).map { $0.applying(halfSizeAboutCentre) }
             glyph = Glyph(paths: ring + inner, evenOdd: false, bounds: boundsOf(ring))
         case .disc:
             var cut = Path()
@@ -160,9 +211,11 @@ public enum OpenSymbols {
             }
             glyph = Glyph(paths: [cut], evenOdd: true, bounds: boundsOf([cut]))
         }
-        cache[name] = glyph
         return glyph
     }
+
+    private static let mirrorAboutCentre = CGAffineTransform(a: -1, b: 0, c: 0, d: 1,
+                                                              tx: 256, ty: 0)
 
     private static let halfSizeAboutCentre = CGAffineTransform(a: 0.5, b: 0, c: 0, d: 0.5,
                                                                 tx: 64, ty: 64)

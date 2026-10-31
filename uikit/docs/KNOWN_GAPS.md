@@ -2231,11 +2231,13 @@ What shipped (all oracle-backed): PNG/JPEG decode+encode and
   after the hand-drawn `chevron.right` / `magnifyingglass`). Unmapped names
   still return nil / draw nothing, and with the flag off every path is
   unchanged. Glyphs are different drawings of the same ideas, not SF outlines
-  (38 rows are marked approximations, e.g. badges omitted or drawn inline,
-  `arrowshape.turn.up.left` as a thin bent arrow); `.circle` names without a
-  Phosphor equivalent are a ring/disc composite. Rendering is monochrome in
-  the resolved foreground colour (hierarchical/palette/multicolor are
-  monochrome) and not weight-aware (regular and fill only). Size: names in
+  (rows with a note are approximations, e.g. badges omitted or drawn inline,
+  `arrowshape.turn.up.left` as Phosphor's share arrow mirrored); `.circle`
+  names without a Phosphor equivalent are a ring/disc composite. Rendering is
+  monochrome in the resolved foreground colour (hierarchical/palette/
+  multicolor are monochrome). Weight is two-step: SF semibold and heavier
+  draw Phosphor bold for regular-weight rows (`regular-only` rows and fill
+  glyphs have one weight); lighter weights draw regular. Size: names in
   `symbol_ink_ios.json` use the measured 17 pt alignment box and ink rect
   scaled by point size / 17; others draw Phosphor's 208-unit circle as SF's
   17 pt circle ink (1.0 × point size) with 2/17 × 1/17 pt padding per side.

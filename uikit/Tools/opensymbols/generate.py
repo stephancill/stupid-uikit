@@ -17,7 +17,7 @@ import re
 import sys
 
 PHOSPHOR_VERSION = "2.1.1"
-COMPOSITES = {"-": "none", "ring": "ring", "disc": "disc"}
+COMPOSITES = {"-": "none", "ring": "ring", "disc": "disc", "mirror": "mirror"}
 PATH_RE = re.compile(r'<path d="([^"]+)"/>')
 D_CHARS = re.compile(r"^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\- ]+$")
 
@@ -27,8 +27,10 @@ def die(msg):
 
 
 def glyph_file(assets, icon, weight):
-    if weight == "regular":
+    if weight in ("regular", "regular-only"):
         return assets / "regular" / (icon + ".svg"), icon
+    if weight == "bold":
+        return assets / "bold" / (icon + "-bold.svg"), icon + "-bold"
     return assets / "fill" / (icon + "-fill.svg"), icon + "-fill"
 
 
@@ -69,6 +71,8 @@ def main():
     entries = []
     seen = set()
     glyphs = {}
+    bold_icons = set()
+    single_icons = set()
     for lineno, line in enumerate(pathlib.Path(args.mapping).read_text().splitlines(), 1):
         if not line.strip() or line.startswith("#"):
             continue
@@ -80,13 +84,26 @@ def main():
         if name in seen:
             die("mapping.tsv:%d: duplicate %s" % (lineno, name))
         seen.add(name)
-        if weight not in ("regular", "fill") or composite not in COMPOSITES:
+        if weight not in ("regular", "regular-only", "fill") or composite not in COMPOSITES:
             die("mapping.tsv:%d: bad weight or composite" % lineno)
         path, key = glyph_file(assets, icon, weight)
         glyphs[key] = load_paths(path)
-        if composite != "-":
+        # Regular-weight entries also carry Phosphor's bold drawing, which
+        # OpenSymbols uses for SF semibold and heavier (fill has one weight).
+        if weight == "regular":
+            bpath, bkey = glyph_file(assets, icon, "bold")
+            glyphs[bkey] = load_paths(bpath)
+            bold_icons.add(icon)
+        elif weight == "regular-only":
+            single_icons.add(icon)
+        if bold_icons & single_icons:
+            die("mapping.tsv:%d: %s is both regular and regular-only" % (lineno, icon))
+        if composite in ("ring", "disc"):
             bpath, bkey = glyph_file(assets, "circle", "regular" if composite == "ring" else "fill")
             glyphs[bkey] = load_paths(bpath)
+            if composite == "ring":
+                bpath, bkey = glyph_file(assets, "circle", "bold")
+                glyphs[bkey] = load_paths(bpath)
         entries.append((name, key, COMPOSITES[composite], note))
 
     entries.sort()

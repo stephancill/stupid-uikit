@@ -5365,6 +5365,9 @@ private enum _ViewRenderer {
             let symbol = _SystemSymbolView(name: name)
             symbol.strokeColor = environment.foregroundColor?.resolve() ?? .label
             symbol.renderingMode = environment.symbolRenderingMode
+            symbol.weight = OpenSymbols.symbolWeight(
+                forFontWeight: (environment.font ?? .body).resolve(weight: environment.weight).weight
+            )
             symbol.frame = rect
             symbol.accessibilityIdentifier = "SwiftUI.Image.systemName.\(name)"
             surface.addSubview(symbol)
@@ -5573,6 +5576,8 @@ private final class _SystemSymbolView: UIView {
     let name: String
     var strokeColor: UIColor = .label
     var renderingMode: SymbolRenderingMode?
+    /// From the resolved font: open symbols draw Phosphor bold at semibold+.
+    var weight: UIImage.SymbolWeight = .regular
 
     init(name: String) {
         self.name = name
@@ -5609,7 +5614,8 @@ private final class _SystemSymbolView: UIView {
             // one resolved foreground colour.
             if OpenUIKitRuntime.openSymbolFallback {
                 OpenSymbols.draw(name: name, in: canvas, bounds: bounds,
-                                 color: strokeColor.resolvedCGColor(with: traitCollection))
+                                 color: strokeColor.resolvedCGColor(with: traitCollection),
+                                 weight: weight)
             }
             return
         }

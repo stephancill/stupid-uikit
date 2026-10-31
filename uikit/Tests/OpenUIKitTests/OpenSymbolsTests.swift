@@ -190,6 +190,46 @@ final class OpenSymbolsTests: XCTestCase {
         XCTAssertNil(OpenSymbols.layout(name: "heart", pointSize: .nan))
     }
 
+    // MARK: Weight
+
+    private func inkArea(_ name: String, weight: UIImage.SymbolWeight) throws -> CGFloat {
+        let bounds = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let placed = try XCTUnwrap(OpenSymbols.paths(name: name, in: bounds, weight: weight))
+        let bitmap = Bitmap(width: 64, height: 64)
+        let canvas = Canvas(bitmap: bitmap, scale: 1)
+        for path in placed.paths {
+            canvas.fill(path, color: CanvasColor.black, evenOdd: placed.evenOdd)
+        }
+        return stride(from: 3, to: bitmap.pixels.count, by: 4)
+            .reduce(0) { $0 + CGFloat(bitmap.pixels[$1]) / 255 }
+    }
+
+    func testSemiboldAndHeavierDrawPhosphorBoldForRegularGlyphs() throws {
+        XCTAssertFalse(OpenSymbols.usesBoldGlyph(.medium))
+        XCTAssertTrue(OpenSymbols.usesBoldGlyph(.semibold))
+        XCTAssertTrue(OpenSymbols.usesBoldGlyph(.black))
+        XCTAssertEqual(OpenSymbols.symbolWeight(forFontWeight: .semibold), .semibold)
+        XCTAssertEqual(OpenSymbols.symbolWeight(forFontWeight: .medium), .regular)
+        // Regular glyph: bold has clearly more ink, around the same centre.
+        let regular = try inkArea("chevron.forward", weight: .regular)
+        let bold = try inkArea("chevron.forward", weight: .semibold)
+        XCTAssertGreaterThan(bold, regular * 1.3)
+        // Ring composite thickens too; fill glyphs have one weight.
+        XCTAssertGreaterThan(try inkArea("heart.circle", weight: .bold),
+                             try inkArea("heart.circle", weight: .regular))
+        XCTAssertEqual(try inkArea("heart.fill", weight: .bold),
+                       try inkArea("heart.fill", weight: .regular))
+    }
+
+    func testMirroredGlyphFacesTheOtherWay() throws {
+        // arrowshape.turn.up.left(.fill) is Phosphor's share arrow mirrored
+        // about the viewBox centre; .right is the same arrow unmirrored.
+        let left = try XCTUnwrap(OpenSymbols.glyph(for: "arrowshape.turn.up.left.fill"))
+        let right = try XCTUnwrap(OpenSymbols.glyph(for: "arrowshape.turn.up.right.fill"))
+        XCTAssertEqual(left.bounds.minX, 256 - right.bounds.maxX, accuracy: 0.01)
+        XCTAssertEqual(left.bounds.width, right.bounds.width, accuracy: 0.01)
+    }
+
     // MARK: UIImage(systemName:)
 
     private func alpha(_ image: UIImage) -> [UInt8] {
