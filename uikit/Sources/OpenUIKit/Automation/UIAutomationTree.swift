@@ -274,6 +274,7 @@ public enum UIAutomationTree {
                scrollView.isScrollEnabled, !scrollView.isPagingEnabled {
                 var children: [UIAutomationElement] = []
                 for child in view.subviews { collect(child, inherited, into: &children, inGroup: true) }
+                if view is UICollectionView { children = Self.geometricOrder(children) }
                 out.append(UIAutomationElement(
                     role: "AXGroup", roleDescription: "Group", frame: frame, children: children))
                 return
@@ -283,6 +284,27 @@ public enum UIAutomationTree {
             func first(_ view: UIView) -> Bool { view is UINavigationBar || view is _UINavigationBarBackButton }
             let children = view.subviews.filter(first) + view.subviews.filter { !first($0) }
             for child in children { collect(child, inherited, into: &out, inGroup: inGroup) }
+        }
+
+        /// iOS reads a UIKit collection view's elements top to bottom by
+        /// their centres, then leading to trailing, not in view order.
+        /// Only collection views: a SwiftUI scroll view's nested containers
+        /// (a feed's story carousels) keep their own order, and a flat sort
+        /// interleaved them (the root feed's tree).
+        /// MEASURED iOS 27 simulator (stupid social's chats): a chat's
+        /// collection view lists its date header before the cells (the
+        /// guest added the supplementary view last), and inside a message
+        /// cell the avatar (centre 164.67) before the bubble's time (169)
+        /// and after the text (164.5), though the time label is the
+        /// bubble's subview and the avatar the cell's.
+        static func geometricOrder(_ elements: [UIAutomationElement]) -> [UIAutomationElement] {
+            elements.enumerated().sorted { a, b in
+                let (ya, yb) = (a.element.frame.midY, b.element.frame.midY)
+                if abs(ya - yb) > 0.5 { return ya < yb }
+                let (xa, xb) = (a.element.frame.minX, b.element.frame.minX)
+                if abs(xa - xb) > 0.5 { return xa < xb }
+                return a.offset < b.offset
+            }.map(\.element)
         }
 
         enum Kind {
@@ -316,6 +338,15 @@ public enum UIAutomationTree {
                    label === bar.titleLabel || label === bar.largeTitleLabel {
                     return .heading
                 }
+                // A label that takes taps (user interaction on, an enabled
+                // tap recognizer) is a button to iOS. MEASURED iOS 27
+                // simulator: stupid social's chat text labels (links,
+                // mentions) are Buttons, its sender-name and time labels
+                // StaticText.
+                if label.isUserInteractionEnabled,
+                   label.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer && $0.isEnabled }) == true {
+                    return .button
+                }
                 return .staticText
             case is _UINavigationBarBackButton: return .backButton
             case is _UIBarButtonItemView: return .barButton
@@ -348,6 +379,8 @@ public enum UIAutomationTree {
                 if label == nil {
                     if let title = (view as? UIButton)?.currentTitle {
                         label = title
+                    } else if let text = (view as? UILabel)?.text {
+                        label = text
                     } else {
                         (label, labelIsSymbolDefault) = combinedLabel(of: view)
                     }
@@ -397,7 +430,9 @@ public enum UIAutomationTree {
                     value = text.isEmpty ? field.placeholder : text
                 }
             case .textView:
-                if value == nil { value = (view as? UITextView)?.text }
+                // An empty text area has no value (iOS 27: the chat
+                // composer is `TextArea "Message"`, no value).
+                if value == nil, let text = (view as? UITextView)?.text, !text.isEmpty { value = text }
             case .toggle:
                 if value == nil, let toggle = view as? UISwitch { value = toggle.isOn ? "1" : "0" }
             case .slider:
