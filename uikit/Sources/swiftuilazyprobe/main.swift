@@ -199,10 +199,14 @@ struct PagerFixture: View {
     let small = smallController.view!
     small.frame = CGRect(x: 0, y: 0, width: 320, height: 500)
     await settle(small)
-    let smallFrames = descendants(small).compactMap { $0 as? UILabel }.map { $0.convert($0.bounds, to: small).minY }
+    let smallLabels = descendants(small).compactMap { $0 as? UILabel }
+    let smallFrames = smallLabels.map { $0.convert($0.bounds, to: small).minY }
+    // Rows sit at 0, 34, 68, ... (30 pt frames, 4 pt spacing); each Text is
+    // placed at its own height, centred in its 30 pt frame, as in SwiftUI.
+    let labelInset = smallLabels.first.map { (30 - $0.bounds.height) / 2 } ?? 0
     check(builtRows(small) == Array(0 ..< 5), "small stack fully built")
     check(scrollView(small)?.contentSize.height == 500, "small stack content size is the viewport: \(scrollView(small)?.contentSize.height ?? -1)")
-    check(smallFrames == [0, 34, 68, 102, 136], "small stack lays out as the eager VStack: \(smallFrames)")
+    check(smallFrames == [0, 34, 68, 102, 136].map { $0 + labelInset }, "small stack lays out as the eager VStack: \(smallFrames)")
 
     // 9. A one-row pager (stupid social's story bar shape): 800 rows of
     //    112pt behind a 112pt-tall ScrollView build only the initial window.

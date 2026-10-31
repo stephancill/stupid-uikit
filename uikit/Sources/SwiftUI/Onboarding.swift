@@ -639,13 +639,48 @@ public struct _OpenGeometryReader<Content: _OpenView>: _OpenView {
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        _OpenViewNode(
+        let content = self.content
+        let builder: @MainActor (CGSize) -> _OpenViewNode = { size in
+            content(GeometryProxy(size: size))._makeOpenUIKitNode()
+        }
+        // The content's views (and their @State, tasks, subscriptions and
+        // appearance actions) belong to the graph: build them during
+        // evaluation, at the size layout last placed the reader at. A content
+        // built only at layout time ran outside the graph, so its @State
+        // never kept a value and its `.task`s never ran (MEASURED: stupid
+        // social's story viewer, all inside a GeometryReader, never showed
+        // its CachedAsyncImage avatars). The first layout, and a placement
+        // at a new size, build at layout time and re-evaluate the graph.
+        guard let state = _OpenGraphContext.geometryReaderState() else {
+            return _OpenViewNode(.geometry(_OpenGeometryNode(builder: builder)))
+        }
+        let prebuilt = state.size.map { size in (size: size, node: builder(size)) }
+        return _OpenViewNode(
             .geometry(
-                _OpenGeometryNode { size in
-                    content(GeometryProxy(size: size))._makeOpenUIKitNode()
-                }
+                _OpenGeometryNode(
+                    prebuilt: prebuilt,
+                    placedAt: { size in state.place(at: size) },
+                    builder: builder
+                )
             )
         )
+    }
+}
+
+/// A GeometryReader's size across graph evaluations.
+@MainActor
+final class _OpenGeometryReaderState {
+    private(set) var size: CGSize?
+    private let invalidate: @MainActor () -> Void
+
+    init(invalidate: @escaping @MainActor () -> Void) {
+        self.invalidate = invalidate
+    }
+
+    func place(at size: CGSize) {
+        guard size != self.size else { return }
+        self.size = size
+        invalidate()
     }
 }
 
