@@ -716,6 +716,9 @@ let conformanceTargets: [Target] = [
     // value NavigationLinks, stable toolbar items, inset-grouped Form/List,
     // the iOS 27 back control and the bottom-docked search field.
     .executableTarget(name: "swiftuiscreensprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for SF Symbol accessibility labels in the automation tree
+    // (docs/SYMBOL_ACCESSIBILITY_LABELS.md).
+    .executableTarget(name: "symbollabelsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for the root-screen residuals pass (docs/ROOT_SCREEN_RESIDUALS.md).
     .executableTarget(name: "rootresidualsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",

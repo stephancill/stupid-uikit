@@ -6320,7 +6320,8 @@ private enum _ViewRenderer {
                 )
             }
             symbol.accessibilityIdentifier = "SwiftUI.Image.systemName.\(name)"
-            symbol._automationAccessibility = _UIAutomationAccessibility(role: .image, identifier: name)
+            symbol._automationAccessibility = _UIAutomationAccessibility(
+                role: .image, identifier: name, symbolName: name)
             surface.addSubview(symbol)
         case .named(let name, let bundle):
             let raw = UIImage(named: name, in: bundle, compatibleWith: nil)

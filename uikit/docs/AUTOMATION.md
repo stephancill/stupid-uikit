@@ -56,22 +56,27 @@ properties but drives no assistive technology):
   "Search", or the SF Symbol name as id), `UITextField` (value: text or placeholder),
   `UITextView`, `UISwitch` (value 0/1), `UISlider`.
 - a control's label is its content's labels joined with ", " (iOS's composition, e.g.
-  `Button "Reply, Actors: alex_smith, 3m, ￼ alex_smith replied to you, …"`); an unlabelled
-  image-only control reports its symbol name as id.
+  `Button "Reply, Actors: alex_smith, 3m, ￼ alex_smith replied to you, …"`).
+- SF Symbols take iOS 27's accessibility label for the symbol when the app gave none
+  (`Image "Favourite" id=star.fill`, `Button "Close" id=xmark`; docs/SYMBOL_ACCESSIBILITY_LABELS.md).
+  Composed labels use symbol labels only when the content has no other label; a control labelled
+  only by symbols, or by none, reports its symbol name as id.
 - the frameworks' own identifiers (`SwiftUI.…`, `OpenUIKit.…`) are never reported.
 
 The SwiftUI layer states what its views mean through `UIView._automationAccessibility`
 (`_UIAutomationAccessibility`, stored in the accessibility side table): `Image` views are Image
-elements (`Image(systemName:)` with the symbol name as id, `Image("name")` labelled by its name);
-`NavigationLink` is a Button; `.accessibilityLabel/Hint/Value/AddTraits/Identifier` apply to every
-element inside the modified view (SwiftUI semantics — a label on a stack labels each element in it)
-instead of making the wrapper an element; `.accessibilityElement(children: .combine/.ignore)` makes
+elements (`Image(systemName:)` with the symbol name as id and the symbol's iOS label,
+`Image("name")` labelled by its name); `NavigationLink` is a Button;
+`.accessibilityLabel/Hint/Value/AddTraits/Identifier` apply to every element inside the modified
+view (SwiftUI semantics — a label on a stack labels each element in it) instead of making the
+wrapper an element; `.accessibilityElement(children: .combine/.ignore)` makes
 one element whose label combines (or ignores) the content.
 
-Known differences from the iOS 27 simulator: SF Symbol images have no Apple label (Apple's symbol
-descriptions are not available; the id carries the name), the navigation bar's large title is a
-Heading where iOS 27 sometimes reports an empty `Group id=<title>` "Nav bar", and element order is
-view order (iOS sorts some containers geometrically).
+Known differences from the iOS 27 simulator: SF Symbols outside OpenUIKit's label table (generated
+for stupid social's symbols) and languages other than English have no label (the id carries the
+name), the navigation bar's large title is a Heading where iOS 27 sometimes reports an empty
+`Group id=<title>` "Nav bar", and element order is view order (iOS sorts some containers
+geometrically).
 
 ## Text input
 

@@ -2930,6 +2930,16 @@ public struct _OpenIconOnlyLabelStyleContent<Source: _OpenView>: _OpenView {
     }
 }
 
+/// The string of a plain `Text` node (through its modifiers), if it is one.
+@MainActor
+private func _openPlainTextContent(_ node: _OpenViewNode) -> String? {
+    switch node.kind {
+    case .text(let string): return string
+    case .modified(let content, _): return _openPlainTextContent(content)
+    default: return nil
+    }
+}
+
 @MainActor
 private func _openApplyingIconOnlyLabelStyle(_ node: _OpenViewNode) -> _OpenViewNode {
     switch node.kind {
@@ -2937,6 +2947,11 @@ private func _openApplyingIconOnlyLabelStyle(_ node: _OpenViewNode) -> _OpenView
         // _OpenLabel's structural spelling is exactly icon + title with a
         // six-point gap.  Keep the actual icon node (including its modifiers)
         // so tint, symbol mode and accessibility still reach the host.
+        // SwiftUI still labels an icon-only Label with its title (not the
+        // SF Symbol's own label).
+        if let title = _openPlainTextContent(children[1]) {
+            return _OpenViewNode(.modified(children[0], .accessibilityLabel(title)))
+        }
         return children[0]
     case .modified(let content, let modification):
         return _OpenViewNode(

@@ -46,6 +46,10 @@ public struct _UIAutomationAccessibility {
     public var addedTraits: UIAccessibilityTraits
     /// The view is one element whose label combines (or ignores) its content.
     public var children: Children?
+    /// The SF Symbol an image element draws (`Image(systemName:)`). Without
+    /// a label of its own it takes iOS's label for the symbol
+    /// (`_UISymbolAccessibility`).
+    public var symbolName: String?
 
     public init(
         role: Role? = nil,
@@ -54,7 +58,8 @@ public struct _UIAutomationAccessibility {
         value: String? = nil,
         identifier: String? = nil,
         addedTraits: UIAccessibilityTraits = [],
-        children: Children? = nil
+        children: Children? = nil,
+        symbolName: String? = nil
     ) {
         self.role = role
         self.label = label
@@ -63,6 +68,7 @@ public struct _UIAutomationAccessibility {
         self.identifier = identifier
         self.addedTraits = addedTraits
         self.children = children
+        self.symbolName = symbolName
     }
 }
 
@@ -86,6 +92,12 @@ public struct UIAutomationElement: Equatable {
     public var value: String?
     public var frame: CGRect
     public var children: [UIAutomationElement]
+    /// The label is iOS's default for an SF Symbol rather than text or a
+    /// label the app set. iOS composes a container's label from such labels
+    /// only when its content has no other label (a Button showing only a
+    /// symbol is "Close"; a Button with a title and a trailing symbol is
+    /// just its title). Not part of the printed tree.
+    public var labelIsSymbolDefault: Bool = false
 
     public init(
         role: String,
@@ -324,18 +336,34 @@ public enum UIAutomationTree {
             var label = inherited.label ?? view.accessibilityLabel
             var value = inherited.value ?? view.accessibilityValue
             var identifier = inherited.identifier ?? appIdentifier(view)
+            var labelIsSymbolDefault = false
             switch kind {
             case .explicit:
-                if label == nil { label = combinedLabel(of: view) }
+                if label == nil { (label, labelIsSymbolDefault) = combinedLabel(of: view) }
             case .staticText, .heading:
                 if label == nil { label = (view as? UILabel)?.text ?? (view as? UITextView)?.text }
                 if kind == .heading { traits.insert(.header) }
             case .button:
                 traits.insert(.button)
                 if label == nil {
-                    label = (view as? UIButton)?.currentTitle ?? combinedLabel(of: view)
+                    if let title = (view as? UIButton)?.currentTitle {
+                        label = title
+                    } else {
+                        (label, labelIsSymbolDefault) = combinedLabel(of: view)
+                    }
                 }
-                if label == nil, identifier == nil { identifier = firstSymbolName(in: view) }
+                // A UIKit button showing only a symbol image (its image view is
+                // not an element of its own).
+                if label == nil, let name = firstSymbolName(in: view),
+                   let symbolLabel = _UISymbolAccessibility.label(forSymbolNamed: name) {
+                    label = symbolLabel
+                    labelIsSymbolDefault = true
+                }
+                // The symbol's name stays the identifier of a control labelled
+                // only by it (iOS: `Button "Close" id=xmark`).
+                if label == nil || labelIsSymbolDefault, identifier == nil {
+                    identifier = firstSymbolName(in: view)
+                }
             case .backButton:
                 traits.insert(.button)
                 if label == nil { label = (view as? _UINavigationBarBackButton)?.backLabel.text }
@@ -349,12 +377,20 @@ public enum UIAutomationTree {
                         label = "\(system)".prefix(1).uppercased() + "\(system)".dropFirst()
                     }
                     if identifier == nil { identifier = item.accessibilityIdentifier }
-                    if label == nil, identifier == nil {
-                        identifier = item.image?._systemSymbolName ?? firstSymbolName(in: view)
+                    let symbol = item.image?._systemSymbolName ?? firstSymbolName(in: view)
+                    if label == nil, let symbol,
+                       let symbolLabel = _UISymbolAccessibility.label(forSymbolNamed: symbol) {
+                        label = symbolLabel
+                        labelIsSymbolDefault = true
                     }
+                    if label == nil || labelIsSymbolDefault, identifier == nil { identifier = symbol }
                 }
             case .image:
                 traits.insert(.image)
+                if label == nil, let name = view._automationAccessibility?.symbolName {
+                    label = _UISymbolAccessibility.label(forSymbolNamed: name)
+                    labelIsSymbolDefault = label != nil
+                }
             case .textField:
                 if value == nil, let field = view as? UITextField {
                     let text = field.text ?? ""
@@ -368,9 +404,11 @@ public enum UIAutomationTree {
                 if value == nil, let slider = view as? UISlider { value = "\(slider.value)" }
             }
             let (role, description) = Self.role(kind: kind, traits: traits)
-            return UIAutomationElement(
+            var element = UIAutomationElement(
                 role: role, roleDescription: description,
                 label: label, identifier: identifier, value: value, frame: frame)
+            element.labelIsSymbolDefault = labelIsSymbolDefault
+            return element
         }
 
         /// `.accessibilityElement(children: .combine / .ignore)`: one element.
@@ -387,8 +425,8 @@ public enum UIAutomationTree {
                 element.children.forEach(flatten)
             }
             parts.forEach(flatten)
-            let labels = flat.compactMap(\.label)
-            let label = inherited.label ?? (labels.isEmpty ? nil : labels.joined(separator: ", "))
+            let composed = Self.composedLabel(flat)
+            let label = inherited.label ?? composed.label
             var role = "AXGenericElement"
             var description = ""
             if inherited.traits.contains(.header) {
@@ -400,24 +438,41 @@ public enum UIAutomationTree {
             } else if !flat.isEmpty, flat.allSatisfy({ $0.role == "AXStaticText" }) {
                 (role, description) = ("AXStaticText", "text")
             }
-            return UIAutomationElement(
+            var element = UIAutomationElement(
                 role: role, roleDescription: description,
                 label: label, identifier: inherited.identifier ?? appIdentifier(view),
                 value: inherited.value, frame: frame)
+            element.labelIsSymbolDefault = inherited.label == nil && composed.fromSymbols
+            return element
         }
 
         /// A control's label as iOS composes it: its content's labels
-        /// (text, labelled images, nested labels) joined with ", ".
-        mutating func combinedLabel(of view: UIView) -> String? {
+        /// (text, labelled images, nested labels) joined with ", ";
+        /// `fromSymbols` when only SF Symbol defaults made it.
+        mutating func combinedLabel(of view: UIView) -> (label: String?, fromSymbols: Bool) {
             var parts: [UIAutomationElement] = []
             for child in view.subviews { collect(child, Inherited(), into: &parts, inGroup: true) }
-            var labels: [String] = []
+            var flat: [UIAutomationElement] = []
             func visit(_ element: UIAutomationElement) {
-                if let label = element.label, !label.isEmpty { labels.append(label) }
+                flat.append(element)
                 element.children.forEach(visit)
             }
             parts.forEach(visit)
-            return labels.isEmpty ? nil : labels.joined(separator: ", ")
+            return Self.composedLabel(flat)
+        }
+
+        /// Joins the labels of `elements` with ", ". SF Symbol default labels
+        /// count only when nothing else is labelled — measured on iOS 27:
+        /// SwiftUI `Button { HStack { Text("GitHub"); Spacer();
+        /// Image(systemName: "arrow.up.forward.square") } }` is
+        /// `Button "GitHub"`, `Button { Image(systemName: "xmark") }` is
+        /// `Button "Close" id=xmark`.
+        static func composedLabel(_ elements: [UIAutomationElement]) -> (label: String?, fromSymbols: Bool) {
+            let labelled = elements.filter { ($0.label ?? "").isEmpty == false }
+            let own = labelled.filter { !$0.labelIsSymbolDefault }
+            let chosen = own.isEmpty ? labelled : own
+            guard !chosen.isEmpty else { return (nil, false) }
+            return (chosen.compactMap(\.label).joined(separator: ", "), own.isEmpty)
         }
 
         /// The SF Symbol an unlabelled image-only control draws, so an
