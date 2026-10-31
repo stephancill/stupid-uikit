@@ -1213,8 +1213,10 @@ public struct _OpenText: _OpenView {
         _applying { if $0.weight == nil { $0.weight = .some(weight) } }
     }
 
+    /// The bold trait (`Font.Weight.boldTrait`), not `fontWeight(.bold)`:
+    /// on iOS it is semibold for most fonts (`_OpenFont.boldTraitWeight`).
     nonisolated public func bold() -> _OpenText {
-        fontWeight(.bold)
+        fontWeight(.boldTrait)
     }
 
     nonisolated public func bold(_ isActive: Bool) -> _OpenText {
@@ -3240,7 +3242,7 @@ public extension _OpenView {
     }
 
     func bold() -> some _OpenView {
-        fontWeight(.bold)
+        fontWeight(.boldTrait)
     }
 
     func multilineTextAlignment(_ alignment: TextAlignment) -> some _OpenView {

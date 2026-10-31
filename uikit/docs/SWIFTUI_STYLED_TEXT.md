@@ -48,6 +48,21 @@ contribute nothing) and key equality compares `rawValue` only. Other values
 still interpolate with `String(describing:)` (Apple formats numbers through
 format specifiers, e.g. `"\(3.14)"` shows `3.140000` there).
 
+## Bold is a trait, not a weight
+
+`Text.bold()`, `View.bold()` and `Font.bold()` add the bold trait. On the iOS
+font cut it resolves per font (`_OpenFont.boldTraitWeight`), as MEASURED on
+the iOS 27.0 simulator (iPhone SE 3rd generation, SwiftUI `ImageRenderer` at
+2x, pixel-identical matches against `.weight(...)`): `.largeTitle`, `.title`
+and `.title2` become bold; every other text style and `.system(size:)` at
+10-34 pt become **semibold**; an explicit medium or semibold system weight is
+unchanged. `fontWeight(.bold)` and `.weight(.bold)` stay the bold weight. So
+stupid social's `Text(actor).bold()` in `.body` is semibold 17, which is why
+its actor names looked too heavy and wide. The macOS cut keeps bold.
+Unmeasured: light/thin bases (kept bold); a text style that already carries
+a weight follows the system-size rule (`.title2.weight(.semibold).bold()` is
+bold on iOS, semibold here).
+
 ## Rendering (`Hosting.swift`)
 
 - A Text whose runs are all strings with one attribute set limited to font,

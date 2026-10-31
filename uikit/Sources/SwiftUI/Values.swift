@@ -20,10 +20,16 @@ public struct _OpenFont: Hashable, Sendable {
 
     public struct Weight: Hashable, Sendable {
         let value: UIFont.Weight
+        /// The bold *trait* (`Text.bold()`, `View.bold()`), not the bold
+        /// weight: on the iOS cut it resolves per font (`boldTraitWeight`).
+        let isBoldTrait: Bool
 
-        init(_ value: UIFont.Weight) {
+        init(_ value: UIFont.Weight, isBoldTrait: Bool = false) {
             self.value = value
+            self.isBoldTrait = isBoldTrait
         }
+
+        static let boldTrait = Weight(.bold, isBoldTrait: true)
 
         public static let regular = Weight(.regular)
         public static let medium = Weight(.medium)
@@ -87,8 +93,43 @@ public struct _OpenFont: Hashable, Sendable {
         )
     }
 
+    /// SwiftUI's `Font.bold()` adds the bold trait, which on iOS is not
+    /// always the bold weight (see `boldTraitWeight`).
     public func bold() -> _OpenFont {
-        weight(.bold)
+        guard OpenUIKitRuntime.systemFontCut == .iOS else { return weight(.bold) }
+        switch storage {
+        case .textStyle(let style):
+            return weight(Weight(Self.boldTraitWeight(style: style, weight: .regular)))
+        case .uiFont(_, let stored, _):
+            return weight(Weight(Self.boldTraitWeight(style: nil, weight: stored)))
+        case .font(let font):
+            return weight(Weight(Self.boldTraitWeight(style: nil, weight: font.weight)))
+        }
+    }
+
+    /// The weight the bold trait gives a system font on iOS. MEASURED
+    /// iPhone SE (3rd generation) / iOS 27.0 (24A434), SwiftUI ImageRenderer
+    /// at 2x, "alex_smith Hg" compared pixel for pixel against
+    /// `.weight(.regular … .heavy)`: `Text.bold()` and `Font.bold()` render
+    /// `.largeTitle`, `.title` and `.title2` bold, every other text style
+    /// (headline … caption2) semibold, `.system(size:)` at 10-34 pt
+    /// semibold (default, monospaced and rounded designs), and leave an
+    /// explicit medium or semibold system weight unchanged.
+    /// `fontWeight(.bold)` and `.weight(.bold)` are the bold weight.
+    /// Not measured here (kept bold): light/thin bases; a text style that
+    /// already carries a weight (`.body.weight(.medium).bold()` measured
+    /// semibold, `.title2.weight(.semibold).bold()` bold) follows the
+    /// size-only `.uiFont` rule, which gives medium and semibold.
+    static func boldTraitWeight(style: TextStyle?, weight: UIFont.Weight) -> UIFont.Weight {
+        if let style {
+            switch style {
+            case .largeTitle, .title, .title2: return .bold
+            default: return .semibold
+            }
+        }
+        if weight == .regular { return .semibold }
+        if weight == .medium || weight == .semibold { return weight }
+        return .bold
     }
 
     /// SwiftUI's `Font.system(_:design:weight:)`. With neither a design nor a
@@ -187,19 +228,30 @@ public struct _OpenFont: Hashable, Sendable {
             case .caption2: size = 11
             case .headline, .body: size = 17
             }
-            let weight: UIFont.Weight = override?.value
+            var weight: UIFont.Weight = override?.value
                 ?? (style == .headline ? .semibold : .regular)
+            if override?.isBoldTrait == true, OpenUIKitRuntime.systemFontCut == .iOS {
+                weight = Self.boldTraitWeight(style: style, weight: .regular)
+            }
             return .systemFont(ofSize: size, weight: weight)
         case .uiFont(let pointSize, let storedWeight, let design):
+            var weight = override?.value ?? storedWeight
+            if override?.isBoldTrait == true, OpenUIKitRuntime.systemFontCut == .iOS {
+                weight = Self.boldTraitWeight(style: nil, weight: storedWeight)
+            }
             let descriptor = UIFontDescriptor(
                 pointSize: pointSize,
-                weight: override?.value ?? storedWeight,
+                weight: weight,
                 design: design
             )
             return UIFont(descriptor: descriptor, size: pointSize)
         case .font(let font):
             guard let override, font.fontName.hasPrefix(".SF") else { return font }
-            return .systemFont(ofSize: font.pointSize, weight: override.value)
+            var weight = override.value
+            if override.isBoldTrait, OpenUIKitRuntime.systemFontCut == .iOS {
+                weight = Self.boldTraitWeight(style: nil, weight: font.weight)
+            }
+            return .systemFont(ofSize: font.pointSize, weight: weight)
         }
     }
 }
