@@ -85,3 +85,10 @@ format specifiers, e.g. `"\(3.14)"` shows `3.140000` there).
   `Text(AttributedString)` runs and `Text: Equatable` are not implemented.
 - Text-level `foregroundStyle` resolves the style to one colour, like the view
   modifier (gradients draw their first colour).
+- Bold body text under the iOS cut mixes fonts: `glyph_ink_ios.json` has only
+  97 `system-bold|17|light` masks (no `m`, `t`, `h`, …), and a miss draws the
+  outline fallback (DejaVu Sans Bold in the portable bundle) at SF Pro's
+  advances. DejaVu Bold is wider, so runs like "alex_smith" / "amy_stories"
+  look tight or overlapping. Advances and kerning are correct; the fix is
+  harvesting `system-bold|17` ASCII (light + dark, F0.0/F0.5) with
+  `SIM_DEVICE=2x scripts/ink_probe_sim.sh`.
