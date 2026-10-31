@@ -62,6 +62,16 @@ of rounded clips/corners differ by a few counts on a handful of pixels
   rasterizer, clip from Canvas's mirror clip mask). Chosen over
   `QZContextClipToMask` + fill to keep label output byte-identical with the
   tuned glyph smoothing (and it is much faster: ClipToMask is O(surface)).
+- **drawMask(blendGamma:)** (the gamma text blend used by Catalyst-table
+  harvested glyph ink, UILabel at scale 2) goes through the backend too
+  (`CanvasBackend.drawMaskGamma`), sharing one straight-alpha kernel
+  (`_TextGammaBlend`) between both backends. It used to write straight
+  into `bitmap.pixels`, which under quartz is only the mirror of the QZ
+  backing: the next op whose sync region overlapped (typically the
+  following glyph's padded mask) copied the backing back over it and
+  erased the glyph. Seen as 2x-only glyph drops in stupid social
+  ("Nico" -> "N co", "Love" -> "Lcve"); 1x never takes the Catalyst ink
+  path. Regression: `BackendParityTests.testGammaMaskSurvivesOverlappingMaskQuartz`.
 - **hardEdges** → `QZContextSetShouldAntialias(false)` around the fill; QZ's
   non-AA rasterizer thresholds at pixel centers, same as the Swift
   `_fillHardEdged` sampling.

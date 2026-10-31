@@ -52,6 +52,10 @@ protocol CanvasBackend: AnyObject {
     func drawImage(_ image: Bitmap, in rect: CGRect, interpolate: Bool)
     func drawMask(_ mask: [UInt8], width: Int, height: Int,
                   atPixelX x: Int, pixelY y: Int, color: CanvasColor)
+    /// Gamma-space text blend of a TRUE-coverage mask (CanvasTextBlend.swift).
+    /// Must draw into the backend's CURRENT render target like drawMask.
+    func drawMaskGamma(_ mask: [UInt8], width: Int, height: Int,
+                       atPixelX x: Int, pixelY y: Int, blend: _TextGammaBlend)
 
     // Additive v2 ops (CanvasEffects.swift). Shadow state lives in
     // Canvas.state.shadow and is honored by `fill`; drawShadowOnly renders
@@ -121,6 +125,10 @@ final class SwiftRasterizerBackend: CanvasBackend {
     func drawMask(_ mask: [UInt8], width: Int, height: Int,
                   atPixelX x: Int, pixelY y: Int, color: CanvasColor) {
         canvas._drawMask(mask, width, height, x, y, color)
+    }
+    func drawMaskGamma(_ mask: [UInt8], width: Int, height: Int,
+                       atPixelX x: Int, pixelY y: Int, blend: _TextGammaBlend) {
+        canvas._drawMaskGamma(mask, width, height, x, y, blend)
     }
     func drawLinearGradient(colors: [CanvasColor], locations: [CGFloat],
                             start: CGPoint, end: CGPoint, in rect: CGRect) {

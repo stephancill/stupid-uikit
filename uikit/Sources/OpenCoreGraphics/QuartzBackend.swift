@@ -379,6 +379,37 @@ final class QuartzBackend: CanvasBackend {
                     x1: Swift.min(width, ox + w), y1: Swift.min(height, oy + h)))
     }
 
+    func drawMaskGamma(_ mask: [UInt8], width w: Int, height h: Int,
+                       atPixelX ox: Int, pixelY oy: Int, blend: _TextGammaBlend) {
+        let x0 = Swift.max(0, ox), y0 = Swift.max(0, oy)
+        let x1 = Swift.min(width, ox + w), y1 = Swift.min(height, oy + h)
+        guard x0 < x1, y0 < y1, let data = QZBitmapContextGetData(ctx) else { return }
+        let px = data.assumingMemoryBound(to: UInt8.self)
+        let bpr = bytesPerRow
+        // The shared straight-alpha kernel, applied to the premultiplied
+        // backing (exact for opaque destinations, the common case).
+        _TextGammaBlend.forEachCoveredPixel(mask, w, h, ox, oy, surfaceWidth: width,
+                                            surfaceHeight: height,
+                                            clip: canvas.state.clipMask) { x, y, cov in
+            let o = y * bpr + x * 4
+            let a = Int(px[o + 3])
+            var p: (UInt8, UInt8, UInt8, UInt8)
+            if a == 0 {
+                p = (0, 0, 0, 0)
+            } else if a == 255 {
+                p = (px[o], px[o + 1], px[o + 2], 255)
+            } else {
+                func s(_ v: UInt8) -> UInt8 { UInt8(Swift.min(255, (Int(v) * 255 + a / 2) / a)) }
+                p = (s(px[o]), s(px[o + 1]), s(px[o + 2]), UInt8(a))
+            }
+            blend.apply(&p, coverage: cov)
+            let na = Int(p.3)
+            func m(_ v: UInt8) -> UInt8 { na == 255 ? v : UInt8((Int(v) * na + 127) / 255) }
+            px[o] = m(p.0); px[o + 1] = m(p.1); px[o + 2] = m(p.2); px[o + 3] = p.3
+        }
+        syncRegion((x0: x0, y0: y0, x1: x1, y1: y1))
+    }
+
     func applyBackdropFilter(_ filter: _CanvasBackdropFilter,
                              coverage: [UInt8], bounds: _CanvasDeviceBounds) {
         guard let data = QZBitmapContextGetData(ctx) else { return }

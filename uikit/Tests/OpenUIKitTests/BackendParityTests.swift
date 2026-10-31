@@ -162,6 +162,35 @@ final class BackendParityTests: XCTestCase {
         XCTAssertEqual(bmp.pixels[(7 * 10 + 2) * 4 + 1], 255)
     }
 
+    /// Regression (stupid social story names at 2x: "Nico" drew "N co"):
+    /// the gamma text blend wrote straight into `bitmap.pixels`, bypassing
+    /// the Quartz backing, so the next overlapping op's sync erased it.
+    /// A gamma-blended glyph followed by an overlapping plain mask must
+    /// keep its ink and match the Swift rasterizer.
+    func testGammaMaskSurvivesOverlappingMaskQuartz() {
+        let w = 6, h = 8
+        let stem = [UInt8](repeating: 255, count: w * h)
+        let empty = [UInt8](repeating: 0, count: 10 * h)
+        var neighbor = empty
+        for y in 0..<h { neighbor[y * 10 + 9] = 255 }
+        let ink = CanvasColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let draw: (Canvas) -> Void = { c in
+            c.fill(rect: CGRect(x: 0, y: 0, width: 24, height: 12),
+                   color: CanvasColor(red: 1, green: 1, blue: 1, alpha: 1))
+            c.drawMask(stem, width: w, height: h, atPixelX: 4, pixelY: 2, color: ink,
+                       blendGamma: 0.79)
+            // Padded box over the stem (all-zero there), ink further right.
+            c.drawMask(neighbor, width: 10, height: h, atPixelX: 2, pixelY: 2, color: ink)
+        }
+        CanvasBackendSelection.current = .quartz
+        let bmp = Bitmap(width: 24, height: 12)
+        draw(Canvas(bitmap: bmp, scale: 1))
+        let o = (5 * 24 + 6) * 4
+        XCTAssertEqual(bmp.pixels[o], 0, "gamma-blended ink was erased by the next mask's sync")
+        XCTAssertLessThanOrEqual(maxDelta(width: 24, height: 12, scale: 1, draw), 1,
+                                 "gamma text blend differs between backends")
+    }
+
     func testStrokeParityCoarse() {
         // Stroking models differ in join/cap details; require agreement on a
         // simple straight segment away from the ends.

@@ -25,29 +25,74 @@ extension Canvas {
     /// the sRGB-effective coverage of the appropriate polarity
     /// (`darkCalibration`: glyph calibrated against a black background),
     /// matching how real UIKit label layers store glyph ink.
+    ///
+    /// Dispatched through the backend like every other drawing op: the
+    /// Quartz backend's QZ backing is the authoritative surface and
+    /// `bitmap.pixels` only its mirror, so blending into the mirror directly
+    /// was overwritten by the next op whose sync region overlapped it (the
+    /// following glyph's mask erased harvested-ink glyphs at 2x).
     public func drawMask(_ mask: [UInt8], width: Int, height: Int,
                          atPixelX x: Int, pixelY y: Int, color: CanvasColor,
                          blendGamma gamma: CGFloat, darkCalibration: Bool = false) {
-        _drawMaskGamma(mask, width, height, x, y, color, gamma, darkCalibration)
+        guard let blend = _TextGammaBlend(color: color, gamma: gamma,
+                                          darkCalibration: darkCalibration) else { return }
+        backend.drawMaskGamma(mask, width: width, height: height,
+                              atPixelX: x, pixelY: y, blend: blend)
     }
 
+    /// Swift-rasterizer implementation: blends into the straight-alpha
+    /// `bitmap.pixels`, which that backend owns.
     func _drawMaskGamma(_ mask: [UInt8], _ w: Int, _ h: Int, _ ox: Int, _ oy: Int,
-                        _ color: CanvasColor, _ gamma: CGFloat, _ darkCal: Bool) {
-        guard color.alpha > 0, w > 0, h > 0 else { return }
-        let lut = _GammaLUT.shared(gamma: gamma)
+                        _ blend: _TextGammaBlend) {
         let bw = bitmap.width
-        let clip = state.clipMask
-        let my0 = Swift.max(0, -oy), my1 = Swift.min(h, bitmap.height - oy)
-        let mx0 = Swift.max(0, -ox), mx1 = Swift.min(w, bw - ox)
-        guard my0 < my1, mx0 < mx1 else { return }
-        let ca = color.alpha
-        let src = [color.red, color.green, color.blue]
+        _TextGammaBlend.forEachCoveredPixel(mask, w, h, ox, oy, surfaceWidth: bw,
+                                            surfaceHeight: bitmap.height,
+                                            clip: state.clipMask) { x, y, cov in
+            let o = (y * bw + x) * 4
+            var px = (bitmap.pixels[o], bitmap.pixels[o + 1],
+                      bitmap.pixels[o + 2], bitmap.pixels[o + 3])
+            blend.apply(&px, coverage: cov)
+            bitmap.pixels[o] = px.0; bitmap.pixels[o + 1] = px.1
+            bitmap.pixels[o + 2] = px.2; bitmap.pixels[o + 3] = px.3
+        }
+    }
+}
+
+/// The per-pixel gamma text blend on STRAIGHT-alpha RGBA8, shared by both
+/// canvas backends so their glyph ink is identical.
+struct _TextGammaBlend {
+    let lut: _GammaLUT
+    let ca: CGFloat
+    let src: (CGFloat, CGFloat, CGFloat)
+    let darkCal: Bool
+    let caG: CGFloat
+    let caDarkG: CGFloat
+
+    init?(color: CanvasColor, gamma: CGFloat, darkCalibration: Bool) {
+        guard color.alpha > 0 else { return nil }
+        lut = _GammaLUT.shared(gamma: gamma)
+        ca = color.alpha
+        src = (color.red, color.green, color.blue)
+        darkCal = darkCalibration
         // Forward map: true coverage -> the sRGB-effective source alpha the
         // layer stores over transparent destinations. The contrast of the
         // map is the COLOR's alpha (verified against oracle renders of both
         // the 0.847-alpha label color and fully-opaque tint colors).
-        let caG = lut.toGamma(1 - ca)      // (1-ca)^g, light polarity
-        let caDarkG = lut.toGamma(ca)      // ca^g, dark polarity
+        caG = lut.toGamma(1 - ca)      // (1-ca)^g, light polarity
+        caDarkG = lut.toGamma(ca)      // ca^g, dark polarity
+    }
+
+    /// Visits every mask pixel with nonzero coverage (after the clip),
+    /// clipped to the surface; `body(x, y, coverage)` in device pixels.
+    static func forEachCoveredPixel(_ mask: [UInt8], _ w: Int, _ h: Int,
+                                    _ ox: Int, _ oy: Int,
+                                    surfaceWidth bw: Int, surfaceHeight bh: Int,
+                                    clip: [UInt8]?,
+                                    _ body: (Int, Int, CGFloat) -> Void) {
+        guard w > 0, h > 0 else { return }
+        let my0 = Swift.max(0, -oy), my1 = Swift.min(h, bh - oy)
+        let mx0 = Swift.max(0, -ox), mx1 = Swift.min(w, bw - ox)
+        guard my0 < my1, mx0 < mx1 else { return }
         for my in my0..<my1 {
             let yy = oy + my
             let maskRow = my * w
@@ -63,49 +108,43 @@ extension Canvas {
                     cov *= CGFloat(cv) / 255
                 }
                 if cov <= 0 { continue }
-                let o = (rowBase + xx) * 4
-                let da = CGFloat(bitmap.pixels[o + 3]) / 255
-                // sRGB-effective source alpha over transparent destinations.
-                let aSrc: CGFloat
-                if darkCal {
-                    aSrc = lut.fromGamma(caDarkG * cov)
-                } else {
-                    aSrc = 1 - lut.fromGamma(1 - (1 - caG) * cov)
-                }
-                let outA = aSrc + da * (1 - aSrc)
-                if outA <= 0 {
-                    bitmap.pixels[o] = 0; bitmap.pixels[o + 1] = 0
-                    bitmap.pixels[o + 2] = 0; bitmap.pixels[o + 3] = 0
-                    continue
-                }
-                if da >= 1 {
-                    // Opaque destination: pure per-channel gamma blend.
-                    for ch in 0..<3 {
-                        let d = CGFloat(bitmap.pixels[o + ch]) / 255
-                        let f = d + ca * (src[ch] - d)
-                        let outG = lut.toGamma(d) + (lut.toGamma(f) - lut.toGamma(d)) * cov
-                        let v = lut.fromGamma(outG)
-                        bitmap.pixels[o + ch] = UInt8((v * 255).rounded().clamped(0, 255))
-                    }
-                } else if da <= 0 {
-                    // Transparent destination: ink accumulates as colored alpha.
-                    for ch in 0..<3 {
-                        bitmap.pixels[o + ch] = UInt8((src[ch] * 255).rounded().clamped(0, 255))
-                    }
-                } else {
-                    // Mixed: blend of the two regimes weighted by dst alpha.
-                    for ch in 0..<3 {
-                        let d = CGFloat(bitmap.pixels[o + ch]) / 255
-                        let f = d + ca * (src[ch] - d)
-                        let outG = lut.toGamma(d) + (lut.toGamma(f) - lut.toGamma(d)) * cov
-                        let blended = lut.fromGamma(outG)
-                        let v = (blended * da + src[ch] * aSrc * (1 - da)) / outA
-                        bitmap.pixels[o + ch] = UInt8((v * 255).rounded().clamped(0, 255))
-                    }
-                }
-                bitmap.pixels[o + 3] = UInt8((outA * 255).rounded().clamped(0, 255))
+                body(xx, yy, cov)
             }
         }
+    }
+
+    func apply(_ px: inout (UInt8, UInt8, UInt8, UInt8), coverage cov: CGFloat) {
+        let da = CGFloat(px.3) / 255
+        // sRGB-effective source alpha over transparent destinations.
+        let aSrc: CGFloat
+        if darkCal {
+            aSrc = lut.fromGamma(caDarkG * cov)
+        } else {
+            aSrc = 1 - lut.fromGamma(1 - (1 - caG) * cov)
+        }
+        let outA = aSrc + da * (1 - aSrc)
+        if outA <= 0 {
+            px = (0, 0, 0, 0)
+            return
+        }
+        func b8(_ v: CGFloat) -> UInt8 { UInt8((v * 255).rounded().clamped(0, 255)) }
+        func channel(_ d8: UInt8, _ s: CGFloat) -> UInt8 {
+            if da <= 0 {
+                // Transparent destination: ink accumulates as colored alpha.
+                return b8(s)
+            }
+            let d = CGFloat(d8) / 255
+            let f = d + ca * (s - d)
+            let outG = lut.toGamma(d) + (lut.toGamma(f) - lut.toGamma(d)) * cov
+            let blended = lut.fromGamma(outG)
+            if da >= 1 {
+                // Opaque destination: pure per-channel gamma blend.
+                return b8(blended)
+            }
+            // Mixed: blend of the two regimes weighted by dst alpha.
+            return b8((blended * da + s * aSrc * (1 - da)) / outA)
+        }
+        px = (channel(px.0, src.0), channel(px.1, src.1), channel(px.2, src.2), b8(outA))
     }
 }
 
