@@ -266,7 +266,11 @@ public enum UIAutomationTree {
                     role: "AXGroup", roleDescription: "Group", frame: frame, children: children))
                 return
             }
-            for child in view.subviews { collect(child, inherited, into: &out, inGroup: inGroup) }
+            // iOS lists a navigation bar's elements before the content it
+            // floats over, and the back button first within the bar.
+            func first(_ view: UIView) -> Bool { view is UINavigationBar || view is _UINavigationBarBackButton }
+            let children = view.subviews.filter(first) + view.subviews.filter { !first($0) }
+            for child in children { collect(child, inherited, into: &out, inGroup: inGroup) }
         }
 
         enum Kind {
