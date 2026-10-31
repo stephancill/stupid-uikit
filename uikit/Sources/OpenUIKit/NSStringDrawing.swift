@@ -82,12 +82,34 @@ extension NSAttributedString {
         options: NSStringDrawingOptions,
         context: NSStringDrawingContext?
     ) -> CGRect {
-        _ = (options, context)
+        _ = context
         let font: UIFont
         if length > 0, let value = attributes(at: 0, effectiveRange: nil)[.font] as? UIFont {
             font = value
         } else {
             font = .systemFont(ofSize: 17)
+        }
+        // Multi-line measurement lays the runs out as a label does (fonts,
+        // attachments, colour emoji, kerning, wrapping at `size.width`), so
+        // a width measured here is one a label of that width keeps on the
+        // same lines. stupid social sizes chat bubbles this way; the
+        // first-font single-line estimate came out 3.5 pt narrower than the
+        // label for a line holding a custom-emoji attachment and a smaller
+        // time run, and the label then wrapped the time onto a line of its
+        // own (iOS 27 simulator: one line, 267 pt).
+        if options.contains(.usesLineFragmentOrigin), size.width > 0, length > 0 {
+            let t = AttributedTextLayout.flatten(self, defaultFont: font,
+                                                 defaultColor: .label)
+            let lines = AttributedTextLayout.wrap(t, maxWidth: size.width, maxLines: 0,
+                                                  scale: OpenUIKitRuntime.imageScreenScale)
+            var w: CGFloat = 0
+            var h: CGFloat = 0
+            for (i, l) in lines.enumerated() {
+                w = Swift.max(w, l.measuredWidth)
+                h += l.height
+                if i < lines.count - 1 { h += l.spacingBelow }
+            }
+            return CGRect(x: 0, y: 0, width: min(size.width, w), height: min(size.height, h))
         }
         let w = FontEngine.measure(string, font: font)
         let h = FontEngine.labelLineHeight(for: font)

@@ -456,9 +456,15 @@ enum LayoutEngine {
             // iPhone 16 / iOS 26.1): the usage footer's label is 46.667 pt
             // (three wrapped lines at 361 pt) and the footer 70.667; with the
             // one-line intrinsic they came out 15.667 and 39.667.
-            let s = width.map {
+            var s = width.map {
                 v.sizeThatFits(CGSize(width: $0, height: CGFloat.greatestFiniteMagnitude))
             } ?? v.intrinsicContentSize
+            if width != nil, v is UIStackView {
+                // A stack's empty axis is "no intrinsic metric", as in its
+                // `intrinsicContentSize`.
+                if s.width == 0 { s.width = UIView.noIntrinsicMetric }
+                if s.height == 0 { s.height = UIView.noIntrinsicMetric }
+            }
             var cs: [Cassowary.Constraint] = []
             if s.width != UIView.noIntrinsicMetric {
                 cs += addIntrinsic(solver, vv.width, Double(s.width),
@@ -614,6 +620,20 @@ enum LayoutEngine {
 
         // Wrapping labels: second pass (see the intrinsic note above).
         for vv in intrinsicViews {
+            // iOS cut: a constraint-sized vertical stack's height depends on
+            // its width as a wrapping label's does (its wrapping labels,
+            // aspect-ratio and constraint-sized rows). Its intrinsic size was
+            // read at its previous width (zero on a first layout), so it is
+            // re-measured at the solved width like a label. stupid social's
+            // chat bubbles (a stack pinned to a fixed-width bubble) came out
+            // a line short or a few points off and the stack then collapsed
+            // its first rows to fit.
+            if OpenUIKitRuntime.systemFontCut == .iOS, let stack = vv.view as? UIStackView,
+               stack.axis == .vertical {
+                for c in intrinsicConstraints[ObjectIdentifier(stack)] ?? [] { try? solver.removeConstraint(c) }
+                addIntrinsics(vv, wrapAt: CGFloat(solver.value(of: vv.width)))
+                continue
+            }
             guard let l = vv.view as? UILabel, l.numberOfLines != 1 else { continue }
             for c in intrinsicConstraints[ObjectIdentifier(l)] ?? [] { try? solver.removeConstraint(c) }
             // Fitting solves always re-measure at the solved width. Ordinary

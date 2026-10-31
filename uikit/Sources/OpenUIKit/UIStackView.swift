@@ -160,8 +160,9 @@ open class UIStackView: UIView {
         // naturalFittingSize).
         if let w = view._explicitSizeConstraint(.width) { s.width = Swift.max(s.width, w) }
         if let h = view._explicitSizeConstraint(.height) { s.height = Swift.max(s.height, h) }
-        applyIOSConstrainedSubviewFloor(to: &s, of: view)
-        applyIOSConstraintFitting(to: &s, of: view)
+        if !applyIOSConstraintFitting(to: &s, of: view) {
+            applyIOSConstrainedSubviewFloor(to: &s, of: view)
+        }
         wrapIOSMultilineLabel(view, wrapWidth: arrangedWidth(bounds.width), size: &s)
         return s
     }
@@ -177,19 +178,30 @@ open class UIStackView: UIView {
     /// exact.
     private static var fittingArrangedView = false
 
-    private func applyIOSConstraintFitting(to s: inout CGSize, of view: UIView) {
-        guard OpenUIKitRuntime.systemFontCut == .iOS else { return }
+    /// True when the engine fitted the view's height (its subviews'
+    /// constraints decide it): that height is what UIKit's solver gives the
+    /// view, so the margin-floor estimate (`applyIOSConstrainedSubviewFloor`)
+    /// must not raise it. MEASURED iOS 27 simulator, stupid social's group
+    /// chat: a reaction row pinned 4 pt below its container's top (bottom at
+    /// low priority) makes a 38 pt container, a reply quote whose labels
+    /// stack is inset 4 pt top and bottom is 40 pt; the floor added the
+    /// plain view's 8 pt margins on both sides.
+    @discardableResult
+    private func applyIOSConstraintFitting(to s: inout CGSize, of view: UIView,
+                                           stackWidth: CGFloat? = nil) -> Bool {
+        guard OpenUIKitRuntime.systemFontCut == .iOS else { return false }
+        let ownWidth = stackWidth ?? bounds.width
         // An aspect-ratio constraint (`height == width * k`, a chat photo)
         // makes the height follow the width the stack gives it.
         if let ratio = view._heightToWidthRatioConstraint() {
-            let fillsWidth = axis == .vertical && alignment == .fill && bounds.width > 0
-            let width = view._explicitSizeConstraint(.width) ?? (fillsWidth ? arrangedWidth(bounds.width) : s.width)
+            let fillsWidth = axis == .vertical && alignment == .fill && ownWidth > 0
+            let width = view._explicitSizeConstraint(.width) ?? (fillsWidth ? arrangedWidth(ownWidth) : s.width)
             s.height = max(s.height, width * ratio.multiplier + ratio.constant)
         }
         // The fitting solve lays the view out, which can ask this stack for
         // its intrinsic size again: measure once, not recursively.
         guard !(view is UIStackView),
-              !view.subviews.isEmpty, !UIStackView.fittingArrangedView else { return }
+              !view.subviews.isEmpty, !UIStackView.fittingArrangedView else { return false }
         UIStackView.fittingArrangedView = true
         defer { UIStackView.fittingArrangedView = false }
         // Only the height is fitted, at a known width: the stack's own width
@@ -199,23 +211,25 @@ open class UIStackView: UIView {
         // collapsed width and grow).
         let intrinsic = view.intrinsicContentSize
         guard intrinsic.height == UIView.noIntrinsicMetric,
-              view._explicitSizeConstraint(.height) == nil else { return }
+              view._explicitSizeConstraint(.height) == nil else { return false }
         let width: CGFloat
-        if axis == .vertical && alignment == .fill && bounds.width > 0 {
-            width = arrangedWidth(bounds.width)
+        if axis == .vertical && alignment == .fill && ownWidth > 0 {
+            width = arrangedWidth(ownWidth)
         } else if let explicit = view._explicitSizeConstraint(.width) {
             width = explicit
         } else if view.bounds.width > 0 {
             width = view.bounds.width
         } else {
-            return
+            return false
         }
         // The engine's fitting solve alone: `constraintFittingSize` also lays
         // the hierarchy out, which re-enters the enclosing solve.
         guard let fitted = LayoutEngine.fittingSize(
             root: view, target: CGSize(width: width, height: 0),
-            freeWidth: false, freeHeight: true) else { return }
+            freeWidth: false, freeHeight: true) else { return false }
+        guard fitted.height > 0 else { return false }
         s.height = max(s.height, fitted.height)
+        return true
     }
 
     /// Extra axis length from a plain arranged view whose SUBVIEWS have
@@ -280,9 +294,21 @@ open class UIStackView: UIView {
     /// intrinsic metrics where present, a nested stack's fitting size, else
     /// zero — under Auto Layout a plain view's current frame is meaningless,
     /// so unlike contentSize(of:) this never reads the child's frame.
-    private func naturalFittingSize(of view: UIView) -> CGSize {
-        var s = (view as? UIStackView)?.sizeThatFits(bounds.size) ?? .zero
-        let intrinsic = view.intrinsicContentSize
+    private func naturalFittingSize(of view: UIView, stackWidth: CGFloat? = nil) -> CGSize {
+        // A nested stack in a filling vertical stack is measured at the
+        // width it will get (iOS cut), so its wrapping labels and
+        // constraint-sized views match its layout.
+        let width = stackWidth ?? bounds.width
+        let measuresNestedAtWidth = OpenUIKitRuntime.systemFontCut == .iOS && axis == .vertical
+            && alignment == .fill && width > 0
+        let nestedSize = measuresNestedAtWidth
+            ? CGSize(width: arrangedWidth(width), height: 0) : bounds.size
+        var s = (view as? UIStackView)?.sizeThatFits(nestedSize) ?? .zero
+        // A nested stack's intrinsic size is measured at its current width
+        // (zero before its first layout); the width-measured size wins.
+        let intrinsic = measuresNestedAtWidth && view is UIStackView
+            ? CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
+            : view.intrinsicContentSize
         if intrinsic.width != UIView.noIntrinsicMetric { s.width = intrinsic.width }
         if intrinsic.height != UIView.noIntrinsicMetric { s.height = intrinsic.height }
         // A view with an explicit SIZE CONSTRAINT of its own contributes that
@@ -291,9 +317,10 @@ open class UIStackView: UIView {
         // often than by intrinsic content — M14, docs/REAL_APP_TEST.md.
         if let w = view._explicitSizeConstraint(.width) { s.width = max(s.width, w) }
         if let h = view._explicitSizeConstraint(.height) { s.height = max(s.height, h) }
-        applyIOSConstrainedSubviewFloor(to: &s, of: view)
-        applyIOSConstraintFitting(to: &s, of: view)
-        wrapIOSMultilineLabel(view, wrapWidth: arrangedWidth(bounds.width), size: &s)
+        if !applyIOSConstraintFitting(to: &s, of: view, stackWidth: width) {
+            applyIOSConstrainedSubviewFloor(to: &s, of: view)
+        }
+        wrapIOSMultilineLabel(view, wrapWidth: arrangedWidth(width), size: &s)
         return s
     }
 
@@ -344,8 +371,9 @@ open class UIStackView: UIView {
             guard OpenUIKitRuntime.systemFontCut == .iOS, axis == .vertical else { return 0 }
             return arrangedWidth(size.width > 0 ? size.width : bounds.width)
         }()
+        let ownWidth = size.width > 0 ? size.width : bounds.width
         for view in visible {
-            var natural = naturalFittingSize(of: view)
+            var natural = naturalFittingSize(of: view, stackWidth: ownWidth)
             wrapIOSMultilineLabel(view, wrapWidth: wrapWidth, size: &natural)
             axisSum += axisLength(natural)
             axisMax = max(axisMax, axisLength(natural))
@@ -472,6 +500,31 @@ open class UIStackView: UIView {
             lengths = visibleContents
             let flexible = visiblePairs.indices.filter { isAxisFlexible(visiblePairs[$0].0) }
             if let lastFlexible = flexible.last {
+                // iOS cut: a flexible view keeps its natural length (a nested
+                // stack's fitting size, a plain view's constraint-fitted
+                // size) and only the slack goes to the last one, as UIKit's
+                // solver gives every view its content when the stack is
+                // sized to fit. Taking every flexible view to 0 collapsed a
+                // chat bubble's header stack (sender name, reply quote) and
+                // gave its height to the content stack's reaction container
+                // (stupid social's group chat, iOS 27 simulator). A real
+                // overflow keeps the Catalyst rule below.
+                if OpenUIKitRuntime.systemFontCut == .iOS {
+                    var natural = lengths
+                    for i in flexible {
+                        let view = visiblePairs[i].0
+                        natural[i] = view is UIStackView
+                            ? visibleContents[i] : axisLength(naturalFittingSize(of: view))
+                    }
+                    // Up to a point short: the stack's own size went
+                    // through pixel rounding the natural lengths did not.
+                    let slack = available - natural.reduce(CGFloat(0), +)
+                    if slack >= -1, natural[lastFlexible] + slack >= 0 {
+                        natural[lastFlexible] += slack
+                        lengths = natural
+                        break
+                    }
+                }
                 for i in flexible { lengths[i] = 0 }
                 let slack = available - lengths.reduce(CGFloat(0), +)
                 if slack >= 0 {

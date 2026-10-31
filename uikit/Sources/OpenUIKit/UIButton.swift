@@ -814,7 +814,12 @@ open class UIButton: UIControl {
         // `configuration.title` nil while still driving the label, so the two
         // stores stay separate and the configuration wins when it has a title.
         if let image = configuration.image {
-            images[State.normal.rawValue] = image.withRenderingMode(.alwaysTemplate)
+            // A configuration tints its image like a template unless the app
+            // asked for the original colours (custom emoji in stupid social's
+            // reaction chips, iOS 27 simulator: drawn in colour, not as a
+            // foreground-coloured square).
+            images[State.normal.rawValue] = image.renderingMode == .alwaysOriginal
+                ? image : image.withRenderingMode(.alwaysTemplate)
         }
         _titleLabel.font = resolvedConfigurationTitleFont(configuration)
         // MEASURED: the default `.byWordWrapping` gives the label

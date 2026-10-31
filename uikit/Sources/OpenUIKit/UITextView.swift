@@ -492,6 +492,33 @@ open class UITextView: UIScrollView, UITextInput, UITextKeyHandling, UITextCaret
         return runs
     }
 
+    /// iOS cut: the height the text needs at `size.width` (a non-scrolling
+    /// text view's self-sizing). TextKit 2 lines advance by the font's line
+    /// height plus its leading. MEASURED iOS 27 simulator, iPhone 16e
+    /// (stupid social's composer: an empty body-font text view with 8 pt
+    /// top/bottom insets that sizes itself from `sizeThatFits`): 38 pt =
+    /// 16 + 20.287 + 1.713. The plain view answer (its current size) kept
+    /// it at its 36 pt starting height. Catalyst keeps UIView's answer.
+    open override func sizeThatFits(_ size: CGSize) -> CGSize {
+        guard OpenUIKitRuntime.systemFontCut == .iOS else { return super.sizeThatFits(size) }
+        let width = size.width > 0 && size.width < CGFloat.greatestFiniteMagnitude / 2
+            ? size.width : bounds.width
+        let wrap = Swift.max(0, width - textContainerInset.left - textContainerInset.right
+                                - 2 * UITextView.lineFragmentPadding)
+        let font = effectiveFont
+        let pitch = FontEngine.metrics(for: font).lineHeight + Swift.max(0, font.leading)
+        let lines: Int
+        if let t = attributedLayoutText {
+            lines = AttributedTextLayout.wrap(t, maxWidth: wrap, maxLines: 0,
+                                              scale: traitCollection.displayScale).count
+        } else {
+            lines = TextLayout.wrap(text, font: font, maxWidth: wrap, maxLines: 0).count
+        }
+        let height = textContainerInset.top + textContainerInset.bottom
+            + CGFloat(Swift.max(1, lines)) * pitch
+        return CGSize(width: width, height: FontEngine.ceilToPixel(height, scale: traitCollection.displayScale > 0 ? traitCollection.displayScale : 2))
+    }
+
     final var contentHeight: CGFloat {
         if let t = attributedLayoutText {
             let lines = AttributedTextLayout.wrap(t, maxWidth: wrapWidth, maxLines: 0,
