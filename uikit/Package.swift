@@ -690,6 +690,7 @@ let conformanceTargets: [Target] = [
     // pager swipes over rows with swipe actions, scroll-view KVO reports,
     // rigid HStack children and the navigation-bar drawer search field.
     .executableTarget(name: "swiftuichatsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    .executableTarget(name: "swiftuilistrestprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for shape masks (docs/SHAPE_MASKS.md): CAShapeLayer in
     // both compositors and SwiftUI `.mask { shape }`.
     .executableTarget(name: "swiftuishapemaskprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
@@ -702,6 +703,9 @@ let conformanceTargets: [Target] = [
     // Native gate for SwiftUI text metrics on the iOS cut
     // (docs/SWIFTUI_TEXT_METRICS.md).
     .executableTarget(name: "swiftuitextmetricsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for SwiftUI full-screen covers and the screenshot status
+    // bar's appearance (docs/SWIFTUI_FULL_SCREEN_COVER.md).
+    .executableTarget(name: "swiftuifullscreencoverprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for screens beyond a root (docs/SWIFTUI_PUSHED_SCREENS.md):
     // value NavigationLinks, stable toolbar items, inset-grouped Form/List,
     // the iOS 27 back control and the bottom-docked search field.

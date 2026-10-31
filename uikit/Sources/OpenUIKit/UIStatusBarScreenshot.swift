@@ -18,10 +18,34 @@
 // Horizontal positions are kept relative to the window's leading and
 // trailing edges; other device families (Dynamic Island, home button) use
 // the same layout centred in their top inset, which is an approximation.
+//
+// Appearance, as iOS resolves it: the topmost controller that covers the
+// screen (the root, or a `.fullScreen` / `.overFullScreen` presentation)
+// supplies `preferredStatusBarStyle`. `.lightContent` draws white ink,
+// `.darkContent` black. `.default` adapts to what is under the bar
+// (UIStatusBarStyle.default: "automatically chooses light or dark content
+// to maintain contrast"): `UIRenderer.render` of the window first renders
+// it without the bar at a quarter of the scale and takes the mean
+// luminance of the bar's strip; below 0.5 the bar is light. iOS's own
+// sampling algorithm is not public; on uniform backgrounds (a white app
+// screen, a black full-screen cover) both agree.
+// MEASURED (iOS 27 iPhone 16e, story viewer over black): light ink is
+// white, the charging bolt is grey 128 with a black rim (178 with a white
+// rim on light), the battery stays systemGreen.
 
 @preconcurrency @MainActor
 final class _UIScreenshotStatusBarView: UIView {
     let timeLabel = UILabel()
+    /// Light ink (white glyphs) over dark content; set before each capture.
+    var lightContent = false {
+        didSet {
+            guard lightContent != oldValue else { return }
+            timeLabel.textColor = ink
+            setNeedsDisplay()
+        }
+    }
+
+    private var ink: UIColor { lightContent ? .white : .black }
 
     init(frame: CGRect, time: String) {
         super.init(frame: frame)
@@ -31,7 +55,7 @@ final class _UIScreenshotStatusBarView: UIView {
         accessibilityIdentifier = "OpenUIKit.ScreenshotStatusBar"
         timeLabel.text = time
         timeLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
-        timeLabel.textColor = .label
+        timeLabel.textColor = ink
         addSubview(timeLabel)
     }
 
@@ -55,7 +79,7 @@ final class _UIScreenshotStatusBarView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        let ink = UIColor.label
+        let ink = self.ink
         let dx = trailing
         let dy = self.dy
 
@@ -106,9 +130,10 @@ final class _UIScreenshotStatusBarView: UIView {
         bolt.close()
         bolt.lineWidth = 1.6
         bolt.lineJoinStyle = .round
-        UIColor.white.setStroke()
+        (lightContent ? UIColor.black : UIColor.white).setStroke()
         bolt.stroke()
-        bolt.fill(with: UIColor(red: 178 / 255, green: 178 / 255, blue: 178 / 255, alpha: 1))
+        let boltGrey: CGFloat = lightContent ? 128 / 255 : 178 / 255
+        bolt.fill(with: UIColor(red: boltGrey, green: boltGrey, blue: boltGrey, alpha: 1))
     }
 }
 
@@ -135,5 +160,48 @@ extension UIWindow {
         addSubview(bar)
         bar.layoutIfNeeded()
         return bar
+    }
+}
+
+extension UIWindow {
+    /// Resolves the screenshot status bar's appearance for the frame about
+    /// to be captured (see the file header). `render` draws the window; it
+    /// is the caller's compositor, called with the bar hidden.
+    func _resolveScreenshotStatusBarAppearance(render: (UIView, CGFloat) -> Bitmap) {
+        guard let bar = subviews.last(where: { $0 is _UIScreenshotStatusBarView })
+            as? _UIScreenshotStatusBarView, !bar.isHidden else { return }
+        // The system status bar is above everything the app shows, including
+        // presentations, which OpenUIKit adds to the window after the bar.
+        if subviews.last !== bar { bringSubviewToFront(bar) }
+        var controller = rootViewController
+        while let presented = controller?.presentedViewController,
+              presented._resolvedPresentationStyle == .fullScreen
+                || presented._resolvedPresentationStyle == .overFullScreen {
+            controller = presented
+        }
+        switch controller?.preferredStatusBarStyle ?? .default {
+        case .lightContent: bar.lightContent = true
+        case .darkContent: bar.lightContent = false
+        case .default:
+            let sampleScale: CGFloat = 0.25
+            bar.isHidden = true
+            let bitmap = render(self, sampleScale)
+            bar.isHidden = false
+            let rows = Swift.min(bitmap.height, Swift.max(1, Int((bar.frame.maxY * sampleScale).rounded())))
+            var total: Double = 0
+            var count = 0
+            for y in 0..<rows {
+                for x in 0..<bitmap.width {
+                    let o = (y * bitmap.width + x) * 4
+                    let a = Double(bitmap.pixels[o + 3]) / 255
+                    // Over the window's white backing, as the screen shows it.
+                    func channel(_ i: Int) -> Double { Double(bitmap.pixels[o + i]) / 255 * a + (1 - a) }
+                    total += 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2)
+                    count += 1
+                }
+            }
+            bar.lightContent = count > 0 && total / Double(count) < 0.5
+        }
+        bar.layoutIfNeeded()
     }
 }

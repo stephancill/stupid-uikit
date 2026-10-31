@@ -688,6 +688,32 @@ private final class _SwiftUIPresentationContainerController: UIViewController,
         contentController.viewIfLoaded?.frame = view.bounds
     }
 
+    // OpenUIKit does not forward appearance to a custom container's children
+    // automatically (UIViewController.shouldAutomaticallyForwardAppearanceMethods):
+    // the hosted content's onAppear/.task/onDisappear ride its hosting
+    // controller's viewDidAppear/viewDidDisappear, so forward them, as UIKit
+    // does for a contained child (MEASURED: a fullScreenCover's root onAppear
+    // never ran, swiftuifullscreencoverprobe).
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        contentController.beginAppearanceTransition(true, animated: animated)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        contentController.endAppearanceTransition()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        contentController.beginAppearanceTransition(false, animated: animated)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        contentController.endAppearanceTransition()
+    }
+
     override func didMove(toParent parent: UIViewController?) {
         super.didMove(toParent: parent)
         if parent is UINavigationController {
@@ -774,7 +800,7 @@ private final class _SwiftUIPresentationHost: UIView {
             configuration: configuration
         )
         switch configuration.kind {
-        case .sheet:
+        case .sheet, .fullScreenCover:
             guard presenter.presentedViewController == nil else { return }
             presenter.present(destination, animated: true)
             destination.presentationController?.delegate = destination
@@ -1085,6 +1111,7 @@ private final class _SwiftUINavigationNodeController: UIViewController {
 
     override func loadView() {
         let host = _SwiftUIHostingView(node: node)
+        host.honorsSafeArea = true
         host.accessibilityIdentifier = "SwiftUI.NavigationStack.content"
         host.didCompleteLayout = { [weak self] in
             self?.completeContainedControllerMoves()
@@ -1802,6 +1829,7 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
     open override func loadView() {
         let node = evaluateRoot()
         let host = _SwiftUIHostingView(node: node)
+        host.honorsSafeArea = true
         host.didCompleteLayout = { [weak self] in
             self?.completeRepresentedControllerMounts()
         }
@@ -2050,7 +2078,7 @@ private func _openContainedControllers(in root: _OpenViewNode) -> [UIViewControl
             if let pressedLabel { visit(pressedLabel) }
             visit(content)
         case .geometry(let geometry):
-            visit(geometry.resolve(CGSize(width: 390, height: 844)))
+            visit(geometry.representative)
         case .scroll(let label), .scrollReader(let label, _),
              .navigationLink(let label, _), .link(let label, _),
              .toggle(let label, _, _):
@@ -2118,7 +2146,7 @@ private func _openContainedViews(in root: _OpenViewNode) -> [UIView] {
             if let pressedLabel { visit(pressedLabel) }
             visit(content)
         case .geometry(let geometry):
-            visit(geometry.resolve(CGSize(width: 390, height: 844)))
+            visit(geometry.representative)
         case .scroll(let label), .scrollReader(let label, _),
              .navigationLink(let label, _), .link(let label, _),
              .toggle(let label, _, _):
@@ -2184,7 +2212,7 @@ private func _openAppearanceActions(
             if let pressedLabel { visit(pressedLabel) }
             visit(content)
         case .geometry(let geometry):
-            visit(geometry.resolve(CGSize(width: 390, height: 844)))
+            visit(geometry.representative)
         case .scroll(let label), .scrollReader(let label, _),
              .navigationLink(let label, _), .link(let label, _),
              .toggle(let label, _, _):
@@ -2245,6 +2273,10 @@ private final class _SwiftUIHostingView: UIView {
     var didCompleteLayout: (@MainActor () -> Void)?
     /// See `_RenderEnvironment.collapsesToolbarVerticalPadding`.
     var collapsesToolbarVerticalPadding = false
+    /// A screen-level host (UIHostingController's view, a NavigationStack
+    /// page) lays its content out in its safe area on the iOS cut, as
+    /// SwiftUI does; bar items and title views do not.
+    var honorsSafeArea = false
     var node: _OpenViewNode {
         didSet { setNeedsLayout() }
     }
@@ -2284,7 +2316,23 @@ private final class _SwiftUIHostingView: UIView {
         }
         clipsToBounds = false
         layer.cornerRadius = 0
-        _ViewRenderer.place(node, in: bounds, on: self, environment: renderEnvironment)
+        var environment = renderEnvironment
+        var rect = bounds
+        let insets = safeAreaInsets
+        if honorsSafeArea, OpenUIKitRuntime.systemFontCut == .iOS, insets != .zero {
+            // SwiftUI proposes the safe area to a screen's content. Scroll
+            // views, lists, forms, navigation and tab containers and UIKit
+            // representables extend under the bars and inset their own
+            // content; `.ignoresSafeArea` extends a view whose edge reaches
+            // the safe area's edge.
+            let safe = bounds.inset(by: insets)
+            environment.safeAreaHost = self
+            environment.safeAreaFullRect = bounds
+            environment.safeAreaSafeRect = safe
+            rect = _ViewRenderer.rect(
+                safe, extendedTo: bounds, edges: _ViewRenderer.safeAreaEdgesExtended(by: node))
+        }
+        _ViewRenderer.place(node, in: rect, on: self, environment: environment)
         _finishRebuildingSubviews()
         didCompleteLayout?()
     }
@@ -2371,6 +2419,13 @@ private struct _RenderEnvironment {
     /// The runs of the Text whose `.text` node is being drawn
     /// (`_OpenViewModification.styledText`); nil for a plain Text.
     var styledText: [_OpenTextRun]?
+    /// The root host's safe area, in `safeAreaHost` coordinates
+    /// (`_SwiftUIHostingView.honorsSafeArea`): content is laid out in
+    /// `safeAreaSafeRect`; `.ignoresSafeArea` extends the edges of a view
+    /// that reach that rect's edges out to `safeAreaFullRect`.
+    var safeAreaHost: UIView?
+    var safeAreaFullRect: CGRect = .zero
+    var safeAreaSafeRect: CGRect = .zero
 
     static let `default` = _RenderEnvironment()
 }
@@ -2379,14 +2434,20 @@ private struct _RenderEnvironment {
 @MainActor
 private final class _SwiftUIListScrollTracker: NSObject, UIScrollViewDelegate {
     weak var state: _OpenLazyStackState?
+    let restY: CGFloat
 
-    init(state: _OpenLazyStackState) {
+    init(state: _OpenLazyStackState, restY: CGFloat) {
         self.state = state
+        self.restY = restY
         super.init()
     }
 
+    /// Only the user's scrolling is retained (a drag and its deceleration);
+    /// the scroll view's own inset rebases are not a position to restore.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        state?.contentOffset = scrollView.contentOffset
+        guard scrollView.isDragging || scrollView.isDecelerating || scrollView.isTracking else { return }
+        let delta = scrollView.contentOffset.y - restY
+        state?.listOffsetFromRest = delta == 0 ? nil : delta
     }
 }
 
@@ -2585,7 +2646,7 @@ private enum _ViewRenderer {
                     measure($0, proposed: proposed, environment: environment)
                 }
                 let widths = _hStackCompressedWidths(
-                    children, sizes: sizes, spacing: gap, available: proposed.width)
+                    children, sizes: sizes, spacing: gap, available: proposed.width).widths
                 var width = gap * CGFloat(max(0, children.count - 1))
                 var height: CGFloat = 0
                 for index in children.indices {
@@ -2621,10 +2682,13 @@ private enum _ViewRenderer {
             let gap = spacing ?? defaultSpacing
             var width: CGFloat = 0
             var height = gap * CGFloat(max(0, children.count - 1))
-            for child in children {
-                let size = measure(child, proposed: proposed, environment: environment)
-                width = max(width, size.width)
-                height += size.height
+            let sizes = children.map { measure($0, proposed: proposed, environment: environment) }
+            let allocated = _vStackOverflowHeights(
+                children, idealHeights: sizes.map(\.height), width: proposed.width,
+                height: proposed.height, spacing: gap, environment: environment)
+            for index in children.indices {
+                width = max(width, sizes[index].width)
+                height += allocated?[index] ?? sizes[index].height
             }
             if children.contains(where: _isSpacer)
                 && !environment.measuresUnboundedVerticalScroll {
@@ -3484,6 +3548,7 @@ private enum _ViewRenderer {
             }
             control.refreshAppearance()
         case .geometry(let geometry):
+            geometry.didPlace(at: rect.size)
             place(
                 geometry.resolve(rect.size),
                 in: rect,
@@ -4032,8 +4097,13 @@ private enum _ViewRenderer {
                 let measured = measure(content, proposed: rect.size, environment: environment)
                 let size = CGSize(width: width ?? min(rect.width, measured.width),
                                   height: height ?? min(rect.height, measured.height))
-                let childRect = alignedRect(size: size, in: rect, alignment: alignment)
-                place(content, in: childRect, on: surface, environment: environment)
+                let frameRect = alignedRect(size: size, in: rect, alignment: alignment)
+                place(
+                    content,
+                    in: _contentRect(content, inFrame: frameRect, alignment: alignment, environment: environment),
+                    on: surface,
+                    environment: environment
+                )
             case .flexibleFrame(
                 let minWidth,
                 let maxWidth,
@@ -4056,9 +4126,10 @@ private enum _ViewRenderer {
                         maximum: maxHeight
                     )
                 )
+                let frameRect = alignedRect(size: size, in: rect, alignment: alignment)
                 place(
                     content,
-                    in: alignedRect(size: size, in: rect, alignment: alignment),
+                    in: _contentRect(content, inFrame: frameRect, alignment: alignment, environment: environment),
                     on: surface,
                     environment: environment
                 )
@@ -4344,11 +4415,15 @@ private enum _ViewRenderer {
                 traitHost.accessibilityIdentifier = "SwiftUI.ColorScheme"
                 surface.addSubview(traitHost)
                 place(content, in: traitHost.bounds, on: traitHost, environment: environment)
-            case .safeAreaIgnored:
-                // The portable host currently proposes its full bounds and
-                // has no synthetic safe-area inset, so ignoring it is an
-                // explicit identity operation.
-                place(content, in: rect, on: surface, environment: environment)
+            case .safeAreaIgnored(let edges):
+                // Without a safe-area host (macOS cut, no device model, bar
+                // items) the content already has the full bounds.
+                place(
+                    content,
+                    in: _rectIgnoringSafeArea(rect, edges: edges, on: surface, environment: environment),
+                    on: surface,
+                    environment: environment
+                )
             case .previewLayout:
                 place(content, in: rect, on: surface, environment: environment)
             case .clipRoundedRectangle(let requestedRadius, let corners):
@@ -5325,12 +5400,21 @@ private enum _ViewRenderer {
         // UICollectionView's does on iOS (MEASURED: a feed scrolled by a drag
         // snapped back to the top on the next rebuild).
         if let retainedState {
-            if let saved = retainedState.contentOffset {
-                let inset = list.adjustedContentInset
-                let maxY = max(-inset.top, list.contentSize.height - list.bounds.height + inset.bottom)
-                list.contentOffset = CGPoint(x: list.contentOffset.x, y: min(max(saved.y, -inset.top), maxY))
+            // Restored relative to the rest offset this pass computed, and
+            // clamped to it: the rest moves when the bar's inset arrives after
+            // the first layout, and this new scroll view has no safe area yet
+            // (its adjustedContentInset is still zero), so neither a raw
+            // offset nor that inset is a valid bound. MEASURED (plain
+            // 300-turn render): the first pass rested at -116, UIKit's inset
+            // rebase moved it to -153, and restoring that against the new
+            // view's zero inset clamped the feed to 0, under the status bar.
+            let restY = list.contentOffset.y
+            if let delta = retainedState.listOffsetFromRest {
+                let bottom = list.contentInset.bottom + surface.safeAreaInsets.bottom
+                let maxY = max(restY, list.contentSize.height - list.bounds.height + bottom)
+                list.contentOffset = CGPoint(x: list.contentOffset.x, y: min(max(restY + delta, restY), maxY))
             }
-            let tracker = _SwiftUIListScrollTracker(state: retainedState)
+            let tracker = _SwiftUIListScrollTracker(state: retainedState, restY: restY)
             retainedState.listScrollTracker = tracker
             list.delegate = tracker
         }
@@ -5781,21 +5865,16 @@ private enum _ViewRenderer {
         let sizes = children.map {
             measure($0, proposed: rect.size, environment: environment)
         }
-        let spacerIndices = children.indices.filter { _isSpacer(children[$0]) }
-        let widths = _hStackCompressedWidths(
+        let layout = _hStackCompressedWidths(
             children, sizes: sizes, spacing: spacing, available: rect.width)
-        let gaps = spacing * CGFloat(max(0, children.count - 1))
-        let compressedFixedWidth = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
-            spacerIndices.contains(entry.offset) ? partial : partial + entry.element
-        }
-        let flexible = max(0, rect.width - compressedFixedWidth - gaps)
-        let spacerWidth = spacerIndices.isEmpty ? 0 : flexible / CGFloat(spacerIndices.count)
+        let widths = layout.widths
+        let sharing = layout.sharing
         var x = rect.minX
 
         for index in children.indices {
             let size = sizes[index]
-            let width = spacerIndices.contains(index)
-                ? spacerWidth
+            let width = sharing.contains(index)
+                ? widths[index]
                 : min(widths[index], max(0, rect.maxX - x))
             // MEASURED HackersPillMetrics, iPhone 16 / iOS 26.1 @3x:
             // narrowing the column to 294 pt wraps its headline, increasing
@@ -5850,11 +5929,15 @@ private enum _ViewRenderer {
         let gaps = spacing * CGFloat(max(0, children.count - 1))
         let flexible = max(0, rect.height - fixedHeight - gaps)
         let spacerHeight = spacerIndices.isEmpty ? 0 : flexible / CGFloat(spacerIndices.count)
+        let allocated = _vStackOverflowHeights(
+            children, idealHeights: sizes.map(\.height), width: rect.width,
+            height: rect.height, spacing: spacing, environment: environment)
         var y = rect.minY
 
         for index in children.indices {
             let size = sizes[index]
-            let height = spacerIndices.contains(index) ? spacerHeight : min(size.height, rect.maxY - y)
+            let height = allocated.map { min($0[index], max(0, rect.maxY - y)) }
+                ?? (spacerIndices.contains(index) ? spacerHeight : min(size.height, rect.maxY - y))
             let width = min(size.width, rect.width)
             let x: CGFloat
             switch alignment.value {
@@ -6341,7 +6424,8 @@ private enum _ViewRenderer {
     /// A child whose width a `.frame(width:)` fixes (an initials avatar with
     /// its Text, say) is rigid: SwiftUI sizes the least flexible children
     /// first, so it keeps its width and the flexible peers absorb the
-    /// overflow; a `Spacer(minLength:)` keeps its minimum the same way.
+    /// overflow; a `Spacer(minLength:)` keeps its minimum the same way, and
+    /// greedy children share the leftover with the spacers.
     /// MEASURED iOS 27 simulator, iPhone 16e, stupid social Chats: the 48 pt
     /// avatar of a row with a two-line preview keeps 48 pt, and the preview
     /// wraps 8 pt before the unread pill (`Spacer(minLength: 8)`).
@@ -6350,14 +6434,27 @@ private enum _ViewRenderer {
         sizes: [CGSize],
         spacing: CGFloat,
         available: CGFloat
-    ) -> [CGFloat] {
-        let spacerIndices = children.indices.filter { _isSpacer(children[$0]) }
+    ) -> (widths: [CGFloat], sharing: Set<Int>) {
+        let gaps = spacing * CGFloat(max(0, children.count - 1))
+        let spacers = Set(children.indices.filter { _isSpacer(children[$0]) })
+        // Children that take every width offered (a GeometryReader, a shape,
+        // a `frame(maxWidth: .infinity)`) are SwiftUI's most flexible: when
+        // the row overflows they share what the others leave, like spacers,
+        // instead of the first one taking the row (MEASURED: stupid social's
+        // two-slide story progress bar drew segments 0 and 370 pt wide; iOS
+        // draws two of 185).
+        let idealTotal = sizes.indices.reduce(CGFloat.zero) {
+            spacers.contains($1) ? $0 : $0 + sizes[$1].width
+        }
+        let greedy: Set<Int> = available < 10_000 && idealTotal + gaps > available + 0.5
+            ? Set(children.indices.filter { !spacers.contains($0) && sizes[$0].width >= available - 0.5 })
+            : []
+        let sharing = spacers.union(greedy)
         var widths = sizes.map(\.width)
         let fixedWidth = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
-            spacerIndices.contains(entry.offset) ? partial : partial + entry.element
+            sharing.contains(entry.offset) ? partial : partial + entry.element
         }
-        let spacerMinimum = spacerIndices.reduce(CGFloat.zero) { $0 + sizes[$1].width }
-        let gaps = spacing * CGFloat(max(0, children.count - 1))
+        let spacerMinimum = spacers.reduce(CGFloat.zero) { $0 + sizes[$1].width }
         var overflow = max(0, fixedWidth + spacerMinimum + gaps - available)
         let compressionOrder = children.indices.sorted { lhs, rhs in
             let lhsPriority = _layoutPriority(children[lhs])
@@ -6367,13 +6464,13 @@ private enum _ViewRenderer {
         }
         let rigid = children.map(_hasFixedWidth)
         for index in compressionOrder
-        where overflow > 0 && !rigid[index] && _containsText(children[index]) {
+        where overflow > 0 && !rigid[index] && !sharing.contains(index) && _containsText(children[index]) {
             let reduction = min(widths[index], overflow)
             widths[index] -= reduction
             overflow -= reduction
         }
         for index in compressionOrder
-        where overflow > 0 && !rigid[index] && !spacerIndices.contains(index) {
+        where overflow > 0 && !rigid[index] && !sharing.contains(index) {
             let reduction = min(widths[index], overflow)
             widths[index] -= reduction
             overflow -= reduction
@@ -6381,12 +6478,20 @@ private enum _ViewRenderer {
         // A malformed or extremely small proposal can still over-constrain
         // rigid leaves.  Clamp them in source order rather than emitting
         // negative frames or placing later children beyond the padded edge.
-        for index in compressionOrder where overflow > 0 && !spacerIndices.contains(index) {
+        for index in compressionOrder where overflow > 0 && !sharing.contains(index) {
             let reduction = min(widths[index], overflow)
             widths[index] -= reduction
             overflow -= reduction
         }
-        return widths
+        // Spacers and greedy children split what the others leave.
+        if !sharing.isEmpty {
+            let compressedFixed = widths.enumerated().reduce(CGFloat.zero) { partial, entry in
+                sharing.contains(entry.offset) ? partial : partial + entry.element
+            }
+            let share = max(0, available - compressedFixed - gaps) / CGFloat(sharing.count)
+            for index in sharing { widths[index] = share }
+        }
+        return (widths, sharing)
     }
 
     /// A `.frame(width:)` (any height) in the node's modifier chain: SwiftUI
@@ -6466,6 +6571,119 @@ private enum _ViewRenderer {
         case .automatic, .never, .none:
             return 0
         }
+    }
+
+    /// SwiftUI's frame layout: the frame proposes its size to the content,
+    /// which keeps the size it chooses and sits inside the frame at the
+    /// frame's alignment (a short Text in `.frame(maxHeight: .infinity)` is
+    /// centred, not stretched to the frame's top). Content that fills its
+    /// proposal (shapes, colours, stacks with spacers) gets the whole frame,
+    /// as before.
+    private static func _contentRect(
+        _ content: _OpenViewNode,
+        inFrame frame: CGRect,
+        alignment: Alignment,
+        environment: _RenderEnvironment
+    ) -> CGRect {
+        let chosen = measure(content, proposed: frame.size, environment: environment)
+        let size = CGSize(
+            width: Swift.min(Swift.max(0, chosen.width), frame.width),
+            height: Swift.min(Swift.max(0, chosen.height), frame.height)
+        )
+        if size == frame.size { return frame }
+        return alignedRect(size: size, in: frame, alignment: alignment)
+    }
+
+    /// The edges a screen's root content extends into the safe area on:
+    /// containers that inset their own content (scroll views, lists, forms,
+    /// navigation and tab containers, UIKit views and controllers) on every
+    /// edge, and `.ignoresSafeArea(edges:)` on its edges.
+    static func safeAreaEdgesExtended(by node: _OpenViewNode) -> Edge.Set {
+        switch node.kind {
+        case .modified(let content, .safeAreaIgnored(let edges)):
+            return safeAreaEdgesExtended(by: content).union(edges)
+        case .modified(let content, _):
+            return safeAreaEdgesExtended(by: content)
+        case .group(let children) where children.count == 1:
+            return safeAreaEdgesExtended(by: children[0])
+        case .scroll, .scrollReader, .list, .form, .tabView, .navigation, .view, .viewController:
+            return .all
+        default:
+            return []
+        }
+    }
+
+    /// `rect` with the given edges moved out to `full`'s.
+    static func rect(_ rect: CGRect, extendedTo full: CGRect, edges: Edge.Set) -> CGRect {
+        let minX = edges.contains(.leading) ? Swift.min(rect.minX, full.minX) : rect.minX
+        let minY = edges.contains(.top) ? Swift.min(rect.minY, full.minY) : rect.minY
+        let maxX = edges.contains(.trailing) ? Swift.max(rect.maxX, full.maxX) : rect.maxX
+        let maxY = edges.contains(.bottom) ? Swift.max(rect.maxY, full.maxY) : rect.maxY
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// SwiftUI's `.ignoresSafeArea(edges:)`: each ignored edge of `rect`
+    /// that reaches the host's safe-area edge extends to the host's bounds.
+    private static func _rectIgnoringSafeArea(
+        _ rect: CGRect,
+        edges: Edge.Set,
+        on surface: UIView,
+        environment: _RenderEnvironment
+    ) -> CGRect {
+        guard let host = environment.safeAreaHost, !edges.isEmpty else { return rect }
+        let inHost = surface.convert(rect, to: host)
+        let safe = environment.safeAreaSafeRect
+        let tolerance: CGFloat = 0.5
+        var reaching: Edge.Set = []
+        if edges.contains(.top), inHost.minY <= safe.minY + tolerance { reaching.insert(.top) }
+        if edges.contains(.bottom), inHost.maxY >= safe.maxY - tolerance { reaching.insert(.bottom) }
+        if edges.contains(.leading), inHost.minX <= safe.minX + tolerance { reaching.insert(.leading) }
+        if edges.contains(.trailing), inHost.maxX >= safe.maxX - tolerance { reaching.insert(.trailing) }
+        guard !reaching.isEmpty else { return rect }
+        let extended = Self.rect(inHost, extendedTo: environment.safeAreaFullRect, edges: reaching)
+        return host.convert(extended, to: surface)
+    }
+
+    /// SwiftUI's stack allocation for children whose ideal heights overflow
+    /// the proposed height (a `frame(maxHeight: .infinity)` child beside fixed
+    /// ones): each child is offered the remaining height divided by the
+    /// children left, least flexible first (flexibility: its height at an
+    /// unbounded proposal minus its height at a zero proposal), spacers
+    /// last, sharing what is left. Nil when the ideal heights fit, where every
+    /// child keeps its ideal height as before.
+    private static func _vStackOverflowHeights(
+        _ children: [_OpenViewNode],
+        idealHeights: [CGFloat],
+        width: CGFloat,
+        height: CGFloat,
+        spacing: CGFloat,
+        environment: _RenderEnvironment
+    ) -> [CGFloat]? {
+        guard height < 10_000 else { return nil }
+        let spacers = Set(children.indices.filter { _isSpacer(children[$0]) })
+        let gaps = spacing * CGFloat(Swift.max(0, children.count - 1))
+        let ideal = children.indices.reduce(CGFloat.zero) { spacers.contains($1) ? $0 : $0 + idealHeights[$1] }
+        guard ideal + gaps > height + 0.5 else { return nil }
+        let flexibility: [CGFloat] = children.indices.map { index in
+            if spacers.contains(index) { return .infinity }
+            let low = measure(children[index], proposed: CGSize(width: width, height: 0), environment: environment)
+            let high = measure(children[index], proposed: CGSize(width: width, height: 10_000), environment: environment)
+            return high.height - low.height
+        }
+        let order = children.indices.filter { !spacers.contains($0) }
+            .sorted { flexibility[$0] == flexibility[$1] ? $0 < $1 : flexibility[$0] < flexibility[$1] }
+        var heights = Array(repeating: CGFloat.zero, count: children.count)
+        var remaining = Swift.max(0, height - gaps)
+        var left = order.count + spacers.count
+        for index in order {
+            let offer = remaining / CGFloat(left)
+            let size = measure(children[index], proposed: CGSize(width: width, height: offer), environment: environment)
+            heights[index] = size.height
+            remaining = Swift.max(0, remaining - size.height)
+            left -= 1
+        }
+        for index in spacers { heights[index] = remaining / CGFloat(spacers.count) }
+        return heights
     }
 
     private static func _bounded(_ size: CGSize) -> CGSize {

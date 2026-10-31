@@ -1042,6 +1042,8 @@ final class _OpenGraphHost {
     private var activeTaskKeys: Set<_OpenEffectKey> = []
     private var lazyStackStates: [_OpenGraphIdentity: _OpenLazyStackState] = [:]
     private var activeLazyStackKeys: Set<_OpenGraphIdentity> = []
+    private var geometryReaderStates: [_OpenGraphIdentity: _OpenGeometryReaderState] = [:]
+    private var activeGeometryReaderKeys: Set<_OpenGraphIdentity> = []
     /// Per evaluation: each lazy stack's `.forEachContent` path and the
     /// element IDs still in its data. State below an unbuilt element of
     /// these survives the stale-state sweep.
@@ -1098,6 +1100,7 @@ final class _OpenGraphHost {
         activeSubscriptionKeys.removeAll(keepingCapacity: true)
         activeTaskKeys.removeAll(keepingCapacity: true)
         activeLazyStackKeys.removeAll(keepingCapacity: true)
+        activeGeometryReaderKeys.removeAll(keepingCapacity: true)
         lazyElementRetention.removeAll(keepingCapacity: true)
         postEvaluationActions.removeAll(keepingCapacity: true)
         path.removeAll(keepingCapacity: true)
@@ -1176,6 +1179,12 @@ final class _OpenGraphHost {
         for key in staleTaskKeys {
             tasks.removeValue(forKey: key)?.cancel()
         }
+        let staleGeometryReaderKeys = geometryReaderStates.keys.filter {
+            !activeGeometryReaderKeys.contains($0)
+        }
+        for key in staleGeometryReaderKeys {
+            geometryReaderStates.removeValue(forKey: key)
+        }
         let staleLazyStackKeys = lazyStackStates.keys.filter {
             !activeLazyStackKeys.contains($0)
         }
@@ -1246,6 +1255,17 @@ final class _OpenGraphHost {
             self?.scheduleInvalidation()
         }
         lazyStackStates[identity] = created
+        return created
+    }
+
+    func geometryReaderState() -> _OpenGeometryReaderState {
+        let identity = currentIdentity()
+        activeGeometryReaderKeys.insert(identity)
+        if let existing = geometryReaderStates[identity] { return existing }
+        let created = _OpenGeometryReaderState { [weak self] in
+            self?.scheduleInvalidation()
+        }
+        geometryReaderStates[identity] = created
         return created
     }
 
@@ -1920,6 +1940,12 @@ enum _OpenGraphContext {
 
     /// The lazy stack at the current path's retained state, or nil outside a
     /// graph host (no invalidation route, so the stack builds eagerly).
+    /// The GeometryReader at the current path's retained state, or nil
+    /// outside a graph host.
+    static func geometryReaderState() -> _OpenGeometryReaderState? {
+        currentHost?.geometryReaderState()
+    }
+
     static func lazyStackState() -> _OpenLazyStackState? {
         currentHost?.lazyStackState()
     }
