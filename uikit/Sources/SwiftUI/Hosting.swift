@@ -3733,9 +3733,26 @@ private enum _ViewRenderer {
                 surface.addSubview(host)
                 place(background, in: host.bounds, on: host, environment: environment)
                 place(content, in: host.bounds, on: host, environment: environment)
-            case .overlay(let overlay, _):
+            case .overlay(let overlay, let alignment):
                 place(content, in: rect, on: surface, environment: environment)
-                place(overlay, in: rect, on: surface, environment: environment)
+                // SwiftUI proposes the content's size to the overlay and
+                // aligns what it returns: flexible overlays (shapes, colours)
+                // still fill, fixed-size ones (an SF Symbol chevron) sit at
+                // the alignment instead of stretching over the content.
+                let overlaySize = measure(overlay, proposed: rect.size, environment: environment)
+                place(
+                    overlay,
+                    in: alignedRect(
+                        size: CGSize(
+                            width: min(rect.width, overlaySize.width),
+                            height: min(rect.height, overlaySize.height)
+                        ),
+                        in: rect,
+                        alignment: alignment
+                    ),
+                    on: surface,
+                    environment: environment
+                )
             case .mask(let maskNode, let alignment):
                 let host = _SwiftUIPassthroughView(frame: rect)
                 host.accessibilityIdentifier = "SwiftUI.Mask"
