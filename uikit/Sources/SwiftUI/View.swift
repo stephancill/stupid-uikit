@@ -418,6 +418,10 @@ enum _OpenViewModification {
     /// the rows out at their positions among every element's measured or
     /// estimated extent and reports the viewport back (`_OpenLazyStackState`).
     case lazyStack(_OpenLazyStackLayout)
+    /// Wraps the `.text` node of a Text with styled runs or inline images:
+    /// the label is drawn from these runs as an attributed string (the
+    /// wrapped node's string is the runs' plain text).
+    case styledText([_OpenTextRun])
 }
 
 /// Construction-time modifier payload. Background and overlay views remain
@@ -1108,51 +1112,225 @@ extension Optional: _OpenView where Wrapped: _OpenView {
     }
 }
 
+/// SwiftUI's Text: an ordered list of runs, each a string or an inline image
+/// with its own text attributes. A modifier applied to a Text (`bold()`,
+/// `font(_:)`, `foregroundColor(_:)`, …) returns a Text and styles every run
+/// that has not set that attribute itself, so the innermost setting wins as in
+/// SwiftUI: `(Text("a").foregroundColor(.red) + Text("b")).foregroundColor(.blue)`
+/// draws "a" red and "b" blue.
+///
+/// Rendering: a Text whose runs are all strings sharing one attribute set that
+/// the plain label path understands (font, weight, monospaced digits,
+/// foreground colour) builds the same node as before runs existed — the joined
+/// string wrapped in those view modifiers — so plain text renders unchanged.
+/// Anything else (mixed styles, inline images, italic, baseline offset,
+/// kerning, tracking, underline, strikethrough) renders as one attributed
+/// UILabel (`_OpenViewModification.styledText`).
 public struct _OpenText: _OpenView {
     public typealias Body = Never
-    public let content: String
-    private var usesMonospacedDigits = false
+    var runs: [_OpenTextRun]
 
+    /// The text's characters without styling; inline images contribute
+    /// nothing. (Not SwiftUI API; kept for source that reads a Text's string.)
+    nonisolated public var content: String {
+        if runs.count == 1, case .string(let string) = runs[0].content { return string }
+        var result = ""
+        for run in runs {
+            if case .string(let string) = run.content { result += string }
+        }
+        return result
+    }
+
+    nonisolated init(runs: [_OpenTextRun]) {
+        self.runs = runs
+    }
+
+    @_disfavoredOverload
     nonisolated public init(_ content: String) {
-        self.content = content
+        runs = [_OpenTextRun(content: .string(content))]
     }
 
     @_disfavoredOverload
     nonisolated public init<S: StringProtocol>(_ content: S) {
-        self.content = String(content)
+        runs = [_OpenTextRun(content: .string(String(content)))]
     }
 
     nonisolated public init(verbatim content: String) {
-        self.content = content
+        runs = [_OpenTextRun(content: .string(content))]
     }
 
+    /// Disfavoured: FoundationEssentials' AttributedString is expressible by
+    /// a string literal, so `Text("x")` would otherwise be ambiguous with the
+    /// LocalizedStringKey initializer.
+    @_disfavoredOverload
     @available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
     nonisolated public init(_ content: AttributedString) {
-        self.content = String(content.characters)
+        runs = [_OpenTextRun(content: .string(String(content.characters)))]
     }
 
     #if canImport(Foundation) || canImport(FoundationEssentials)
     @available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
     nonisolated public init<F>(_ input: F.FormatInput, format: F)
     where F: FormatStyle, F.FormatInput: Equatable, F.FormatOutput == String {
-        content = format.format(input)
+        runs = [_OpenTextRun(content: .string(format.format(input)))]
     }
     #endif
+
+    /// SwiftUI's `Text(_ image: Image)`: the image inline in the text, its
+    /// bottom on the baseline. A bitmap keeps its point size; a system symbol
+    /// is sized from the run's font.
+    nonisolated public init(_ image: _OpenImage) {
+        runs = [_OpenTextRun(content: .image(image))]
+    }
+
+    nonisolated public static func + (lhs: _OpenText, rhs: _OpenText) -> _OpenText {
+        _OpenText(runs: lhs.runs + rhs.runs)
+    }
+
+    nonisolated func _applying(_ update: (inout _OpenTextAttributes) -> Void) -> _OpenText {
+        var result = self
+        for index in result.runs.indices {
+            update(&result.runs[index].attributes)
+        }
+        return result
+    }
+
+    nonisolated public func font(_ font: Font?) -> _OpenText {
+        _applying { if $0.font == nil { $0.font = .some(font) } }
+    }
+
+    nonisolated public func fontWeight(_ weight: Font.Weight?) -> _OpenText {
+        _applying { if $0.weight == nil { $0.weight = .some(weight) } }
+    }
+
+    nonisolated public func bold() -> _OpenText {
+        fontWeight(.bold)
+    }
+
+    nonisolated public func bold(_ isActive: Bool) -> _OpenText {
+        isActive ? bold() : self
+    }
+
+    nonisolated public func italic() -> _OpenText {
+        _applying { $0.italic = true }
+    }
+
+    nonisolated public func italic(_ isActive: Bool) -> _OpenText {
+        isActive ? italic() : self
+    }
 
     /// Uses a fixed-width numeral design while leaving punctuation and other
     /// glyphs in the surrounding text style. OpenUIKit's portable font cut
     /// currently represents that OpenType feature with its monospaced face,
     /// preserving stable counter widths across value changes.
     nonisolated public func monospacedDigit() -> _OpenText {
-        var result = self
-        result.usesMonospacedDigits = true
-        return result
+        _applying { $0.monospacedDigits = true }
+    }
+
+    /// The monospaced face (the same one `monospacedDigit()` selects).
+    nonisolated public func monospaced(_ isActive: Bool = true) -> _OpenText {
+        isActive ? monospacedDigit() : self
+    }
+
+    nonisolated public func foregroundColor(_ color: Color?) -> _OpenText {
+        _applying { if $0.foregroundColor == nil { $0.foregroundColor = .some(color) } }
+    }
+
+    public func foregroundStyle<S: ShapeStyle>(_ style: S) -> _OpenText {
+        foregroundColor(style._openResolvedForegroundColor())
+    }
+
+    nonisolated public func baselineOffset(_ baselineOffset: CGFloat) -> _OpenText {
+        _applying { if $0.baselineOffset == nil { $0.baselineOffset = baselineOffset } }
+    }
+
+    nonisolated public func kerning(_ kerning: CGFloat) -> _OpenText {
+        _applying { if $0.kerning == nil { $0.kerning = kerning } }
+    }
+
+    nonisolated public func tracking(_ tracking: CGFloat) -> _OpenText {
+        _applying { if $0.tracking == nil { $0.tracking = tracking } }
+    }
+
+    nonisolated public func underline(_ isActive: Bool = true, color: Color? = nil) -> _OpenText {
+        _applying { if $0.underline == nil { $0.underline = isActive ? .some(color) : .none } }
+    }
+
+    nonisolated public func underline(
+        _ isActive: Bool = true,
+        pattern: LineStyle.Pattern,
+        color: Color? = nil
+    ) -> _OpenText {
+        underline(isActive, color: color)
+    }
+
+    nonisolated public func strikethrough(_ isActive: Bool = true, color: Color? = nil) -> _OpenText {
+        _applying { if $0.strikethrough == nil { $0.strikethrough = isActive ? .some(color) : .none } }
+    }
+
+    nonisolated public func strikethrough(
+        _ isActive: Bool = true,
+        pattern: LineStyle.Pattern,
+        color: Color? = nil
+    ) -> _OpenText {
+        strikethrough(isActive, color: color)
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        let text = _OpenViewNode(.text(content))
-        guard usesMonospacedDigits else { return text }
-        return _OpenViewNode(.modified(text, .monospacedDigits))
+        if let attributes = runs.first?.attributes, attributes.rendersAsPlainLabel,
+           runs.allSatisfy({ $0.isString && $0.attributes == attributes }) {
+            // The pre-run node shape: the string, then each view modifier.
+            var node = _OpenViewNode(.text(content))
+            if attributes.monospacedDigits { node = _OpenViewNode(.modified(node, .monospacedDigits)) }
+            if let weight = attributes.weight { node = _OpenViewNode(.modified(node, .fontWeight(weight))) }
+            if let font = attributes.font { node = _OpenViewNode(.modified(node, .font(font))) }
+            if let color = attributes.foregroundColor {
+                node = _OpenViewNode(.modified(node, .foregroundColor(color)))
+            }
+            return node
+        }
+        return _OpenViewNode(.modified(_OpenViewNode(.text(content)), .styledText(runs)))
+    }
+}
+
+/// One run of a Text: its content and the attributes set on it. A nil
+/// attribute inherits the environment (or an enclosing Text's modifier).
+struct _OpenTextRun {
+    enum Content {
+        case string(String)
+        case image(_OpenImage)
+    }
+
+    var content: Content
+    var attributes = _OpenTextAttributes()
+
+    var isString: Bool {
+        if case .string = content { return true }
+        return false
+    }
+}
+
+struct _OpenTextAttributes: Equatable {
+    /// `.some(nil)` is an explicit `font(nil)`, which (as the view modifier
+    /// does) resets to the body style.
+    var font: Font??
+    var weight: Font.Weight??
+    var italic = false
+    var monospacedDigits = false
+    var foregroundColor: Color??
+    var baselineOffset: CGFloat?
+    var kerning: CGFloat?
+    var tracking: CGFloat?
+    /// `.some(color)`: drawn, in `color` or the text colour; `.some(.none)` is
+    /// not used (an inactive rule is stored as nil, which still lets an outer
+    /// modifier turn it on, as in SwiftUI).
+    var underline: Color??
+    var strikethrough: Color??
+
+    /// Attributes the plain `.text` node renders through view modifiers.
+    var rendersAsPlainLabel: Bool {
+        !italic && baselineOffset == nil && kerning == nil && tracking == nil
+            && underline == nil && strikethrough == nil
     }
 }
 

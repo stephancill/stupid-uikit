@@ -729,6 +729,8 @@ public enum _OpenTextTruncationMode: UInt8, Hashable, Sendable {
 public extension _OpenText {
     /// SwiftUI's `Text(_:tableName:bundle:comment:)`. Like `Text(_ key:)`, the
     /// development-language key is displayed; the comment is for translators.
+    /// Disfavoured so `Text("x")` resolves to `init(_ key:)` alone.
+    @_disfavoredOverload
     nonisolated init(_ key: LocalizedStringKey, tableName: String? = nil,
                      bundle: Bundle? = nil, comment: StaticString? = nil) {
         _ = tableName

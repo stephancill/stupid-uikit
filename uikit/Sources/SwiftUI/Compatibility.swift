@@ -1,3 +1,8 @@
+#if canImport(Foundation)
+import Foundation
+#elseif canImport(FoundationEssentials)
+import FoundationEssentials
+#endif
 // Preview is app-side machinery: DeveloperToolsSupport is built against the
 // app-facing Foundation facade. In a Foundation-hidden (FoundationEssentials-
 // only) SwiftUI build the module is absent or unloadable, so the whole #Preview
@@ -49,21 +54,36 @@ public struct _OpenLocalizedStringKey: Equatable, ExpressibleByStringLiteral,
     ExpressibleByStringInterpolation
 {
     public let rawValue: String
+    /// The key's runs when a Text or Image was interpolated into it
+    /// (`Text("\(Text(name).bold()) replied")`); nil for a plain string.
+    let styledRuns: [_OpenTextRun]?
 
     nonisolated public init(_ value: String) {
         rawValue = value
+        styledRuns = nil
     }
 
     nonisolated public init(stringLiteral value: String) {
         rawValue = value
+        styledRuns = nil
     }
 
     nonisolated public init(stringInterpolation: StringInterpolation) {
         rawValue = stringInterpolation.value
+        styledRuns = stringInterpolation.hasStyledRuns ? stringInterpolation.runs : nil
+    }
+
+    /// Keys compare by their development-language string; interpolated
+    /// styling is not part of a key's identity.
+    nonisolated public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.rawValue == rhs.rawValue
     }
 
     public struct StringInterpolation: StringInterpolationProtocol {
         var value: String
+        /// Every segment as a run, so interpolated Text keeps its styling.
+        var runs: [_OpenTextRun] = []
+        var hasStyledRuns = false
 
         nonisolated public init(literalCapacity: Int, interpolationCount: Int) {
             _ = interpolationCount
@@ -71,21 +91,55 @@ public struct _OpenLocalizedStringKey: Equatable, ExpressibleByStringLiteral,
             value.reserveCapacity(literalCapacity)
         }
 
+        nonisolated mutating func appendPlain(_ string: String) {
+            value.append(string)
+            if let last = runs.indices.last, runs[last].attributes == _OpenTextAttributes(),
+               case .string(let previous) = runs[last].content {
+                runs[last].content = .string(previous + string)
+            } else {
+                runs.append(_OpenTextRun(content: .string(string)))
+            }
+        }
+
         nonisolated public mutating func appendLiteral(_ literal: String) {
-            value.append(literal)
+            appendPlain(literal)
         }
 
         nonisolated public mutating func appendInterpolation(_ string: String) {
-            value.append(string)
+            appendPlain(string)
         }
 
         nonisolated public mutating func appendInterpolation(_ substring: Substring) {
-            value.append(contentsOf: substring)
+            appendPlain(String(substring))
         }
 
         nonisolated public mutating func appendInterpolation<T>(_ value: T) {
-            self.value.append(String(describing: value))
+            appendPlain(String(describing: value))
         }
+
+        /// SwiftUI's `appendInterpolation(_ text: Text)`: the Text's runs,
+        /// with their styling, become part of the key's Text.
+        nonisolated public mutating func appendInterpolation(_ text: _OpenText) {
+            value.append(text.content)
+            runs.append(contentsOf: text.runs)
+            hasStyledRuns = true
+        }
+
+        /// SwiftUI's `appendInterpolation(_ image: Image)`: the image inline.
+        nonisolated public mutating func appendInterpolation(_ image: _OpenImage) {
+            appendInterpolation(_OpenText(image))
+        }
+
+        #if canImport(Foundation) || canImport(FoundationEssentials)
+        /// SwiftUI's `appendInterpolation(_:format:)`.
+        @available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
+        nonisolated public mutating func appendInterpolation<F: FormatStyle>(
+            _ input: F.FormatInput,
+            format: F
+        ) where F.FormatInput: Equatable, F.FormatOutput == String {
+            appendPlain(format.format(input))
+        }
+        #endif
     }
 }
 
@@ -316,7 +370,11 @@ public macro Entry() = #externalMacro(
 
 public extension _OpenText {
     nonisolated init(_ key: LocalizedStringKey) {
-        self.init(verbatim: key.rawValue)
+        if let styledRuns = key.styledRuns {
+            self.init(runs: styledRuns)
+        } else {
+            self.init(verbatim: key.rawValue)
+        }
     }
 }
 

@@ -2019,6 +2019,9 @@ private struct _RenderEnvironment {
     /// label's `.padding(.vertical, 16)` around a 44 pt glass capsule is
     /// collapsed so the glass centres at y = −4 inside that 36 pt host.
     var collapsesToolbarVerticalPadding = false
+    /// The runs of the Text whose `.text` node is being drawn
+    /// (`_OpenViewModification.styledText`); nil for a plain Text.
+    var styledText: [_OpenTextRun]?
 
     static let `default` = _RenderEnvironment()
 }
@@ -2703,6 +2706,10 @@ private enum _ViewRenderer {
                  .navigationDestination, .toolbar, .toolbarItem, .tag,
                  .pageTabViewStyle:
                 return measure(content, proposed: proposed, environment: environment)
+            case .styledText(let runs):
+                var next = environment
+                next.styledText = runs
+                return measure(content, proposed: proposed, environment: next)
             case .lazyStack(let layout):
                 guard let rows = _lazyStackRows(content, layout: layout) else {
                     return measure(content, proposed: proposed, environment: environment)
@@ -4359,6 +4366,10 @@ private enum _ViewRenderer {
                 // NavigationView consumes this metadata while building its
                 // node.  Outside a NavigationView it leaves content intact.
                 place(content, in: rect, on: surface, environment: environment)
+            case .styledText(let runs):
+                var next = environment
+                next.styledText = runs
+                place(content, in: rect, on: surface, environment: next)
             case .lazyStack(let layout):
                 guard let rows = _lazyStackRows(content, layout: layout) else {
                     place(content, in: rect, on: surface, environment: environment)
@@ -5099,7 +5110,112 @@ private enum _ViewRenderer {
         label.lineBreakMode = environment.lineLimit == 1
             ? .byTruncatingTail
             : .byWordWrapping
+        if let runs = environment.styledText {
+            label.attributedText = _styledTextAttributedString(runs, environment: environment)
+        }
         return label
+    }
+
+    /// A styled Text's runs as one attributed string. Each run resolves its
+    /// own attributes over the environment's (font, weight, monospaced digits,
+    /// colour); inline images become text attachments sitting on the
+    /// baseline.
+    private static func _styledTextAttributedString(
+        _ runs: [_OpenTextRun],
+        environment: _RenderEnvironment
+    ) -> OpenUIKit.NSAttributedString {
+        let result = OpenUIKit.NSMutableAttributedString()
+        for run in runs {
+            let attributes = run.attributes
+            var font: _OpenFont = (attributes.font ?? environment.font) ?? .body
+            if attributes.italic { font = font.italic() }
+            var uiFont = font.resolve(weight: attributes.weight ?? environment.weight)
+            if attributes.monospacedDigits || environment.usesMonospacedDigits {
+                uiFont = .monospacedSystemFont(ofSize: uiFont.pointSize, weight: uiFont.weight)
+            }
+            let color = (attributes.foregroundColor ?? environment.foregroundColor)?.resolve()
+                ?? .label
+            var values: [OpenUIKit.NSAttributedString.Key: Any] = [
+                .font: uiFont,
+                .foregroundColor: color,
+            ]
+            if let offset = attributes.baselineOffset { values[.baselineOffset] = offset }
+            if let kerning = attributes.kerning { values[.kern] = kerning }
+            if let tracking = attributes.tracking { values[.tracking] = tracking }
+            if let underline = attributes.underline {
+                values[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                if let underline { values[.underlineColor] = underline.resolve() }
+            }
+            if let strikethrough = attributes.strikethrough {
+                values[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                if let strikethrough { values[.strikethroughColor] = strikethrough.resolve() }
+            }
+            switch run.content {
+            case .string(let string):
+                result.append(OpenUIKit.NSAttributedString(string: string, attributes: values))
+            case .image(let image):
+                guard let attachment = _textAttachment(
+                    image.source,
+                    font: uiFont,
+                    color: color,
+                    baselineOffset: attributes.baselineOffset ?? 0
+                ) else { continue }
+                // The attachment's bounds carry the offset.
+                values[.baselineOffset] = nil
+                values[.attachment] = attachment
+                result.append(OpenUIKit.NSAttributedString(
+                    string: NSAttachmentCharacterString,
+                    attributes: values
+                ))
+            }
+        }
+        return result
+    }
+
+    /// An inline image as a text attachment. SwiftUI puts the image's bottom
+    /// on the baseline, raised by the run's baseline offset; a bitmap keeps
+    /// its point size; a system symbol is `UIImage(systemName:)` at the run's
+    /// font size, in the text colour, centred on the cap height. An image
+    /// that does not resolve (unknown name or symbol) is left out.
+    private static func _textAttachment(
+        _ source: _OpenImageSource,
+        font: UIFont,
+        color: UIColor,
+        baselineOffset: CGFloat
+    ) -> NSTextAttachment? {
+        let attachment = NSTextAttachment()
+        switch source {
+        case .uiImage(let image):
+            attachment.image = image
+        case .named(let name, let bundle):
+            guard let image = UIImage(named: name, in: bundle, compatibleWith: nil) else {
+                return nil
+            }
+            attachment.image = image
+        case .system(let name):
+            guard let symbol = UIImage(
+                systemName: name,
+                withConfiguration: UIImage.SymbolConfiguration(
+                    pointSize: font.pointSize,
+                    weight: .regular
+                )
+            ) else { return nil }
+            let image = symbol.withTintColor(color)
+            guard image.size.width > 0, image.size.height > 0 else { return nil }
+            attachment.image = image
+            attachment.bounds = CGRect(
+                x: 0,
+                y: (font.capHeight - image.size.height) / 2 + baselineOffset,
+                width: image.size.width,
+                height: image.size.height
+            )
+            return attachment
+        }
+        guard let size = attachment.image?.size, size.width > 0, size.height > 0 else {
+            return nil
+        }
+        attachment.bounds = CGRect(x: 0, y: baselineOffset, width: size.width, height: size.height)
+        return attachment
     }
 
     private static func measureImage(
