@@ -331,6 +331,9 @@ enum _OpenViewModification {
     )
     case padding(Edge.Set, CGFloat?)
     case edgeInsetsPadding(EdgeInsets)
+    /// `listRowInsets(_:)`: laid out as edge-insets padding; a plain List's
+    /// Section uses it in place of its default row insets.
+    case listRowInsets(EdgeInsets)
     case background(_OpenViewNode, alignment: Alignment)
     case overlay(_OpenViewNode, alignment: Alignment)
     case mask(_OpenViewNode, alignment: Alignment)
@@ -406,6 +409,7 @@ enum _OpenViewModification {
     case contextMenu(_OpenViewNode)
     case matchedGeometry(id: AnyHashable, namespace: Namespace.ID, isSource: Bool)
     case listStyle(ListStyle)
+    case scrollContentBackground(Visibility)
     case listRowBackground(_OpenViewNode)
     case listRowSeparator(Visibility, VerticalEdge.Set)
     case searchable(_OpenSearchConfiguration)
@@ -458,6 +462,9 @@ fileprivate enum _OpenViewModifier {
     )
     case padding(Edge.Set, CGFloat?)
     case edgeInsetsPadding(EdgeInsets)
+    /// `listRowInsets(_:)`: laid out as edge-insets padding; a plain List's
+    /// Section uses it in place of its default row insets.
+    case listRowInsets(EdgeInsets)
     case background(@MainActor () -> _OpenViewNode, alignment: Alignment)
     case overlay(@MainActor () -> _OpenViewNode, alignment: Alignment)
     case mask(@MainActor () -> _OpenViewNode, alignment: Alignment)
@@ -551,6 +558,7 @@ fileprivate enum _OpenViewModifier {
     case contextMenu(@MainActor () -> _OpenViewNode)
     case matchedGeometry(id: AnyHashable, namespace: Namespace.ID, isSource: Bool)
     case listStyle(ListStyle)
+    case scrollContentBackground(Visibility)
     case listRowBackground(@MainActor () -> _OpenViewNode)
     case listRowSeparator(Visibility, VerticalEdge.Set)
     case searchable(_OpenSearchConfiguration)
@@ -600,6 +608,7 @@ fileprivate enum _OpenViewModifier {
             )
         case .padding(let edges, let length): return .padding(edges, length)
         case .edgeInsetsPadding(let insets): return .edgeInsetsPadding(insets)
+        case .listRowInsets(let insets): return .listRowInsets(insets)
         case .background(let makeNode, let alignment):
             return .background(
                 _OpenGraphContext.withStructuralScope(.background, operation: makeNode),
@@ -752,6 +761,7 @@ fileprivate enum _OpenViewModifier {
         case .matchedGeometry(let id, let namespace, let isSource):
             return .matchedGeometry(id: id, namespace: namespace, isSource: isSource)
         case .listStyle(let style): return .listStyle(style)
+        case .scrollContentBackground(let visibility): return .scrollContentBackground(visibility)
         case .listRowBackground(let makeBackground):
             return .listRowBackground(
                 _OpenGraphContext.withStructuralScope(
@@ -4256,6 +4266,12 @@ public extension _OpenView {
         _OpenModifiedContent(content: self, modification: .listStyle(style))
     }
 
+    /// Hides (or shows) the system background of a List or Form; content
+    /// behind the scroll view shows through when hidden.
+    func scrollContentBackground(_ visibility: Visibility) -> some _OpenView {
+        _OpenModifiedContent(content: self, modification: .scrollContentBackground(visibility))
+    }
+
     func listStyle(_ style: GroupedListStyle) -> some _OpenView {
         _ = style
         return _OpenModifiedContent(content: self, modification: .listStyle(.grouped))
@@ -4286,7 +4302,7 @@ public extension _OpenView {
         guard let insets else {
             return _OpenModifiedContent(content: self, modification: .effect)
         }
-        return _OpenModifiedContent(content: self, modification: .edgeInsetsPadding(insets))
+        return _OpenModifiedContent(content: self, modification: .listRowInsets(insets))
     }
 
     func tag<Value: Hashable>(_ tag: Value) -> some _OpenView {

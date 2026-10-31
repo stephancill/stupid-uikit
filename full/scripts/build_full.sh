@@ -45,18 +45,31 @@ UIKIT=${UIKIT:-$W/uikit}
 # runs under machorun. Set to the empty string to build none. The probes add
 # executables and OpenUIKit's Objective-C header; render_full is unchanged.
 BUILD_FULL_EXTRA_PROBES=${BUILD_FULL_EXTRA_PROBES-$UIKIT/Tools/guestprobes}
-MINOS=${MINOS:-15.0}
-LINK_PLATFORM=${LINK_PLATFORM:-macos}
-LINK_SDK_VERSION=${LINK_SDK_VERSION:-$MINOS}
+MINOS=${MINOS:-$GUEST_MINOS}
+LINK_PLATFORM=${LINK_PLATFORM:-$GUEST_LINK_PLATFORM}
+# An iOS-simulator guest presents iOS 26.1 (full/shims/ios_availability.c),
+# which is also the SDK version its images carry.
+if [ "$LINK_PLATFORM" = ios-simulator ]; then
+    LINK_SDK_VERSION=${LINK_SDK_VERSION:-26.1}
+else
+    LINK_SDK_VERSION=${LINK_SDK_VERSION:-$MINOS}
+fi
 SYS=${SYS:-$W/scratch/sysroot_fe4${FULL_OUT_SUFFIX}}     # Darwin + FE compile sysroot; x86_64 writes beside
 APPLE_SWIFT_USER_OVERLAYS=${APPLE_SWIFT_USER_OVERLAYS:-}
+# x86_64 iOS simulator: scripts/x86/stage_ios_sim_sysroot.sh stages the Darwin
+# overlays beside the sysroot.
+if [ -z "$APPLE_SWIFT_USER_OVERLAYS" ] && [ "$LINK_PLATFORM" = ios-simulator ] && [ "$ARCH" = x86_64 ]; then
+    APPLE_SWIFT_USER_OVERLAYS=$W/scratch/apple-overlays${FULL_OUT_SUFFIX}
+fi
+# Sub-builds (FoundationInternationalization, ...) read these from the environment.
+export MINOS LINK_PLATFORM LINK_SDK_VERSION APPLE_SWIFT_USER_OVERLAYS
 OUT=${OUT:-$W/build/full${FULL_OUT_SUFFIX}}
 ROOTDIR=${ROOTDIR:-$W/scratch/mrroot_full${FULL_OUT_SUFFIX}}
 MC=${MC:-$W/scratch/modcache_full${FULL_OUT_SUFFIX}}
 SF=${SF:-$W/scratch/swift-foundation}
 SC=${SC:-$W/scratch/swift-collections}
-BASE_RUNTIME_SOURCE=${BASE_RUNTIME_SOURCE:-$W/scratch/mrroot${FULL_OUT_SUFFIX}}
-FE_RUNTIME_SOURCE=${FE_RUNTIME_SOURCE:-$W/scratch/mrroot_fe${FULL_OUT_SUFFIX}}
+BASE_RUNTIME_SOURCE=${BASE_RUNTIME_SOURCE:-$W/scratch/mrroot${RUNTIME_SOURCE_SUFFIX}}
+FE_RUNTIME_SOURCE=${FE_RUNTIME_SOURCE:-$W/scratch/mrroot_fe${RUNTIME_SOURCE_SUFFIX}}
 SWIFT_CORE_RUNTIME_STAGER=$W/full/scripts/stage_swift_core_runtime.py
 FE_BUILD=$OUT/foundation
 FE_OUT=$FE_BUILD/essentials
@@ -132,7 +145,7 @@ rm -f "$OUT/uihelpers-subject.sha256" "$OUT/uihelpers-artifacts.sha256" \
 APPLE_SWIFT_OVERLAY_FLAGS=()
 if [ -n "$APPLE_SWIFT_USER_OVERLAYS" ]; then
     for module_name in Darwin _DarwinFoundation1 _DarwinFoundation2 _DarwinFoundation3 ObjectiveC; do
-        module_file="$APPLE_SWIFT_USER_OVERLAYS/$module_name.swiftmodule/arm64-apple-ios-simulator.swiftinterface"
+        module_file="$APPLE_SWIFT_USER_OVERLAYS/$module_name.swiftmodule/$ARCH-apple-ios-simulator.swiftinterface"
         [ -f "$module_file" ] && [ ! -L "$module_file" ] || {
             echo "build_full: missing regular Apple user-overlay interface: $module_file" >&2
             exit 2
@@ -1423,7 +1436,7 @@ echo "== Foundation/UIKit notification identity compile proof"
 # Dispatch and FoundationInternationalization exist — the same order as
 # full/frameworks/build_core_guest_package.sh after it calls this script.
 OPENCOMBINE_ROOT=${OPENCOMBINE_ROOT:-$W/scratch/opencombine-core-durable-20260828-r2}
-OPENCOMBINE_ARTIFACTS=${OPENCOMBINE_ARTIFACTS:-$OPENCOMBINE_ROOT/export${FULL_OUT_SUFFIX}/artifacts}
+OPENCOMBINE_ARTIFACTS=${OPENCOMBINE_ARTIFACTS:-$OPENCOMBINE_ROOT/export${OPENCOMBINE_EXPORT_SUFFIX}/artifacts}
 OPENCOMBINE_SOURCE=$OPENCOMBINE_ROOT/source
 OPENCOMBINE_HELPERS=$OPENCOMBINE_SOURCE/Sources/COpenCombineHelpers
 FOUNDATION_GUEST_MANIFEST=$W/full/foundation/foundation_guest_sources.txt

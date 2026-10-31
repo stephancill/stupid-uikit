@@ -2013,6 +2013,9 @@ private struct _RenderEnvironment {
     var refreshAction: (@MainActor () async -> Void)?
     var scrollIndicatorVisibility: Visibility = .automatic
     var listStyle: ListStyle = .automatic
+    /// `.scrollContentBackground(_:)`: `.hidden` clears the List/Form
+    /// container background (rows and sections keep theirs).
+    var scrollContentBackground: Visibility = .automatic
     var menuIndicatorVisibility: Visibility = .automatic
     /// MEASURED realapp_hackers_feed_light, iPhone 16 @3x: the principal
     /// `HostedViewWrapper` is 36 pt (`_UINavigationBarTitleControl`); the
@@ -2369,7 +2372,9 @@ private enum _ViewRenderer {
             return CGSize(width: width, height: height)
         case .section(let header, let footer, let rows):
             let bounded = _bounded(proposed)
-            let headerHeight: CGFloat = header == nil ? 12 : 28
+            let plain = _isPlainListSection(environment)
+            let headerHeight: CGFloat = header == nil ? (plain ? 0 : 12) : 28
+            let rowPadding = 2 * _plainSectionRowVerticalInset(environment)
             var height = headerHeight
             for row in rows {
                 let size = measure(
@@ -2377,9 +2382,10 @@ private enum _ViewRenderer {
                     proposed: CGSize(width: bounded.width, height: selfSizingRowProposalHeight),
                     environment: environment
                 )
-                height += max(defaultFormRowHeight, size.height)
+                let padding = plain && _hasListRowInsets(row) ? 0 : rowPadding
+                height += max(defaultFormRowHeight, size.height + padding)
             }
-            let footerHeight: CGFloat = footer == nil ? 12 : 28
+            let footerHeight: CGFloat = footer == nil ? (plain ? 0 : 12) : 28
             return CGSize(width: bounded.width, height: height + footerHeight)
         case .toggle(let label, _, _):
             let labelSize = measure(label, proposed: proposed, environment: environment)
@@ -2627,7 +2633,7 @@ private enum _ViewRenderer {
                 )
                 let size = measure(content, proposed: inner, environment: environment)
                 return CGSize(width: size.width + horizontal, height: size.height + vertical)
-            case .edgeInsetsPadding(let insets):
+            case .edgeInsetsPadding(let insets), .listRowInsets(let insets):
                 let horizontal = max(0, insets.leading) + max(0, insets.trailing)
                 let vertical = max(0, insets.top) + max(0, insets.bottom)
                 let inner = CGSize(
@@ -2668,6 +2674,10 @@ private enum _ViewRenderer {
             case .listStyle(let style):
                 var next = environment
                 next.listStyle = style
+                return measure(content, proposed: proposed, environment: next)
+            case .scrollContentBackground(let visibility):
+                var next = environment
+                next.scrollContentBackground = visibility
                 return measure(content, proposed: proposed, environment: next)
             case .searchable:
                 // The search field occupies the content's existing viewport;
@@ -3717,7 +3727,7 @@ private enum _ViewRenderer {
                     inset.bottom = 0
                 }
                 place(content, in: rect.inset(by: inset), on: surface, environment: environment)
-            case .edgeInsetsPadding(let insets):
+            case .edgeInsetsPadding(let insets), .listRowInsets(let insets):
                 place(
                     content,
                     in: rect.inset(
@@ -4234,6 +4244,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.listStyle = style
                 place(content, in: rect, on: surface, environment: next)
+            case .scrollContentBackground(let visibility):
+                var next = environment
+                next.scrollContentBackground = visibility
+                place(content, in: rect, on: surface, environment: next)
             case .listRowSeparator:
                 // Consumed by `placeList` when it creates the physical row
                 // boundary. Outside a list it is layout-transparent.
@@ -4560,6 +4574,20 @@ private enum _ViewRenderer {
         )
     }
 
+    /// Sections inside a List styled `.plain` explicitly (`.automatic` keeps
+    /// the measured grouped section chrome).
+    static func _isPlainListSection(_ environment: _RenderEnvironment) -> Bool {
+        if case .plain = environment.listStyle.storage { return true }
+        return false
+    }
+
+    /// Vertical padding of a row inside a plain-list Section on the iOS cut:
+    /// the section's rows are the list's rows, so they take placeList's
+    /// measured plain-row padding (15 pt above and below the content).
+    static func _plainSectionRowVerticalInset(_ environment: _RenderEnvironment) -> CGFloat {
+        _isPlainListSection(environment) && OpenUIKitRuntime.systemFontCut == .iOS ? 15 : 0
+    }
+
     private static func placeSection(
         header: _OpenViewNode?,
         footer: _OpenViewNode?,
@@ -4568,13 +4596,20 @@ private enum _ViewRenderer {
         on surface: UIView,
         environment: _RenderEnvironment
     ) {
+        // A section in a `.plain` List has no grouped chrome: no grouped
+        // background, no 12 pt gap above or below a header/footer-less
+        // section, and rows on the list's own background (clear here, so the
+        // list's color, or what is behind a `.scrollContentBackground(.hidden)`
+        // list, shows through).
+        let plain = _isPlainListSection(environment)
         let section = UIView(frame: rect)
-        section.backgroundColor = .systemGroupedBackground
+        section.backgroundColor = plain ? .clear : .systemGroupedBackground
         section.clipsToBounds = true
         section.accessibilityIdentifier = "SwiftUI.Section"
         surface.addSubview(section)
 
-        var y: CGFloat = header == nil ? 12 : 28
+        var y: CGFloat = header == nil ? (plain ? 0 : 12) : 28
+        let rowVerticalInset = _plainSectionRowVerticalInset(environment)
         if let header {
             var headerEnvironment = environment
             headerEnvironment.font = .caption
@@ -4593,12 +4628,18 @@ private enum _ViewRenderer {
         }
 
         for (index, row) in rows.enumerated() {
+            // In a plain list a row's own listRowInsets replace the default
+            // row insets, as in SwiftUI (the insets are laid out as padding
+            // inside the row node).
+            let rowInsets = plain && _hasListRowInsets(row)
+                ? UIEdgeInsets.zero
+                : UIEdgeInsets(top: rowVerticalInset, left: 16, bottom: rowVerticalInset, right: 16)
             let proposal = CGSize(
-                width: max(0, section.bounds.width - 32),
+                width: max(0, section.bounds.width - rowInsets.left - rowInsets.right),
                 height: selfSizingRowProposalHeight
             )
             let measured = measure(row, proposed: proposal, environment: environment)
-            let height = max(defaultFormRowHeight, measured.height)
+            let height = max(defaultFormRowHeight, measured.height + rowInsets.top + rowInsets.bottom)
             guard y < section.bounds.height else { break }
             let rowView = UIView(
                 frame: CGRect(
@@ -4608,14 +4649,12 @@ private enum _ViewRenderer {
                     height: min(height, section.bounds.height - y)
                 )
             )
-            rowView.backgroundColor = .secondarySystemBackground
+            rowView.backgroundColor = plain ? .clear : .secondarySystemBackground
             rowView.accessibilityIdentifier = "SwiftUI.Section.row.\(index)"
             section.addSubview(rowView)
             place(
                 row,
-                in: rowView.bounds.inset(
-                    by: UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
-                ),
+                in: rowView.bounds.inset(by: rowInsets),
                 on: rowView,
                 environment: environment
             )
@@ -4660,7 +4699,8 @@ private enum _ViewRenderer {
         environment: _RenderEnvironment
     ) {
         let formView = UIView(frame: rect)
-        formView.backgroundColor = .systemGroupedBackground
+        formView.backgroundColor = environment.scrollContentBackground == .hidden
+            ? .clear : .systemGroupedBackground
         formView.clipsToBounds = true
         formView.accessibilityIdentifier = "SwiftUI.Form"
         surface.addSubview(formView)
@@ -4728,6 +4768,9 @@ private enum _ViewRenderer {
         case .automatic, .plain:
             list.backgroundColor = .systemBackground
         }
+        if environment.scrollContentBackground == .hidden {
+            list.backgroundColor = .clear
+        }
         list.clipsToBounds = true
         list.accessibilityIdentifier = "SwiftUI.List"
         list.accessibilityValue = "style=\(environment.listStyle.storage)"
@@ -4794,10 +4837,23 @@ private enum _ViewRenderer {
             ),
             height: 10_000
         )
+        // In an explicitly `.plain` list a Section is not a row: its rows are
+        // the list's rows and carry the plain-row padding themselves
+        // (placeSection), so it spans the list's full width without the row
+        // insets. `.automatic` lists keep their measured layout.
+        let plainSections = _isPlainListSection(environment)
+        func rowInsets(_ row: _OpenViewNode) -> UIEdgeInsets {
+            if plainSections, case .section = row.kind { return .zero }
+            return iOSPlainRowInsets
+        }
         for row in rows {
-            let measured = measure(row, proposed: proposal, environment: environment)
-            let padded = measured.height
-                + iOSPlainRowInsets.top + iOSPlainRowInsets.bottom
+            let insets = rowInsets(row)
+            let rowProposal = CGSize(
+                width: max(0, list.bounds.width - horizontalInset * 2 - insets.left - insets.right),
+                height: proposal.height
+            )
+            let measured = measure(row, proposed: rowProposal, environment: environment)
+            let padded = measured.height + insets.top + insets.bottom
             let height = max(defaultFormRowHeight, padded)
             rowLayouts.append((row, height))
             contentHeight += height
@@ -4818,6 +4874,7 @@ private enum _ViewRenderer {
             let rowHost: UIView
             let contentRect: CGRect
             if iOSPlainRowInsets != .zero {
+                let insets = rowInsets(layout.node)
                 let host = UIView(frame: rowFrame)
                 host.backgroundColor = list.backgroundColor
                 host.clipsToBounds = true
@@ -4825,16 +4882,10 @@ private enum _ViewRenderer {
                 list.addSubview(host)
                 rowHost = host
                 contentRect = CGRect(
-                    x: iOSPlainRowInsets.left,
-                    y: iOSPlainRowInsets.top,
-                    width: max(
-                        0,
-                        rowFrame.width - iOSPlainRowInsets.left - iOSPlainRowInsets.right
-                    ),
-                    height: max(
-                        0,
-                        rowFrame.height - iOSPlainRowInsets.top - iOSPlainRowInsets.bottom
-                    )
+                    x: insets.left,
+                    y: insets.top,
+                    width: max(0, rowFrame.width - insets.left - insets.right),
+                    height: max(0, rowFrame.height - insets.top - insets.bottom)
                 )
             } else {
                 rowHost = list
@@ -4885,6 +4936,15 @@ private enum _ViewRenderer {
             }
             y += layout.height
         }
+    }
+
+    /// Whether a row carries `listRowInsets(_:)` (outermost modifier chain).
+    static func _hasListRowInsets(_ node: _OpenViewNode) -> Bool {
+        guard case .modified(let content, let modification) = node.kind else {
+            return false
+        }
+        if case .listRowInsets = modification { return true }
+        return _hasListRowInsets(content)
     }
 
     private static func _listRowSeparatorVisibility(
