@@ -492,8 +492,14 @@ public final class UIImage: NSObject {
     }
 #else
     /// Foundation-hidden guest: the same bytes, without Foundation.Data.
+    /// Disfavoured so that a module adding UIKit's `Data?` spelling on top
+    /// (stupid-app-preview's `_PreviewUIKitCompat`) wins where the call has no
+    /// type context, as in UIKit (`guard let jpeg = image.jpegData(...)` then
+    /// returned as `Data`); alone, these are still the only candidates.
+    @_disfavoredOverload
     public func pngData() -> [UInt8]? { ImageCodec.encodePNG(bitmap) }
 
+    @_disfavoredOverload
     public func jpegData(compressionQuality: CGFloat) -> [UInt8]? {
         ImageCodec.encodeJPEG(bitmap, quality: compressionQuality)
     }
