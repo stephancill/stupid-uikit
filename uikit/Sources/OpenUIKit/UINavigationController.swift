@@ -646,9 +646,16 @@ open class UINavigationController: UIViewController {
         bar._padTrailingChrome = false
         bar.setShowsCancelButton(false, animated: false)
         if bar.superview !== platter { platter.addSubview(bar) }
-        bar.frame = CGRect(x: fieldInset, y: fieldInset,
-                           width: max(0, fieldPlatterW - fieldInset * 2),
-                           height: fieldH)
+        if dock.usesIOS27Field {
+            // iOS 27: the field spans the platter, 28 pt tall, centred
+            // (`UISearchBar.BottomDock.iOS27FieldHeight`).
+            bar.frame = CGRect(x: 0, y: (platterH - dock.iOS27FieldHeight) / 2,
+                               width: fieldPlatterW, height: dock.iOS27FieldHeight)
+        } else {
+            bar.frame = CGRect(x: fieldInset, y: fieldInset,
+                               width: max(0, fieldPlatterW - fieldInset * 2),
+                               height: fieldH)
+        }
         bar.isHidden = false
         bar.setNeedsLayout()
         v.bringSubviewToFront(container)
@@ -666,13 +673,39 @@ open class UINavigationController: UIViewController {
         // toolbar; reuse the tab/toolbar platter shadow (opacity 0.10,
         // radius 7, offset 2.5).
         platter.clipsToBounds = false
-        if platter._usesIOSGlass {
+        if platter._usesIOSGlass, OpenUIKitRuntime.chromeRelease == .iOS27 {
+            // iOS 27: the bar platters' light shadow and grey rim. MEASURED
+            // stupid social's Search screen, iPhone 16e @3x / iOS 27.0, over
+            // systemGroupedBackground: nothing above or beside the docked
+            // search platter, at most 3 counts below it (iOS 26.1's tab
+            // platter shadow drew ~10); the rim darkens px 27.33 / 27.67 to
+            // 203 / 164 at the ends and 229 / 219 along the top, as on the
+            // toolbar capsule (`_UIBarPlatterRimView`).
+            platter.layer._shadowColorValue = CanvasColor(red: 0, green: 0, blue: 0, alpha: 1)
+            platter.layer.shadowOpacity = _UIBarMetrics.iOS27ShadowOpacity
+            platter.layer.shadowRadius = _UIBarMetrics.shadowRadius
+            platter.layer.shadowOffset = _UIBarMetrics.shadowOffset
+        } else if platter._usesIOSGlass {
             platter.layer._shadowColorValue = CanvasColor(red: 0, green: 0, blue: 0, alpha: 1)
             platter.layer.shadowOpacity = UITabBar.shadowOpacity
             platter.layer.shadowRadius = UITabBar.shadowRadius
             platter.layer.shadowOffset = UITabBar.shadowOffset
         } else {
             platter.layer.shadowOpacity = 0
+        }
+        // The rim view exists only where it applies, so the iOS 26 chrome's
+        // hierarchy is unchanged.
+        let existingRim = platter.subviews.first { $0 is _UIBarPlatterRimView }
+        if _UIBarPlatterRimView.applies(to: platter) {
+            let rim = existingRim ?? {
+                let r = _UIBarPlatterRimView()
+                platter.insertSubview(r, at: 0)
+                return r
+            }()
+            rim.isHidden = false
+            rim.frame = _UIBarPlatterRimView.frame(around: platter.bounds)
+        } else {
+            existingRim?.isHidden = true
         }
     }
 

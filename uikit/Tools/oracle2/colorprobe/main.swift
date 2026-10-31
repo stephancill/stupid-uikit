@@ -7,6 +7,11 @@
 // Catalyst and #000000 on iOS; measured 2026-09-04 when the whole scene suite
 // was first captured on the iOS 26.1 simulator).
 // Run: scripts/color_probe_sim.sh <outdir>
+//
+// iOS 27 traps at launch (UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption)
+// without scene lifecycle, so ColorProbe-Info.plist declares a scene manifest
+// whose ColorProbeSceneDelegate shows the window; the colours are resolved
+// from explicit traits and need no window.
 import UIKit
 
 let docsDir = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
@@ -31,14 +36,29 @@ func resolve(_ name: String, style: UIUserInterfaceStyle, elevated: Bool = false
     return [r6(r), r6(g), r6(b), r6(a)]
 }
 
-final class AppDelegate: NSObject, UIApplicationDelegate {
+@objc(ColorProbeSceneDelegate)
+final class ColorProbeSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
-    func application(_ app: UIApplication,
-                     didFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let w = UIWindow(frame: UIScreen.main.bounds)
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = scene as? UIWindowScene else { fatalError("colorprobe: not a UIWindowScene") }
+        let w = UIWindow(windowScene: windowScene)
         window = w
         w.rootViewController = UIViewController()
         w.makeKeyAndVisible()
+    }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let c = UISceneConfiguration(name: "Default", sessionRole: connectingSceneSession.role)
+        c.delegateClass = ColorProbeSceneDelegate.self
+        return c
+    }
+    func application(_ app: UIApplication,
+                     didFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         let src = Bundle.main.path(forResource: "system_colors", ofType: "json")!
         let table = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: src))) as! [String: Any]
         var names = Set<String>()
@@ -67,7 +87,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             elevatedOut[styleName] = m
         }
         out["elevated"] = elevatedOut
-        out["device"] = ["system": UIDevice.current.systemVersion, "model": UIDevice.current.model]
+        out["device"] = ["system": UIDevice.current.systemVersion, "model": UIDevice.current.model,
+                         "runtimeBuild": ProcessInfo.processInfo.environment["SIMULATOR_RUNTIME_BUILD_VERSION"] ?? "",
+                         "deviceType": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""]
         let data = try! JSONSerialization.data(withJSONObject: out, options: [.sortedKeys, .prettyPrinted])
         try! data.write(to: URL(fileURLWithPath: "\(docsDir)/system_colors_ios.json"))
         try! "ok".write(toFile: docsDir + "/DONE", atomically: true, encoding: .utf8)

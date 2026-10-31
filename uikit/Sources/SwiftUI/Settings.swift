@@ -86,7 +86,7 @@ public struct _OpenContentUnavailableView<LabelContent: _OpenView,
 // symbol above the title, the description under it, all centred. MEASURED
 // stupid social's Search empty state, iPhone 16e @3x / iOS 27.0 (stupidsim
 // frames and ink): label element [123.83, 245.67, 142.33 x 86] = the symbol
-// (ink 38.33 x 38.67, secondary) then the title (title2 bold, frame bottom
+// (ink 38.33 x 38.67, secondary) then the title (20 pt bold, frame bottom
 // 331.67); description [87, 334.67, 216 x 49] = two title3 lines in
 // secondary, 3 pt under the title. In its 320 pt list row the content sits
 // 26.67 pt above centre (row centre 328, content 245.67...383.67): iOS
@@ -94,11 +94,14 @@ public struct _OpenContentUnavailableView<LabelContent: _OpenView,
 extension _OpenContentUnavailableView {
     static var iOSSymbolPointSize: CGFloat { 42 }
     static var iOSSymbolHeight: CGFloat { 39 }
-    /// 19.33 pt from the symbol's ink to the title's frame on iOS; the
-    /// guest's title2 line box puts its ink ~0.7 pt higher, hence 20.
-    static var iOSSymbolTitleGap: CGFloat { 20 }
+    /// Fitted to the reference ink with the 20 pt bold title: symbol ink
+    /// [245.67, 284.33], title baseline 327, description ink from 339.33.
+    /// (With title2's taller line box these were 20 and 26.67; the smaller
+    /// line box moved the symbol 1.17 pt down, so the gap and the space
+    /// below grow by that much and the block stays centred.)
+    static var iOSSymbolTitleGap: CGFloat { 21 + 1.0 / 6.0 }
     static var iOSTitleDescriptionGap: CGFloat { 3 }
-    static var iOSBottomSpace: CGFloat { 26 + 2.0 / 3.0 }
+    static var iOSBottomSpace: CGFloat { 27 + 5.0 / 6.0 }
 
     func _iOSNode(icon: _OpenAnyView, title: _OpenAnyView, iconHeight: CGFloat?) -> _OpenViewNode {
         var children: [_OpenViewNode] = [_OpenViewNode(.spacer(minLength: 0))]
@@ -113,7 +116,10 @@ extension _OpenContentUnavailableView {
                         .accessibilityHidden(true)
                         .padding(.bottom, Self.iOSSymbolTitleGap)
                     title
-                        .font(.title2.bold())
+                        // 20 pt bold, not title2 (22): MEASURED (same
+                        // reference) "Search Profiles" ink 141 pt wide, "S"
+                        // 11.33 x 15 pt; title2 bold draws 154 / 12.5 x 16.5.
+                        .font(.title3.weight(.bold))
                         .multilineTextAlignment(.center)
                 }
                 .accessibilityElement(children: .combine)
@@ -125,7 +131,13 @@ extension _OpenContentUnavailableView {
                 _OpenGraphContext.withStructuralScope(.sectionContent) {
                     description
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        // UIKit's secondaryLabel, not the hierarchical
+                        // `.secondary`: MEASURED (same reference) the
+                        // description's full-coverage pixels are (133, 133,
+                        // 139) on (242, 242, 247), i.e. (60, 60, 67) at 0.6,
+                        // where iOS 27's `.secondary` text is black at 0.5
+                        // ((121, 121, 124) there); the symbol above it is.
+                        .foregroundStyle(_OpenColor(uiColor: .secondaryLabel))
                         .multilineTextAlignment(.center)
                         .padding(.top, Self.iOSTitleDescriptionGap)
                         ._makeOpenUIKitNode()

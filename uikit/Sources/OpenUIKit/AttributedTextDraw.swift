@@ -156,7 +156,7 @@ extension AttributedTextLayout {
                     k += 1
                     continue
                 }
-                if ch != " " && ch.value != 0x00A0 && ch != "\n" && ch.value != 0xFFFC && color.alpha > 0 {
+                if ch != " " && ch.value != 0x00A0 && ch.value != 0x202F && ch != "\n" && ch.value != 0xFFFC && color.alpha > 0 {
                     UILabel.drawGlyph(ch, penX: x, baselineY: baselineY, in: canvas,
                                       font: st.font, dark: dark, color: color,
                                       glyphFont: glyphFont, inkEligible: inkEligible,

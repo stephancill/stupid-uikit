@@ -149,3 +149,7 @@ semibold, as measured on iOS.
   at most 76/255), 4.2 % of pixels changed, ink sums within 1.6 %. The table therefore mixes two
   runtimes' rasterisation at that level. Dark-appearance masks for these
   families were not harvested (the root screen is light).
+
+Beyond the root (2026-10-31, `IOS27_CROSS_SCREEN.md`): misses logged on detail, settings,
+search, story, chats and chat (`SSG_INK_LOG` with `SSG_SCRIPT`) harvested on the same device
+and runtime: 2123 + 161 keys, table 10891 -> 13175. U+202F is "no ink" and skipped like SPACE.
