@@ -25,6 +25,12 @@ LINK_SDK_VERSION=${LINK_SDK_VERSION:-$MIN_OS}
 APPLE_SWIFT_USER_OVERLAYS=${APPLE_SWIFT_USER_OVERLAYS:-}
 DYLIB_INSTALL_PREFIX=${DYLIB_INSTALL_PREFIX:-@rpath}
 FOUNDATION_ICU_JOBS=${FOUNDATION_ICU_JOBS:-8}
+# all (default): the whole build. objects: only the inventories and the 474
+# ICU translation units (they need nothing but the pinned sources and the SDK),
+# so build_full.sh can run them in the background while it compiles
+# FoundationEssentials and OpenUIKit. finish: everything else, in a WORK that a
+# completed objects step of the same pinned source list prepared.
+FOUNDATION_ICU_STEP=${FOUNDATION_ICU_STEP:-all}
 COLLECTIONS=${COLLECTIONS:-}
 OSMOD=${OSMOD:-}
 CSHIMS=${CSHIMS:-}
@@ -41,6 +47,10 @@ die() {
     echo "foundation_internationalization: REFUSING -- $*" >&2
     exit 2
 }
+case "$FOUNDATION_ICU_STEP" in
+    all|objects|finish) ;;
+    *) die "FOUNDATION_ICU_STEP must be all, objects or finish" ;;
+esac
 
 case "$FOUNDATION_ICU_JOBS" in
     ''|*[!0-9]*) die 'FOUNDATION_ICU_JOBS must be a positive integer' ;;
@@ -65,6 +75,8 @@ for tool in git find cmp sha256sum swiftc clang-18 clang++-18 ld64.lld-18 \
     llvm-nm-18 llvm-otool-18 readelf xargs; do
     command -v "$tool" >/dev/null || die "required tool is missing: $tool"
 done
+[ -d "$STAGE/sdk" ] || die 'staged SDK root is missing'
+if [ "$FOUNDATION_ICU_STEP" != objects ]; then
 [ -d "$STAGE/sdk" ] && [ -d "$STAGE/modules" ] \
     && [ -d "$STAGE/lib" ] && [ -d "$STAGE/guest-root/darwin/usr/lib" ] \
     || die 'staged SDK/module/library/runtime roots are incomplete'
@@ -94,6 +106,7 @@ if [ -n "$CSHIMS" ]; then
             || die "CSHIMS is missing $object.o: $CSHIMS"
     done
 fi
+fi
 
 assert_checkout() {
     local checkout=$1 expected_commit=$2 expected_tree=$3 label=$4
@@ -114,8 +127,14 @@ assert_checkout "$SWIFT_FOUNDATION" "$EXPECTED_FOUNDATION_COMMIT" \
 assert_checkout "$SWIFT_FOUNDATION_ICU" "$EXPECTED_FOUNDATION_ICU_COMMIT" \
     "$EXPECTED_FOUNDATION_ICU_TREE" swift-foundation-icu
 
+if [ "$FOUNDATION_ICU_STEP" = finish ]; then
+    [ -f "$WORK/foundation-internationalization/icu-objects.complete" ] \
+        && [ ! -L "$WORK/foundation-internationalization/icu-objects.complete" ] \
+        || die 'the ICU objects step did not complete in this WORK'
+else
 [ ! -e "$WORK/foundation-internationalization" ] \
     || die 'FoundationInternationalization work directory is stale'
+fi
 mkdir -p "$WORK/foundation-internationalization/icu-objects" \
     "$WORK/foundation-internationalization/module-cache" \
     "$STAGE/include" "$STAGE/guest-root/host" "$STAGE/attestation"
@@ -163,11 +182,18 @@ icu_header_count=$(git -C "$SWIFT_FOUNDATION_ICU" ls-files -z -- \
     || die "Foundation ICU header count $icu_header_count, expected $EXPECTED_FOUNDATION_ICU_HEADER_COUNT"
 [ -f "$ICU_SOURCE_ROOT/include/_foundation_unicode/module.modulemap" ] \
     || die 'Foundation ICU module map is missing'
+if [ "$FOUNDATION_ICU_STEP" = finish ]; then
+    # Staged by the objects step: still exactly the pinned headers.
+    diff -r --no-dereference "$ICU_SOURCE_ROOT/include/_foundation_unicode" \
+        "$STAGE/include/FoundationICU/_foundation_unicode" >/dev/null \
+        || die 'staged Foundation ICU headers differ from the pinned checkout'
+else
 [ ! -e "$STAGE/include/FoundationICU" ] \
     || die 'staged Foundation ICU headers already exist'
 mkdir -p "$STAGE/include/FoundationICU"
 cp -a "$ICU_SOURCE_ROOT/include/_foundation_unicode" \
     "$STAGE/include/FoundationICU/"
+fi
 
 hash_file() {
     sha256sum "$1" | awk '{print $1}'
@@ -217,6 +243,19 @@ ICU_DEFINES=(
 export TARGET STAGE ICU_SOURCE_ROOT ICU_OBJECT_ROOT COMPAT_INCLUDE
 printf -v FOUNDATION_ICU_DEFINES_Q '%q ' "${ICU_DEFINES[@]}"
 export FOUNDATION_ICU_DEFINES_Q
+# What a finish step accepts: the exact source list, defines and compile
+# command these objects were built from.
+icu_objects_subject() {
+    {
+        sha256sum < "$INTL_WORK/icu-sources.tracked.nul"
+        printf '%s\n' "$TARGET" "$STAGE" "$ICU_OBJECT_ROOT" "$FOUNDATION_ICU_DEFINES_Q"
+        sha256sum < "${BASH_SOURCE[0]}"
+    } | sha256sum | cut -d' ' -f1
+}
+if [ "$FOUNDATION_ICU_STEP" = finish ]; then
+    [ "$(cat "$INTL_WORK/icu-objects.complete")" = "$(icu_objects_subject)" ] \
+        || die 'the ICU objects in this WORK were built from a different source list or command'
+else
 while IFS= read -r -d '' relative; do
     printf '%s\0' "$SWIFT_FOUNDATION_ICU/$relative"
 done < "$INTL_WORK/icu-sources.tracked.nul" \
@@ -234,10 +273,16 @@ done < "$INTL_WORK/icu-sources.tracked.nul" \
             -I "$ICU_SOURCE_ROOT/common" -I "$ICU_SOURCE_ROOT/i18n" \
             -I "$ICU_SOURCE_ROOT/io" -c "$source_path" -o "$object_path"
       ' foundation-icu-compile
+fi
 icu_object_count=$(find "$ICU_OBJECT_ROOT" -type f -name '*.o' \
     | wc -l | tr -d '[:space:]')
 [ "$icu_object_count" -eq "$EXPECTED_FOUNDATION_ICU_CPP_COUNT" ] \
     || die "Foundation ICU object count $icu_object_count, expected $EXPECTED_FOUNDATION_ICU_CPP_COUNT"
+if [ "$FOUNDATION_ICU_STEP" = objects ]; then
+    icu_objects_subject > "$INTL_WORK/icu-objects.complete"
+    echo "FOUNDATION_ICU_OBJECTS_OK icu-cpp=$icu_cpp_count"
+    exit 0
+fi
 
 clang++-18 -target "$TARGET" -isysroot "$STAGE/sdk" -std=c++17 -O2 \
     -fno-exceptions -fno-rtti -nostdinc++ \

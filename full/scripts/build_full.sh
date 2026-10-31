@@ -100,6 +100,23 @@ echo "   -> $PINNED_SOURCE_STATE_BEFORE"
 UIHELPERS_SUBJECT_BEFORE=$(bash "$W/full/scripts/uihelpers_subject.sh" \
     "$W" "$UIKIT" "$SF" "$SC")
 FOCUS_SUBJECT_BEFORE=$(python3 "$W/full/focus-ios/guest_subject.py" "$W" "$UIKIT")
+
+# ---- incremental mode switches (see full/scripts/INCREMENTAL.md) ------------
+# BUILD_FULL_INCREMENTAL=1 memoizes every swiftc / clang -c / ld64.lld step by
+# the content of its complete input set (full/scripts/build_memo.py). Off by
+# default: the authority routes keep compiling everything.
+# BUILD_FULL_CLEAN=1 is the cold build: it deletes this script's outputs, the
+# step memo, the stage cache and the module cache before anything else runs.
+BUILD_FULL_INCREMENTAL=${BUILD_FULL_INCREMENTAL:-0}
+BUILD_FULL_CLEAN=${BUILD_FULL_CLEAN:-0}
+BUILD_FULL_MEMO_DIR=${BUILD_FULL_MEMO_DIR:-$OUT.memo}
+case "$BUILD_FULL_INCREMENTAL" in 0|1) ;; *) die "BUILD_FULL_INCREMENTAL must be 0 or 1" ;; esac
+case "$BUILD_FULL_CLEAN" in 0|1) ;; *) die "BUILD_FULL_CLEAN must be 0 or 1" ;; esac
+if [ "$BUILD_FULL_CLEAN" = 1 ]; then
+    echo "== BUILD_FULL_CLEAN=1: removing $OUT, its step memo, stage cache and module cache"
+    rm -rf -- "$OUT" "$BUILD_FULL_MEMO_DIR" \
+        "${BUILD_FULL_STAGE_CACHE_DIR:-$OUT.stage-cache}" "$MC"
+fi
 mkdir -p "$OUT" "$MC" "$FE_OUT" "$FE_COLLECTIONS" "$FE_OS" "$FE_CSHIMS"
 rm -f "$OUT/focus-guest-subject.sha256" "$OUT/focus-guest-executable.sha256"
 # These files are commit markers for a completely successful build. Remove
@@ -205,7 +222,8 @@ hash_inputs() {
     done
 }
 toolchain_identity() {
-    local tool
+    # The real tools, never the incremental-mode shims below.
+    local tool PATH=${BUILD_FULL_MEMO_REAL_PATH:-$PATH}
     swiftc -version 2>&1
     clang-18 --version 2>&1
     for tool in swiftc swift-frontend clang-18 clang++-18 ld64.lld-18; do
@@ -213,6 +231,39 @@ toolchain_identity() {
         sha256sum < "$(readlink -f "$(command -v "$tool")")"
     done
 }
+
+# ---- incremental mode: step memo shims --------------------------------------
+# Every later swiftc, clang-18, clang++-18 and ld64.lld-18 -- here and in the
+# FE / FI / host-bridge sub-builders -- resolves to a shim that runs
+# full/scripts/build_memo.py. The memo hashes each step's complete input set
+# (argv, every file it names, every file the tool reported reading last time,
+# negative lookups, toolchain identity) and either runs the tool or restores
+# the exact bytes the same inputs produced before. Shims live in a fake
+# <prefix>/usr/bin whose ../lib is the real toolchain's, so code that locates
+# the toolchain from `command -v swiftc` still finds it.
+if [ "$BUILD_FULL_INCREMENTAL" = 1 ]; then
+    BUILD_FULL_MEMO_TOOL=$W/full/scripts/build_memo.py
+    [ -f "$BUILD_FULL_MEMO_TOOL" ] || die "no step memo tool at $BUILD_FULL_MEMO_TOOL"
+    memo_real_swiftc=$(readlink -f "$(command -v swiftc)") \
+        || die "incremental: swiftc is not on PATH"
+    memo_bin=$BUILD_FULL_MEMO_DIR/toolchain/usr/bin
+    mkdir -p "$memo_bin" "$BUILD_FULL_MEMO_DIR/steps"
+    ln -sfn "$(dirname "$memo_real_swiftc")/../lib" "$BUILD_FULL_MEMO_DIR/toolchain/usr/lib"
+    for memo_tool in swiftc clang-18 clang++-18 ld64.lld-18; do
+        printf '#!/bin/sh\nexec python3 -B %q exec %s "$@"\n' \
+            "$BUILD_FULL_MEMO_TOOL" "$memo_tool" > "$memo_bin/$memo_tool.tmp"
+        chmod 755 "$memo_bin/$memo_tool.tmp"
+        mv -f "$memo_bin/$memo_tool.tmp" "$memo_bin/$memo_tool"
+    done
+    [ -f "$BUILD_FULL_MEMO_DIR/log" ] && mv -f "$BUILD_FULL_MEMO_DIR/log" "$BUILD_FULL_MEMO_DIR/log.prev"
+    : > "$BUILD_FULL_MEMO_DIR/log"
+    BUILD_FULL_MEMO_SALT=$( { toolchain_identity; sha256sum < "$BUILD_FULL_MEMO_TOOL"; } \
+        | sha256sum | cut -d' ' -f1)
+    export BUILD_FULL_MEMO_DIR BUILD_FULL_MEMO_SALT
+    export BUILD_FULL_MEMO_REAL_PATH=$PATH
+    export PATH=$memo_bin:$PATH
+    echo "== incremental: step memo at $BUILD_FULL_MEMO_DIR (salt ${BUILD_FULL_MEMO_SALT:0:12})"
+fi
 # >>> stage-cache functions (extracted by full/scripts/test_build_full_stage_cache.py)
 # Entries never go through cp or tar. Both trust the file system's inode
 # identity, and Docker Desktop's bind mount (virtiofs) does not keep it stable
@@ -927,6 +978,65 @@ case "${BUILD_FULL_THROUGH:-all}" in
         ;;
 esac
 
+# ---- FoundationInternationalization's ICU objects, in the background --------
+# The 474 ICU translation units (one of them alone ~50 s) need only the pinned
+# swift-foundation-icu sources and the SDK, yet the FI build that consumes them
+# waits for FoundationEssentials, OpenUIKit and the app modules. With the stage
+# cache off, the FI builder's `objects` step runs them here, niced, while the
+# single-threaded Swift compiles below run; its `finish` step later refuses
+# objects built from any other source list or command. The stage cache keeps
+# the single-step route, because its key hashes the freshly staged tree.
+APPMODS=$OUT/appmods
+SWIFT_FOUNDATION_ICU=${SWIFT_FOUNDATION_ICU:-$W/scratch/swift-foundation-icu}
+FOUNDATION_INTERNATIONALIZATION_BUILDER=$W/full/foundationinternationalization/build_foundation_internationalization.sh
+FINTL_STAGE=$OUT/fi-stage
+FINTL_WORK=$OUT/fi-work
+fi_stage_setup() {
+    rm -rf -- "$FINTL_STAGE" "$FINTL_WORK"
+    mkdir -p "$FINTL_STAGE/guest-root/host" \
+        "$FINTL_STAGE/guest-root/darwin/usr/lib" \
+        "$FINTL_STAGE/include" \
+        "$FINTL_STAGE/attestation" \
+        "$FINTL_WORK"
+    ln -sfn "$SYS" "$FINTL_STAGE/sdk"
+    ln -sfn "$APPMODS" "$FINTL_STAGE/lib"
+    ln -sfn "$APPMODS" "$FINTL_STAGE/modules"
+    mkdir -p "$FINTL_STAGE/include/_FoundationCShims"
+    cp -a "$SF/Sources/_FoundationCShims/include/." \
+        "$FINTL_STAGE/include/_FoundationCShims/"
+    for fi_runtime in libc++.1.dylib libc++.real.dylib libc++abi.dylib \
+        libSystem.B.dylib libSystem.real.dylib libswiftcompat.dylib; do
+        [ -e "$ROOTDIR/darwin/usr/lib/$fi_runtime" ] \
+            || die "FI runtime dylib missing: $ROOTDIR/darwin/usr/lib/$fi_runtime"
+        ln -s "$ROOTDIR/darwin/usr/lib/$fi_runtime" \
+            "$FINTL_STAGE/guest-root/darwin/usr/lib/$fi_runtime"
+    done
+    : > "$FINTL_STAGE/guest-root/.manifest"
+}
+fi_builder() {
+    env SUPPORT_ROOT="$W" SWIFT_FOUNDATION="$SF" \
+        SWIFT_FOUNDATION_ICU="$SWIFT_FOUNDATION_ICU" STAGE="$FINTL_STAGE" \
+        WORK="$FINTL_WORK" TARGET="$TARGET" MIN_OS="$MINOS" \
+        COLLECTIONS="$FE_COLLECTIONS" OSMOD="$FE_OS" CSHIMS="$FE_CSHIMS" \
+        FOUNDATION_ICU_JOBS="${FOUNDATION_ICU_JOBS:-$BUILD_FULL_JOBS}" \
+        FOUNDATION_ICU_STEP="$1" \
+        bash "$FOUNDATION_INTERNATIONALIZATION_BUILDER"
+}
+[ -f "$FOUNDATION_INTERNATIONALIZATION_BUILDER" ] \
+    || die "FoundationInternationalization builder missing"
+FI_OBJECTS_PID=
+if [ "$BUILD_FULL_STAGE_CACHE" = 0 ]; then
+    echo "== FoundationInternationalization ICU objects (background)"
+    fi_stage_setup
+    # Its own process group, so an early exit of this script stops it too.
+    setsid nice -n 10 bash -c "$(declare -f fi_builder); $(declare -p W SF \
+        SWIFT_FOUNDATION_ICU FINTL_STAGE FINTL_WORK TARGET MINOS FE_COLLECTIONS \
+        FE_OS FE_CSHIMS BUILD_FULL_JOBS FOUNDATION_INTERNATIONALIZATION_BUILDER); fi_builder objects" \
+        > "$FINTL_WORK/icu-objects.log" 2>&1 &
+    FI_OBJECTS_PID=$!
+    trap '[ -z "$FI_OBJECTS_PID" ] || kill -TERM -- "-$FI_OBJECTS_PID" 2>/dev/null || true' EXIT
+fi
+
 # ---- libquartz, from ~/uikit's CQuartz -------------------------------------
 # Flags mirror machorun/scripts/build_quartz.sh exactly (-fno-exceptions
 # -fno-rtti because machorun has no unwinder for compact __unwind_info; stock
@@ -1023,7 +1133,10 @@ echo "== FoundationEssentials production inputs ($TARGET)"
 # build_fe.sh also derives patched upstream sources here; they are part of the
 # stage's output tree (FoundationEssentials.swiftsourceinfo names them).
 FE_PORT_SOURCES=$W/build/foundationessentials-port-sources
-fe_stage_key=$(
+# The stage keys hash the whole sysroot; compute them only when the cache
+# that consumes them is on.
+fe_stage_key=stage-cache-off
+[ "$BUILD_FULL_STAGE_CACHE" = 1 ] && fe_stage_key=$(
     {
         echo 'fe-stage-v1'
         toolchain_identity
@@ -1160,35 +1273,62 @@ if [ -n "$BUILD_FULL_EXTRA_PROBES" ]; then
     mkdir -p "$OUT/objc-include"
     OPENUIKIT_OBJC_HEADER_FLAGS=(-emit-objc-header-path "$OUT/objc-include/OpenUIKit-Swift.h")
 fi
+# host_full renders every frame, so it links OPTIMIZED copies of the two
+# rendering modules: the same sources and flags plus -O, objects only (the
+# -Onone .swiftmodules stay the interface every client compiles
+# against; the optimisation level does not change a public symbol or a type
+# layout). render_full and the probes keep the -Onone objects, so their bytes
+# and pixels are untouched. MEASURED 2026-09-22, Focus at 375x667@2x under
+# machorun: 490-2030 ms per frame with the -Onone objects.
+# Started BEFORE the -Onone OpenUIKit compile: it compiles the same sources
+# itself and reads nothing that compile writes (no OpenUIKit source imports or
+# canImports OpenUIKit), so it overlaps the whole -Onone chain below.
+# The -O OpenUIKit compile is the longest single step of the build (~150 s
+# single-threaded on the x86_64 host, longer than everything after it), so its
+# LLVM half runs on BUILD_FULL_JOBS threads: -num-threads with -wmo still
+# optimizes the whole module but emits one object per source file, named by
+# the output file map below and linked into host_full in source order. Only
+# host_full links these objects.
+HOST_OPT_PID=
+HOST_OPT_UIKIT_OBJECTS=()
+if [ -f /usr/include/SDL2/SDL.h ]; then
+    echo "== OpenCoreGraphics + OpenUIKit -O objects for host_full (background)"
+    mkdir -p "$OUT/host-opt"
+    rm -rf "$OUT/host-opt/opencoregraphics.o" "$OUT/host-opt/openuikit.o" \
+        "$OUT/host-opt/openuikit" "$OUT/host-opt/openuikit-objects.json"
+    mkdir -p "$OUT/host-opt/openuikit"
+    mapfile -t HOST_OPT_UIKIT_OBJECTS < <(
+        python3 -B - "$OUT/host-opt/openuikit-objects.json" "$OUT/host-opt/openuikit" \
+            "${UIKIT_SRCS[@]}" "$W/full/shims/FoundationNames.swift" <<'PY'
+import json, os, sys
+ofm, objdir, sources = sys.argv[1], sys.argv[2], sys.argv[3:]
+objects = [os.path.join(objdir, "%03d-%s.o" % (i, os.path.basename(s)[:-len(".swift")]))
+           for i, s in enumerate(sources)]
+with open(ofm, "w") as f:
+    json.dump({s: {"object": o} for s, o in zip(sources, objects)}, f, indent=1, sort_keys=True)
+print("\n".join(objects))
+PY
+    )
+    [ "${#HOST_OPT_UIKIT_OBJECTS[@]}" -eq $((${#UIKIT_SRCS[@]} + 1)) ] \
+        || die "host-opt object map has ${#HOST_OPT_UIKIT_OBJECTS[@]} entries for $((${#UIKIT_SRCS[@]} + 1)) sources"
+    (
+        "${SWIFTC[@]}" -O "${CINC[@]}" -module-name OpenCoreGraphics \
+            -emit-object -o "$OUT/host-opt/opencoregraphics.o" \
+            "$UIKIT"/Sources/OpenCoreGraphics/*.swift
+        "${SWIFTC[@]}" -O "${CINC[@]}" "${FEMODULES[@]}" -I "$OUT" -module-name OpenUIKit \
+            -num-threads "$BUILD_FULL_JOBS" \
+            -output-file-map "$OUT/host-opt/openuikit-objects.json" -emit-object \
+            "${UIKIT_SRCS[@]}" "$W/full/shims/FoundationNames.swift"
+    ) > "$OUT/host-opt/compile.log" 2>&1 &
+    HOST_OPT_PID=$!
+fi
+
 echo "== OpenUIKit (${#UIKIT_SRCS[@]} files verbatim, incl. AutoLayout/ + FoundationNames.swift)"
 "${SWIFTC[@]}" "${CINC[@]}" "${FEMODULES[@]}" -I "$OUT" -module-name OpenUIKit \
     -emit-object -emit-module -emit-module-path "$OUT/OpenUIKit.swiftmodule" \
     "${OPENUIKIT_OBJC_HEADER_FLAGS[@]}" \
     -o "$OUT/openuikit.o" \
     "${UIKIT_SRCS[@]}" "$W/full/shims/FoundationNames.swift"
-
-# host_full renders every frame, so it links OPTIMIZED copies of the two
-# rendering modules: the same sources and flags plus -O, objects only (the
-# -Onone .swiftmodules above stay the interface every client compiles
-# against; the optimisation level does not change a public symbol or a type
-# layout). render_full and the probes keep the -Onone objects, so their bytes
-# and pixels are untouched. MEASURED 2026-09-22, Focus at 375x667@2x under
-# machorun: 490-2030 ms per frame with the -Onone objects.
-HOST_OPT_PID=
-if [ -f /usr/include/SDL2/SDL.h ]; then
-    echo "== OpenCoreGraphics + OpenUIKit -O objects for host_full (background)"
-    mkdir -p "$OUT/host-opt"
-    rm -f "$OUT/host-opt/opencoregraphics.o" "$OUT/host-opt/openuikit.o"
-    (
-        "${SWIFTC[@]}" -O "${CINC[@]}" -module-name OpenCoreGraphics \
-            -emit-object -o "$OUT/host-opt/opencoregraphics.o" \
-            "$UIKIT"/Sources/OpenCoreGraphics/*.swift
-        "${SWIFTC[@]}" -O "${CINC[@]}" "${FEMODULES[@]}" -I "$OUT" -module-name OpenUIKit \
-            -emit-object -o "$OUT/host-opt/openuikit.o" \
-            "${UIKIT_SRCS[@]}" "$W/full/shims/FoundationNames.swift"
-    ) > "$OUT/host-opt/compile.log" 2>&1 &
-    HOST_OPT_PID=$!
-fi
 
 # Keep this focused probe honest even though the combined renderer below must
 # see APPINC for RealAppProbe. A separate typecheck before APPINC exists proves
@@ -1282,13 +1422,10 @@ echo "== Foundation/UIKit notification identity compile proof"
 # (full/foundation/foundation_guest_sources.txt), compiled after Combine,
 # Dispatch and FoundationInternationalization exist — the same order as
 # full/frameworks/build_core_guest_package.sh after it calls this script.
-APPMODS=$OUT/appmods
 OPENCOMBINE_ROOT=${OPENCOMBINE_ROOT:-$W/scratch/opencombine-core-durable-20260828-r2}
 OPENCOMBINE_ARTIFACTS=${OPENCOMBINE_ARTIFACTS:-$OPENCOMBINE_ROOT/export${FULL_OUT_SUFFIX}/artifacts}
 OPENCOMBINE_SOURCE=$OPENCOMBINE_ROOT/source
 OPENCOMBINE_HELPERS=$OPENCOMBINE_SOURCE/Sources/COpenCombineHelpers
-SWIFT_FOUNDATION_ICU=${SWIFT_FOUNDATION_ICU:-$W/scratch/swift-foundation-icu}
-FOUNDATION_INTERNATIONALIZATION_BUILDER=$W/full/foundationinternationalization/build_foundation_internationalization.sh
 FOUNDATION_GUEST_MANIFEST=$W/full/foundation/foundation_guest_sources.txt
 COREFOUNDATION_GUEST_MANIFEST=$W/full/foundation/corefoundation_guest_sources.txt
 # 19: was 18 (a01077e9); 507a05a6 added NSPredicateCollections.swift's CONTAINS
@@ -1297,6 +1434,10 @@ COREFOUNDATION_GUEST_MANIFEST=$W/full/foundation/corefoundation_guest_sources.tx
 EXPECTED_FOUNDATION_STRING_PROCESSING_UNDEFINEDS=19
 EXPECTED_FOUNDATION_SYNCHRONIZATION_UNDEFINEDS=2
 EXPECTED_FOUNDATION_REGEX_PARSER_UNDEFINEDS=0
+# APPMODS is a search path of nearly every compile below. Start it empty so
+# each compile sees exactly the modules this run has produced so far (as on a
+# fresh OUT), never a later step's output left by an earlier run.
+rm -rf -- "$APPMODS"
 mkdir -p "$APPMODS/include/CPortableIO" "$APPMODS/include/CSTBTrueType" \
     "$APPMODS/include/CHostClock" "$APPMODS/include/COpenCombineHelpers" \
     "$APPMODS/include/COpenDispatch" "$APPMODS/include/COpenRelativeTime" \
@@ -1565,8 +1706,6 @@ done
 cp "$APPMODS/CoreFoundation.swiftmodule" "$APPINC/"
 
 echo "== build pinned FoundationInternationalization (core-guest ICU closure)"
-[ -f "$FOUNDATION_INTERNATIONALIZATION_BUILDER" ] \
-    || die "FoundationInternationalization builder missing"
 "${LD[@]}" -dylib -dead_strip \
     -install_name @rpath/libFoundationEssentials.dylib -rpath @loader_path \
     -L"$ROOTDIR/darwin/usr/lib" \
@@ -1579,28 +1718,16 @@ for fe_artifact in FoundationEssentials.swiftmodule FoundationEssentials.swiftdo
     [ -f "$FE_OUT/$fe_artifact" ] || die "missing $FE_OUT/$fe_artifact"
     cp "$FE_OUT/$fe_artifact" "$APPMODS/$fe_artifact"
 done
-FINTL_STAGE=$OUT/fi-stage
-FINTL_WORK=$OUT/fi-work
-rm -rf -- "$FINTL_STAGE" "$FINTL_WORK"
-mkdir -p "$FINTL_STAGE/guest-root/host" \
-    "$FINTL_STAGE/guest-root/darwin/usr/lib" \
-    "$FINTL_STAGE/include" \
-    "$FINTL_STAGE/attestation" \
-    "$FINTL_WORK"
-ln -sfn "$SYS" "$FINTL_STAGE/sdk"
-ln -sfn "$APPMODS" "$FINTL_STAGE/lib"
-ln -sfn "$APPMODS" "$FINTL_STAGE/modules"
-mkdir -p "$FINTL_STAGE/include/_FoundationCShims"
-cp -a "$SF/Sources/_FoundationCShims/include/." \
-    "$FINTL_STAGE/include/_FoundationCShims/"
-for fi_runtime in libc++.1.dylib libc++.real.dylib libc++abi.dylib \
-    libSystem.B.dylib libSystem.real.dylib libswiftcompat.dylib; do
-    [ -e "$ROOTDIR/darwin/usr/lib/$fi_runtime" ] \
-        || die "FI runtime dylib missing: $ROOTDIR/darwin/usr/lib/$fi_runtime"
-    ln -s "$ROOTDIR/darwin/usr/lib/$fi_runtime" \
-        "$FINTL_STAGE/guest-root/darwin/usr/lib/$fi_runtime"
-done
-: > "$FINTL_STAGE/guest-root/.manifest"
+if [ -n "$FI_OBJECTS_PID" ]; then
+    fi_objects_rc=0
+    wait "$FI_OBJECTS_PID" || fi_objects_rc=$?
+    FI_OBJECTS_PID=
+    cat "$FINTL_WORK/icu-objects.log"
+    [ "$fi_objects_rc" -eq 0 ] \
+        || die "FoundationInternationalization ICU objects step failed (rc=$fi_objects_rc); log above"
+    fi_builder finish
+else
+fi_stage_setup
 # Stage-cache key for FI. Its Swift compile searches APPMODS, which by now
 # also holds modules built from uikit/. The pinned FoundationInternationalization
 # sources import only FoundationEssentials, _FoundationICU, _FoundationCShims,
@@ -1628,7 +1755,8 @@ fi_stage_appmods_inputs() {
             esac
         done
 }
-fi_stage_key=$(
+fi_stage_key=stage-cache-off
+[ "$BUILD_FULL_STAGE_CACHE" = 1 ] && fi_stage_key=$(
     {
         echo 'fi-stage-v1'
         echo "$fe_stage_key"
@@ -1658,16 +1786,12 @@ if stage_cache_restore fi "$fi_stage_key" "$FINTL_STAGE" "$FINTL_WORK" \
     "$APPMODS/lib_FoundationICU.dylib"; then
     :
 else
-env SUPPORT_ROOT="$W" SWIFT_FOUNDATION="$SF" \
-    SWIFT_FOUNDATION_ICU="$SWIFT_FOUNDATION_ICU" STAGE="$FINTL_STAGE" \
-    WORK="$FINTL_WORK" TARGET="$TARGET" MIN_OS="$MINOS" \
-    COLLECTIONS="$FE_COLLECTIONS" OSMOD="$FE_OS" CSHIMS="$FE_CSHIMS" \
-    FOUNDATION_ICU_JOBS="${FOUNDATION_ICU_JOBS:-8}" \
-    bash "$FOUNDATION_INTERNATIONALIZATION_BUILDER"
+fi_builder all
 stage_cache_store fi "$fi_stage_key" "$FINTL_STAGE" "$FINTL_WORK" \
     "$APPMODS"/FoundationInternationalization.* \
     "$APPMODS/libFoundationInternationalization.dylib" \
     "$APPMODS/lib_FoundationICU.dylib"
+fi
 fi
 [ -f "$APPMODS/FoundationInternationalization.swiftmodule" ] \
     || die "FoundationInternationalization.swiftmodule missing after FI build"
@@ -1744,7 +1868,7 @@ echo "== compile final app-facing UIKit after Foundation facade"
     "$UIKIT/Sources/UIKitShim/UIKit.swift"
 cp "$APPINC/UIKit.swiftmodule" "$APPMODS/"
 
-echo "== RealAppProbe stub modules (FocusModules / HackersModules, dependency order)"
+echo "== RealAppProbe stub modules (FocusModules / HackersModules, dependency order; built in the app-module graph below)"
 # Package.swift target graph: Glean, Intents, Onboarding have no deps;
 # IntentsUI → Intents+OpenUIKit; Licenses → SwiftUI; Domain → Foundation;
 # Shared → Domain+UIKit+SwiftUI+Combine; DesignSystem → Domain+Shared+SwiftUI.
@@ -1857,34 +1981,147 @@ compile_app_module() {
         -emit-object -o "$outfile" \
         "$@"
 }
-compile_app_module Glean "$OUT/glean.o" \
+# ---- the app-module graph, BUILD_FULL_JOBS at a time --------------------------
+# app_dag_add <job> <command> <args...> records one step of what used to be a
+# straight sequence; app_dag_run runs them all. A job starts only after every
+# EARLIER job (in app_dag_add order) that it could observe or that could
+# observe it has finished: two jobs keep their sequential order when either
+# one's Swift sources name the other's module (import / canImport, before and
+# after -module-alias), with names closed over earlier dependencies, so a
+# module that reaches SwiftUI through Shared still sees the bootstrap SwiftUI
+# interface the sequential build gave it. app_dag_after adds edges the sources
+# cannot show (a C library build). Independent jobs share nothing but read-only
+# inputs, so the bytes cannot depend on scheduling; with BUILD_FULL_JOBS=1 this
+# is exactly the old sequence. Each job's output is printed when it finishes.
+APP_DAG_JOBS=()
+declare -A APP_DAG_CMD=() APP_DAG_REFS=() APP_DAG_AFTER=()
+app_dag_refs() {
+    local -a files=()
+    local arg prev= refs alias
+    for arg in "$@"; do
+        case "$arg" in *.swift) [ -f "$arg" ] && files+=("$arg") ;; esac
+    done
+    refs=" "
+    if [ "${#files[@]}" -gt 0 ]; then
+        refs+=$(grep -ohE '(^|[^A-Za-z0-9_])(import[[:space:]]+([a-z]+[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*|canImport\([[:space:]]*[A-Za-z_][A-Za-z0-9_]*)' \
+            "${files[@]}" | grep -oE '[A-Za-z_][A-Za-z0-9_]*$' | LC_ALL=C sort -u | tr '\n' ' ' || true)
+    fi
+    for arg in "$@"; do
+        if [ "$prev" = -module-alias ]; then
+            alias=${arg%%=*}
+            [[ "$refs" == *" $alias "* ]] && refs+="${arg#*=} "
+        fi
+        prev=$arg
+    done
+    printf '%s\n' "$refs"
+}
+app_dag_add() {
+    local job=$1
+    shift
+    [ -z "${APP_DAG_CMD[$job]+set}" ] || die "app module job $job added twice"
+    APP_DAG_JOBS+=("$job")
+    printf -v "APP_DAG_CMD[$job]" '%q ' "$@"
+    APP_DAG_REFS[$job]=$(app_dag_refs "$@")
+}
+app_dag_after() {
+    APP_DAG_AFTER[$1]+=" $2 "
+}
+app_dag_run() {
+    local -A deps=() eff=() state=() pid_job=()
+    local -i k i running=0
+    local job prev fin rc tmp failed=
+    for ((k = 0; k < ${#APP_DAG_JOBS[@]}; k++)); do
+        job=${APP_DAG_JOBS[k]}
+        eff[$job]=${APP_DAG_REFS[$job]}
+        deps[$job]=" "
+        for ((i = 0; i < k; i++)); do
+            prev=${APP_DAG_JOBS[i]}
+            if [[ "${APP_DAG_REFS[$job]}" == *" $prev "* ]] \
+                || [[ "${APP_DAG_AFTER[$job]:-}" == *" $prev "* ]]; then
+                deps[$job]+="$prev "
+                eff[$job]+="${eff[$prev]} "
+            fi
+        done
+        for ((i = 0; i < k; i++)); do
+            prev=${APP_DAG_JOBS[i]}
+            if [[ "${eff[$prev]}" == *" $job "* ]] || [[ "${eff[$job]}" == *" $prev "* ]]; then
+                [[ "${deps[$job]}" == *" $prev "* ]] || deps[$job]+="$prev "
+            fi
+        done
+        state[$job]=pending
+        echo "   graph: $job <-${deps[$job]% }"
+    done
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/build_full-app-dag.XXXXXX")
+    while :; do
+        if [ -z "$failed" ]; then
+            for job in "${APP_DAG_JOBS[@]}"; do
+                [ "$running" -lt "$BUILD_FULL_JOBS" ] || break
+                [ "${state[$job]}" = pending ] || continue
+                for prev in ${deps[$job]}; do
+                    [ "${state[$prev]}" = done ] || continue 2
+                done
+                ( eval "${APP_DAG_CMD[$job]}" ) >"$tmp/$job.out" 2>"$tmp/$job.err" &
+                pid_job[$!]=$job
+                state[$job]=running
+                running+=1
+            done
+        fi
+        [ "$running" -gt 0 ] || break
+        # Only this graph's jobs: the background host-opt compile is also a
+        # child of this shell and is waited for by its own pid later.
+        rc=0
+        wait -n -p fin "${!pid_job[@]}" || rc=$?
+        job=${pid_job[$fin]:-}
+        [ -n "$job" ] || die "app module graph: wait returned an unknown pid '$fin' (rc=$rc)"
+        unset 'pid_job[$fin]'
+        running=$((running - 1))
+        cat "$tmp/$job.out"
+        cat "$tmp/$job.err" >&2
+        if [ "$rc" -eq 0 ]; then
+            state[$job]=done
+        else
+            state[$job]=failed
+            failed+=" $job"
+        fi
+    done
+    rm -rf -- "$tmp"
+    [ -z "$failed" ] || die "app module job(s)$failed failed"
+    for job in "${APP_DAG_JOBS[@]}"; do
+        [ "${state[$job]}" = done ] || die "app module job $job never ran"
+    done
+}
+
+app_dag_add Glean compile_app_module Glean "$OUT/glean.o" \
     "$UIKIT"/Sources/RealAppProbe/FocusModules/Glean/*.swift
-compile_app_module Intents "$OUT/intents_stub.o" \
+app_dag_add Intents compile_app_module Intents "$OUT/intents_stub.o" \
     "$UIKIT"/Sources/RealAppProbe/FocusModules/Intents/*.swift
-compile_app_module Domain "$OUT/domain.o" \
+app_dag_add Domain compile_app_module Domain "$OUT/domain.o" \
     "$UIKIT"/Sources/RealAppProbe/HackersModules/Domain/*.swift
-compile_app_module IntentsUI "$OUT/intentsui_stub.o" \
+app_dag_add IntentsUI compile_app_module IntentsUI "$OUT/intentsui_stub.o" \
     "$UIKIT"/Sources/RealAppProbe/FocusModules/IntentsUI/*.swift
-compile_app_module Licenses "$OUT/licenses.o" \
+app_dag_add Licenses compile_app_module Licenses "$OUT/licenses.o" \
     "$UIKIT"/Sources/RealAppProbe/FocusModules/Licenses/*.swift
-compile_app_module Shared "$OUT/shared.o" \
+app_dag_add Shared compile_app_module Shared "$OUT/shared.o" \
     "$UIKIT"/Sources/RealAppProbe/HackersModules/Shared/*.swift
-compile_app_module DesignSystem "$OUT/designsystem.o" \
+app_dag_add DesignSystem compile_app_module DesignSystem "$OUT/designsystem.o" \
     "$UIKIT"/Sources/RealAppProbe/HackersModules/DesignSystem/*.swift
 
-echo "== Focus guest application graph (unmodified vendored app sources)"
 # SwiftUI was needed to bootstrap Foundation. Its final interface now exports
-# the actual app-facing Foundation identity, as UIKit does above.
-compile_app_module SwiftUI "$OUT/swiftui.o" "${SWIFTUI_SOURCES[@]}" \
+# the actual app-facing Foundation identity, as UIKit does above. Every job
+# above that reaches SwiftUI finishes first (it saw the bootstrap interface).
+app_job_final_swiftui() {
+    compile_app_module SwiftUI "$@"
+    cp "$APPINC/SwiftUI.swiftmodule" "$APPMODS/"
+}
+app_dag_add SwiftUI app_job_final_swiftui "$OUT/swiftui.o" "${SWIFTUI_SOURCES[@]}" \
     "$W/full/appshim/SwiftUIFoundation.swift"
-cp "$APPINC/SwiftUI.swiftmodule" "$APPMODS/"
 mapfile -d '' -t SNAPKIT_SOURCES < <(
     find "$UIKIT/Sources/SnapKit" -name '*.swift' ! -name Debugging.swift -print0 | LC_ALL=C sort -z
 )
-compile_app_module SnapKit "$OUT/snapkit.o" "${SNAPKIT_SOURCES[@]}"
+app_dag_add SnapKit compile_app_module SnapKit "$OUT/snapkit.o" "${SNAPKIT_SOURCES[@]}"
 FOCUS_LINK_OBJECTS=("$OUT/snapkit.o")
 for module in WebKit Sentry FocusAppServices LocalAuthentication SafariServices PassKit Network; do
-    compile_app_module "$module" "$OUT/focus-$module.o" "$UIKIT/Sources/$module/"*.swift
+    app_dag_add "$module" compile_app_module "$module" "$OUT/focus-$module.o" "$UIKIT/Sources/$module/"*.swift
     FOCUS_LINK_OBJECTS+=("$OUT/focus-$module.o")
 done
 # Focus and Hackers both call their package DesignSystem. Use Swift module
@@ -1894,9 +2131,9 @@ mapfile -d '' -t FOCUS_DESIGN_SOURCES < <(
     find "$UIKIT/Sources/BlockzillaPackage/DesignSystem" -name '*.swift' \
         ! -path '*/Preview Files/*' -print0 | LC_ALL=C sort -z
 )
-compile_app_module FocusDesignSystem "$OUT/focus-designsystem.o" \
+app_dag_add FocusDesignSystem compile_app_module FocusDesignSystem "$OUT/focus-designsystem.o" \
     -D FOCUS_DESIGN_SYSTEM "${FOCUS_DESIGN_SOURCES[@]}" "$W/full/focus-ios/PackageBundle.swift"
-compile_app_module FocusLicenses "$OUT/focus-licenses.o" \
+app_dag_add FocusLicenses compile_app_module FocusLicenses "$OUT/focus-licenses.o" \
     "$UIKIT/Sources/BlockzillaPackage/Licenses/"*.swift "$W/full/focus-ios/PackageBundle.swift"
 FOCUS_PACKAGE_FLAGS=(-module-alias DesignSystem=FocusDesignSystem -module-alias Licenses=FocusLicenses)
 FOCUS_LINK_OBJECTS+=("$OUT/focus-designsystem.o" "$OUT/focus-licenses.o")
@@ -1913,25 +2150,37 @@ for module in UIHelpers UIComponents Widget AppShortcuts Onboarding; do
         find "$UIKIT/Sources/BlockzillaPackage/$module" -name '*.swift' \
             ! -path '*/Preview Files/*' -print0 | LC_ALL=C sort -z
     )
-    compile_app_module "$module" "$OUT/focus-$module.o" "${FOCUS_PACKAGE_FLAGS[@]}" "${package_sources[@]}"
+    app_dag_add "$module" compile_app_module "$module" "$OUT/focus-$module.o" \
+        "${FOCUS_PACKAGE_FLAGS[@]}" "${package_sources[@]}"
     FOCUS_LINK_OBJECTS+=("$OUT/focus-$module.o")
 done
-compile_app_module OpenUIKitStoreKit "$OUT/focus-storekit.o" "$UIKIT/Sources/StoreKit/StoreKit.swift"
+app_dag_add OpenUIKitStoreKit compile_app_module OpenUIKitStoreKit "$OUT/focus-storekit.o" \
+    "$UIKIT/Sources/StoreKit/StoreKit.swift"
 for module in AudioToolbox CoreHaptics; do
-    compile_app_module "$module" "$OUT/focus-$module.o" "$W/full/focus-ios/$module.swift"
+    app_dag_add "$module" compile_app_module "$module" "$OUT/focus-$module.o" "$W/full/focus-ios/$module.swift"
     FOCUS_LINK_OBJECTS+=("$OUT/focus-$module.o")
 done
-env W="$W" SYS="$SYS" OUT="$OUT" TARGET="$TARGET" bash "$W/full/focus-ios/build_libxml_guest.sh"
+# CMake caches the absolute compiler path, so libxml2 always builds with the
+# real tools (its own ninja build is already incremental).
+app_job_libxml() {
+    env PATH="${BUILD_FULL_MEMO_REAL_PATH:-$PATH}" \
+        W="$W" SYS="$SYS" OUT="$OUT" TARGET="$TARGET" bash "$W/full/focus-ios/build_libxml_guest.sh"
+}
+app_dag_add libxml2 app_job_libxml
 FOCUS_XML_FLAGS=(-I "$UIKIT/Sources/CLibXML2" -Xcc -I"$OUT/focus-libxml/include")
-compile_app_module Fuzi "$OUT/focus-fuzi.o" "${FOCUS_XML_FLAGS[@]}" "$UIKIT/Sources/Fuzi/"*.swift
+app_dag_add Fuzi compile_app_module Fuzi "$OUT/focus-fuzi.o" "${FOCUS_XML_FLAGS[@]}" "$UIKIT/Sources/Fuzi/"*.swift
+app_dag_after Fuzi libxml2
 mapfile -d '' -t BLOCKZILLA_SOURCES < <(
     find "$UIKIT/Sources/Blockzilla" -name '*.swift' -print0 | LC_ALL=C sort -z
 )
-compile_app_module Blockzilla "$OUT/blockzilla.o" "${FOCUS_PACKAGE_FLAGS[@]}" \
+app_dag_add Blockzilla compile_app_module Blockzilla "$OUT/blockzilla.o" "${FOCUS_PACKAGE_FLAGS[@]}" \
     -default-isolation MainActor -enable-upcoming-feature IsolatedDefaultValues \
     -module-alias StoreKit=OpenUIKitStoreKit \
     -Xcc -fmodule-map-file="$UIKIT/Sources/os/include/module.modulemap" \
     -Xcc -I"$UIKIT/Sources/os/include" "${FOCUS_XML_FLAGS[@]}" "${BLOCKZILLA_SOURCES[@]}"
+app_dag_after Blockzilla libxml2
+echo "== Focus guest application graph (unmodified vendored app sources; ${#APP_DAG_JOBS[@]} jobs, BUILD_FULL_JOBS=$BUILD_FULL_JOBS)"
+app_dag_run
 FOCUS_LINK_OBJECTS+=("$OUT/focus-storekit.o" "$OUT/focus-fuzi.o" "$OUT/blockzilla.o"
     "$OUT/focus-libxml/build/libxml2.a" "$OUT/focus-libxml/random.o")
 # Blockzilla's serialized module imports Fuzi and the os.log Clang submodule.
@@ -2071,7 +2320,7 @@ build_final_executable() {
             local obj
             for obj in "${COMMON_LINK_OBJECTS[@]}"; do
                 case "$obj" in
-                    "$OUT/openuikit.o") host_common+=("$OUT/host-opt/openuikit.o") ;;
+                    "$OUT/openuikit.o") host_common+=("${HOST_OPT_UIKIT_OBJECTS[@]}") ;;
                     "$OUT/opencoregraphics.o") host_common+=("$OUT/host-opt/opencoregraphics.o") ;;
                     *) host_common+=("$obj") ;;
                 esac
@@ -2228,6 +2477,9 @@ mv "$OUT/uihelpers-artifacts.sha256.tmp" "$OUT/uihelpers-artifacts.sha256"
 mv "$OUT/uihelpers-subject.sha256.tmp" "$OUT/uihelpers-subject.sha256"
 
 echo "== done"; ls -l "$OUT/render_full" "$OUT/indexpath_identity_probe"
+if [ "$BUILD_FULL_INCREMENTAL" = 1 ]; then
+    echo "build_full: incremental steps $(python3 -B "$BUILD_FULL_MEMO_TOOL" summary "$BUILD_FULL_MEMO_DIR/log") (log $BUILD_FULL_MEMO_DIR/log)"
+fi
 
 # Bracket every app/module/resource input, including the real package targets.
 FOCUS_SUBJECT_AFTER=$(python3 "$W/full/focus-ios/guest_subject.py" "$W" "$UIKIT")
