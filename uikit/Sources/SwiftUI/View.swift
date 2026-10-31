@@ -1942,7 +1942,7 @@ public struct _OpenHStack<Content: _OpenView>: _OpenView {
     public func _makeOpenUIKitNode() -> _OpenViewNode {
         _OpenViewNode(
             .hStack(
-                children: _flattenGroup(
+                children: _stackChildren(
                     _OpenGraphContext.withStructuralScope(.hStackContent) {
                         content._makeOpenUIKitNode()
                     }
@@ -1973,7 +1973,7 @@ public struct _OpenVStack<Content: _OpenView>: _OpenView {
     public func _makeOpenUIKitNode() -> _OpenViewNode {
         _OpenViewNode(
             .vStack(
-                children: _flattenGroup(
+                children: _stackChildren(
                     _OpenGraphContext.withStructuralScope(.vStackContent) {
                         content._makeOpenUIKitNode()
                     }
@@ -4303,6 +4303,18 @@ public extension _OpenView {
 
 private enum _OpenDefaultTaskIdentity: Equatable {
     case value
+}
+
+/// A stack's laid-out children: EmptyView and untaken `if` branches
+/// (`.empty`) are not children in SwiftUI, so they take no slot and no
+/// spacing. Counting them applied HStack(spacing: -6)'s gap to a lone
+/// avatar and squeezed it from 32 to 26 points (stupid social AvatarStrip).
+@MainActor
+private func _stackChildren(_ node: _OpenViewNode) -> [_OpenViewNode] {
+    _flattenGroup(node).filter {
+        if case .empty = $0.kind { return false }
+        return true
+    }
 }
 
 @MainActor
