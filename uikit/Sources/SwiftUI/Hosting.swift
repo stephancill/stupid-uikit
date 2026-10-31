@@ -3967,7 +3967,18 @@ private enum _ViewRenderer {
                 place(content, in: rect, on: surface, environment: environment)
             case .previewLayout:
                 place(content, in: rect, on: surface, environment: environment)
-            case .clipRoundedRectangle(let radius, let corners):
+            case .clipRoundedRectangle(let requestedRadius, let corners):
+                // SwiftUI shapes never round past half the shorter side
+                // (clipShape(Circle()/Capsule()) arrives as radius 10_000).
+                // A CALayer cornerRadius is NOT clamped: under the iOS
+                // corner model an oversized radius leaves only the
+                // intersection of the corner discs — empty here, which
+                // clipped initials avatars away entirely — and the Mac
+                // kappa model draws a spiked star. Clamp to the shape.
+                let radius = Swift.min(
+                    requestedRadius,
+                    Swift.min(rect.width, rect.height) / 2
+                )
                 if surface is _SwiftUIHostingView, rect == surface.bounds {
                     surface.layer.cornerRadius = radius
                     surface.layer.maskedCorners = corners
