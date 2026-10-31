@@ -37,15 +37,19 @@ PINNED_INPUTS_TOOL=${PINNED_INPUTS_TOOL:-$W/full/foundation/pinned_inputs.pl}
 URL_RESOURCE_KEY_PATCH=${URL_RESOURCE_KEY_PATCH:-$W/full/foundation/patches/FoundationEssentials-URLResourceKey.patch}
 PREDICATE_KEYPATH_PATCH=${PREDICATE_KEYPATH_PATCH:-$W/full/foundation/patches/FoundationEssentials-PredicateFinalClassKeyPath.patch}
 IOS_HOME_DIRECTORY_PATCH=${IOS_HOME_DIRECTORY_PATCH:-$W/full/foundation/patches/FoundationEssentials-URLIOSHomeDirectory.patch}
+LOCALE_ARGUMENT_DOMAIN_PATCH=${LOCALE_ARGUMENT_DOMAIN_PATCH:-$W/full/foundation/patches/FoundationEssentials-LocaleArgumentDomain.patch}
 EXPECTED_PREDICATE_KEYPATH_SOURCE_SHA=835ca09d5d0bf757abc02af0ca4294cc58bcad3d455ef71c1026746ad7ba08f7
 EXPECTED_PREDICATE_KEYPATH_PATCH_SHA=ecf4e8045d42fb196705f37fbf723f75e11c20d9d6b2adc251210ed87e1464de
 EXPECTED_IOS_HOME_DIRECTORY_PATCH_SHA=37ec5f335225bb8ae6860d50305975827f9b4228abe8c4ec0303b97fb8e45848
+EXPECTED_LOCALE_CACHE_SOURCE_SHA=da456e0b0d0eb62e72523f12c1e15f7f828894911658e17104ce00f87189286c
+EXPECTED_LOCALE_ARGUMENT_DOMAIN_PATCH_SHA=92d068ec61b169958b91bba59ce4bb1a373b6413212047594fafcbb702f1e0ab
 [ -d "$SF/Sources/FoundationEssentials" ] || { echo "no $SF" >&2; exit 1; }
 [ -d "$SYS/usr/include" ] || { echo "no sysroot $SYS -- run stage_fe_sysroot.sh on macOS" >&2; exit 1; }
 [ -f "$PINNED_INPUTS_TOOL" ] || { echo "no pinned-input tool $PINNED_INPUTS_TOOL" >&2; exit 1; }
 [ -f "$URL_RESOURCE_KEY_PATCH" ] || { echo "no URLResourceKey patch $URL_RESOURCE_KEY_PATCH" >&2; exit 1; }
 [ -f "$PREDICATE_KEYPATH_PATCH" ] || { echo "no Predicate key-path patch $PREDICATE_KEYPATH_PATCH" >&2; exit 1; }
 [ -f "$IOS_HOME_DIRECTORY_PATCH" ] || { echo "no iOS home-directory patch $IOS_HOME_DIRECTORY_PATCH" >&2; exit 1; }
+[ -f "$LOCALE_ARGUMENT_DOMAIN_PATCH" ] || { echo "no Locale argument-domain patch $LOCALE_ARGUMENT_DOMAIN_PATCH" >&2; exit 1; }
 mkdir -p "$MC"
 [ -d "$SYS" ] && SYS=$(realpath -P "$SYS")
 [ -d "$SF" ] && SF=$(realpath -P "$SF")
@@ -101,6 +105,22 @@ PATCHED_URL_RESOURCE_SOURCE=$PATCHED_SOURCE_DIR/URL-resource-key.swift
 PATCHED_URL_SOURCE=$PATCHED_SOURCE_DIR/URL.swift
 FOUNDATION_PREDICATE_KEYPATH_SOURCE=$SF/Sources/FoundationEssentials/Predicate/KeyPath+Inspection.swift
 PATCHED_PREDICATE_KEYPATH_SOURCE=$PATCHED_SOURCE_DIR/KeyPath+Inspection.swift
+# Locale.current / preferredLanguages / the 12-24 hour preference from the
+# launch arguments' -AppleLocale / -AppleLanguages / -AppleICUForce24HourTime
+# (the guest has no CFPreferences; see the patch). Without them the upstream
+# en_001 defaults stand, so every target takes the same source.
+FOUNDATION_LOCALE_CACHE_SOURCE=$SF/Sources/FoundationEssentials/Locale/Locale_Cache.swift
+PATCHED_LOCALE_CACHE_SOURCE=$PATCHED_SOURCE_DIR/Locale_Cache.swift
+[ "$(sha256sum "$FOUNDATION_LOCALE_CACHE_SOURCE" | awk '{print $1}')" = \
+    "$EXPECTED_LOCALE_CACHE_SOURCE_SHA" ] || {
+        echo "build_fe: pinned Locale cache source hash drifted" >&2
+        exit 2
+    }
+[ "$(sha256sum "$LOCALE_ARGUMENT_DOMAIN_PATCH" | awk '{print $1}')" = \
+    "$EXPECTED_LOCALE_ARGUMENT_DOMAIN_PATCH_SHA" ] || {
+        echo "build_fe: Locale argument-domain patch hash drifted" >&2
+        exit 2
+    }
 [ "$(sha256sum "$FOUNDATION_PREDICATE_KEYPATH_SOURCE" | awk '{print $1}')" = \
     "$EXPECTED_PREDICATE_KEYPATH_SOURCE_SHA" ] || {
         echo "build_fe: pinned Predicate key-path source hash drifted" >&2
@@ -131,8 +151,11 @@ case "${TARGET:-arm64-apple-macos15.0}" in
 esac
 patch --batch --forward --fuzz=0 -s -o "$PATCHED_PREDICATE_KEYPATH_SOURCE" \
     "$FOUNDATION_PREDICATE_KEYPATH_SOURCE" "$PREDICATE_KEYPATH_PATCH"
+patch --batch --forward --fuzz=0 -s -o "$PATCHED_LOCALE_CACHE_SOURCE" \
+    "$FOUNDATION_LOCALE_CACHE_SOURCE" "$LOCALE_ARGUMENT_DOMAIN_PATCH"
 patched_url_count=0
 patched_predicate_keypath_count=0
+patched_locale_cache_count=0
 for source_index in "${!SRCS[@]}"; do
     if [ "${SRCS[$source_index]}" = "$FOUNDATION_URL_SOURCE" ]; then
         SRCS[$source_index]=$PATCHED_URL_SOURCE
@@ -142,7 +165,19 @@ for source_index in "${!SRCS[@]}"; do
         SRCS[$source_index]=$PATCHED_PREDICATE_KEYPATH_SOURCE
         patched_predicate_keypath_count=$((patched_predicate_keypath_count + 1))
     fi
+    if [ "${SRCS[$source_index]}" = "$FOUNDATION_LOCALE_CACHE_SOURCE" ]; then
+        SRCS[$source_index]=$PATCHED_LOCALE_CACHE_SOURCE
+        patched_locale_cache_count=$((patched_locale_cache_count + 1))
+    fi
 done
+[ "$patched_locale_cache_count" -eq 1 ] || {
+    echo "build_fe: Locale_Cache.swift replacement count $patched_locale_cache_count, expected 1" >&2
+    exit 2
+}
+grep -F 'argumentBool("AppleICUForce24HourTime")' "$PATCHED_LOCALE_CACHE_SOURCE" >/dev/null || {
+    echo "build_fe: derived Locale cache source is incomplete" >&2
+    exit 2
+}
 [ "$patched_url_count" -eq 1 ] || {
     echo "build_fe: URL.swift replacement count $patched_url_count, expected 1" >&2
     exit 2
