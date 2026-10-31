@@ -13,5 +13,21 @@
 	<key>MinimumOSVersion</key><string>26.0</string>
 	<key>UIDeviceFamily</key><array><integer>1</integer></array>
 	<key>UILaunchScreen</key><dict/>
+	<!-- Scene lifecycle: iOS 27 traps at launch without it
+	     (UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption). -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key><false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key><string>Default</string>
+					<key>UISceneDelegateClassName</key><string>SymbolInkProbeSceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>

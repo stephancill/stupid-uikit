@@ -1,12 +1,17 @@
 #!/bin/zsh
 # symbol_ink_probe_sim.sh <outdir> — build Tools/oracle2/symbolinkprobe for
-# the iOS 26 simulator, run it, and collect symbol_ink_ios.json (coverage
+# the iOS simulator, run it, and collect symbol_ink_ios.json (coverage
 # masks of UIImage(systemName:) at the configurations real apps use).
-# Same device/runtime as ink_probe_sim.sh.
+# Same device/runtime selection as ink_probe_sim.sh.
 #
 #   SIM_DEVICE=2x   iPhone SE 3rd gen (native 2x)
 #   default          iPhone 16 (native 3x); set INK_SCALE=3 via
 #                    SIMCTL_CHILD_INK_SCALE=3
+#   SIM_UDID=<udid>  run on this existing simulator (e.g. a temporary one the
+#                    caller created and deletes) instead of a named OpenUIKit-*
+#   SIM_RUNTIME=<id> runtime for a created device (default: the newest
+#                    installed iOS runtime; tables so far: iOS 26.1, 27.0)
+#   SYMBOL_NAMES=<f> names file (default Tools/oracle2/symbolinkprobe/names.txt)
 set -e
 setopt null_glob
 cd "$(dirname "$0")/.."
@@ -20,7 +25,7 @@ swiftc -O -swift-version 5 -Xfrontend -default-isolation -Xfrontend MainActor \
   -module-name symbolinkprobe Tools/oracle2/symbolinkprobe/main.swift \
   -o "$APP/symbolinkprobe"
 cp Tools/oracle2/SymbolInkProbe-Info.plist "$APP/Info.plist"
-cp Tools/oracle2/symbolinkprobe/names.txt "$APP/names.txt"
+cp "${SYMBOL_NAMES:-Tools/oracle2/symbolinkprobe/names.txt}" "$APP/names.txt"
 if [[ "${SIM_DEVICE:-}" == "2x" ]]; then
   DEVNAME="OpenUIKit-2x${SIM_DEVICE_SUFFIX:-}"
   DEVTYPE="com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"
@@ -28,9 +33,10 @@ else
   DEVNAME="OpenUIKit-Chrome${SIM_DEVICE_SUFFIX:-}"
   DEVTYPE="com.apple.CoreSimulator.SimDeviceType.iPhone-16"
 fi
-RUNTIME=$(xcrun simctl list runtimes | grep -o 'com.apple.CoreSimulator.SimRuntime.iOS-26[0-9-]*' | tail -1)
-UDID=$(xcrun simctl list devices | grep "$DEVNAME" | grep -o '[0-9A-F-]\{36\}' | head -1)
+RUNTIME=${SIM_RUNTIME:-$(xcrun simctl list runtimes | grep -o 'com.apple.CoreSimulator.SimRuntime.iOS-[0-9-]*' | sort -t- -k2,2n -k3,3n | tail -1)}
+UDID=${SIM_UDID:-$(xcrun simctl list devices | grep "$DEVNAME" | grep -o '[0-9A-F-]\{36\}' | head -1)}
 if [[ -z "$UDID" ]]; then UDID=$(xcrun simctl create "$DEVNAME" "$DEVTYPE" "$RUNTIME"); fi
+echo "symbol_ink_probe_sim: device $UDID ($(xcrun simctl list devices | grep "$UDID" | sed 's/^ *//'))"
 STATE=$(xcrun simctl list devices | grep "$UDID" | grep -o '(Booted)' || true)
 if [[ -z "$STATE" ]]; then xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID"; fi
 xcrun simctl uninstall "$UDID" com.openuikit.symbolinkprobe 2>/dev/null || true

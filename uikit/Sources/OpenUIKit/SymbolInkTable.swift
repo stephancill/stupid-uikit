@@ -35,6 +35,16 @@
 // Guarded by the iOS cut. A harvested name at a harvested configuration
 // whose key is missing from the resource fails loudly. Catalyst keeps
 // the procedural vectors (tabbar_basic uses solid bitmaps).
+//
+// iOS 27 overlay (docs/SYMBOL_INK_IOS27.md): symbol_ink_ios27.json /
+// _ios27_3x.json hold the same probe's iOS 27.0 (24A434) masks for the
+// names stupid social draws from this table, at the same configurations,
+// SE 2x / iPhone 16 3x. With `OpenUIKitRuntime.chromeRelease == .iOS27`
+// a name in the overlay draws from it; every other name, and the iOS 26
+// chrome the existing goldens pin, keep the iOS 26.1 masks. MEASURED:
+// iOS 27 redrew `gear` (17|medium|large 3x: image 29 x 29 pt, ink 25 x 25,
+// was 27.67 / 23.67) and grew the 17|regular|unspecified alignment box
+// by 2 px at 3x (ink unchanged).
 
 public enum SymbolInkTable {
     private struct Table {
@@ -72,6 +82,8 @@ public enum SymbolInkTable {
 
     private static var table2x: Table? = { loadTable("symbol_ink_ios.json") }()
     private static var table3x: Table? = { loadTable("symbol_ink_ios_3x.json") }()
+    private static var iOS27Table2x: Table? = { loadTable("symbol_ink_ios27.json") }()
+    private static var iOS27Table3x: Table? = { loadTable("symbol_ink_ios27_3x.json") }()
     private static var cache: [String: (pw: Int, ph: Int, mask: GlyphInkMask)] = [:]
 
     /// Tab-bar configuration the first harvest measured.
@@ -86,6 +98,25 @@ public enum SymbolInkTable {
         if scale == 3 { return table3x }
         if scale == 2 { return table2x }
         return nil
+    }
+
+    /// The iOS 27.0 overlay at `scale`, or nil on the iOS 26 chrome.
+    private static func iOS27Table(scale: CGFloat) -> Table? {
+        guard OpenUIKitRuntime.chromeRelease == .iOS27 else { return nil }
+        if scale == 3 { return iOS27Table3x }
+        if scale == 2 { return iOS27Table2x }
+        return nil
+    }
+
+    /// The release whose masks `name` draws from: the iOS 27 overlay when
+    /// the host renders the iOS 27 chrome and the overlay harvested `name`,
+    /// otherwise the iOS 26.1 table.
+    private static func resolvedTable(name: String, scale: CGFloat) -> (table: Table, tag: String)? {
+        if let overlay = iOS27Table(scale: scale), overlay.names.contains(name) {
+            return (overlay, "27")
+        }
+        guard let base = table(scale: scale) else { return nil }
+        return (base, "26")
     }
 
     static func entries(scale: CGFloat) -> [String: JSONValue]? {
@@ -169,10 +200,10 @@ public enum SymbolInkTable {
                               configuration: UIImage.SymbolConfiguration?,
                               scale: CGFloat) -> UIImage? {
         guard OpenUIKitRuntime.systemFontCut == .iOS,
-              let table = table(scale: scale) else { return nil }
+              let (table, release) = resolvedTable(name: name, scale: scale) else { return nil }
         guard let key = lookupKey(name: name, configuration: configuration,
                                    scale: scale) else { return nil }
-        let cacheKey = String(Int(scale)) + "|" + key
+        let cacheKey = release + "|" + String(Int(scale)) + "|" + key
         let packed: (pw: Int, ph: Int, mask: GlyphInkMask)
         if let hit = cache[cacheKey] {
             packed = hit
