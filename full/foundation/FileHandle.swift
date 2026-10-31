@@ -45,6 +45,26 @@ public final class FileHandle: NSObject, @unchecked Sendable {
         self.init(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 
+    public convenience init(forReadingFrom url: URL) throws {
+        try self.init(opening: url, flags: O_RDONLY)
+    }
+
+    public convenience init(forWritingTo url: URL) throws {
+        try self.init(opening: url, flags: O_WRONLY)
+    }
+
+    public convenience init(forUpdating url: URL) throws {
+        try self.init(opening: url, flags: O_RDWR)
+    }
+
+    /// Like Foundation, the URL entry points open an existing file only (no O_CREAT) and throw on failure.
+    private convenience init(opening url: URL, flags: Int32) throws {
+        guard url.isFileURL else { throw FileHandleError(operation: "open", code: EINVAL) }
+        let descriptor = url.path.withCString { Darwin.open($0, flags) }
+        guard descriptor >= 0 else { throw FileHandleError(operation: "open", code: errno) }
+        self.init(fileDescriptor: descriptor, closeOnDealloc: true)
+    }
+
     deinit {
         if closeOnDealloc {
             closeFile()
