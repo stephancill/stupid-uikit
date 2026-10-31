@@ -988,6 +988,39 @@ public struct _OpenToolbarItem<Content: _OpenView>: _OpenView {
     }
 }
 
+/// ToolbarItemGroup: each view of the group is its own toolbar item at the
+/// group's placement (SwiftUI lays a group's views out as separate bar
+/// items, not one item holding a stack). On iOS 26 adjacent items then
+/// share one glass platter in the navigation bar.
+public struct _OpenToolbarItemGroup<Content: _OpenView>: _OpenView {
+    public typealias Body = Never
+    public let placement: ToolbarItemPlacement
+    public let content: Content
+
+    public init(
+        placement: ToolbarItemPlacement = .automatic,
+        @_OpenViewBuilder content: () -> Content
+    ) {
+        self.placement = placement
+        self.content = content()
+    }
+
+    public func _makeOpenUIKitNode() -> _OpenViewNode {
+        let placement = placement
+        func item(_ node: _OpenViewNode) -> _OpenViewNode {
+            switch node.kind {
+            case .empty:
+                return node
+            case .group(let children):
+                return _OpenViewNode(.group(children.map(item)))
+            default:
+                return _OpenViewNode(.modified(node, .toolbarItem(placement)))
+            }
+        }
+        return item(content._makeOpenUIKitNode())
+    }
+}
+
 /// Newer SwiftUI toolbars use semantic spacers instead of empty fixed-width
 /// views. The retained spacer keeps its placement so future toolbar layout
 /// can partition each bar; today the same node participates in the existing
@@ -1458,6 +1491,7 @@ public typealias ScrollViewReader<Content> = _OpenScrollViewReader<Content> wher
 public typealias LazyVStack<Content> = _OpenLazyVStack<Content> where Content: _OpenView
 public typealias GeometryReader<Content> = _OpenGeometryReader<Content> where Content: _OpenView
 public typealias ToolbarItem<Content> = _OpenToolbarItem<Content> where Content: _OpenView
+public typealias ToolbarItemGroup<Content> = _OpenToolbarItemGroup<Content> where Content: _OpenView
 public typealias ToolbarSpacer = _OpenToolbarSpacer
 public typealias DefaultToolbarItem = _OpenDefaultToolbarItem
 public typealias Menu<Label, Content> = _OpenMenu<Label, Content>

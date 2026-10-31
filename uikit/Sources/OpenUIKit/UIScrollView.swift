@@ -859,7 +859,9 @@ open class UIScrollView: UIView {
         adjustedSafeAreaTop = safeAreaInsets.top
         super.safeAreaInsetsDidChange()
         let newTop = safeAreaInsets.top
-        if newTop != previous {
+        // `.never` keeps the safe area out of `adjustedContentInset`, so
+        // there is no resting offset to rebase.
+        if newTop != previous, contentInsetAdjustmentBehavior != .never {
             if OpenUIKitRuntime.systemFontCut == .iOS,
                newTop < previous,
                !isDragging, !isTracking, !isDecelerating {

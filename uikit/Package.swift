@@ -683,6 +683,9 @@ let conformanceTargets: [Target] = [
     // (docs/SWIFTUI_LAZY_STACKS.md). SwiftUITests is Darwin-only, so this
     // drives UIHostingController directly: `swift run swiftuilazyprobe`.
     .executableTarget(name: "swiftuilazyprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for iOS navigation chrome parity (docs/SWIFTUI_NAV_CHROME.md):
+    // large titles, ToolbarItemGroup platters, device safe area, status bar.
+    .executableTarget(name: "swiftuinavchromeprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",
                       dependencies: ["OpenUIKit", "OpenUIKitC", "CPortableIO"],
                       linkerSettings: [.linkedLibrary("m", .when(platforms: [.linux]))]),

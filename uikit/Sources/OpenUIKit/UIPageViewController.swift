@@ -319,6 +319,11 @@ open class UIPageViewController: UIViewController {
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
         scrollView.bounces = false
+        // The queue's pages fill the controller and take the safe area by
+        // geometry (a NavigationStack page puts its bar under the status
+        // bar); the queue itself never folds the safe area into its insets,
+        // which would rest the slots at a negative offset.
+        scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.addSubview(leadingSlot)
         scrollView.addSubview(currentSlot)
         scrollView.addSubview(trailingSlot)

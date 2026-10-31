@@ -246,6 +246,10 @@ open class UIWindow: UIView {
         super.init(frame: windowScene.screen.bounds)
         self.windowScene = windowScene
         UIApplication.shared._register(window: self)
+        // A scene window is a full-screen app window: it reports the safe
+        // area of the device a host configured (OpenUIKitRuntime
+        // .configureDevice). No device by default: zero insets, as before.
+        if let device = OpenUIKitRuntime.device { _setSafeAreaInsets(device.safeAreaInsets) }
     }
 
     public required init?(coder: NSCoder) {

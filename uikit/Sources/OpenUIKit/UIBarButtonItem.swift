@@ -150,6 +150,14 @@ public class UIBarButtonItem: UIBarItem {
     /// xmark) still sit in a 44×44 glass platter. Arbitrary UIKit
     /// `init(customView:)` stays platter-free.
     public var _showsPlatterWithCustomView = false
+    /// A SwiftUI toolbar symbol item in a run of adjacent ones (a
+    /// ToolbarItemGroup or neighbouring ToolbarItems): iOS 26 draws the run
+    /// on ONE shared platter. MEASURED iOS 27 simulator, iPhone 16e, a
+    /// two-item ToolbarItemGroup (magnifyingglass, gear) as
+    /// `.primaryAction`: platter [266.67, 47, 108, 44], symbol centres 25 pt
+    /// from either end and 57 pt apart, i.e. 50 pt item views with the
+    /// grouped 8 pt gap (wider than UIKit's own image items, 44).
+    public var _sharesSwiftUISymbolPlatter = false
 
     /// Set by the bar that owns the item so a mutation can trigger a relayout.
     weak var _bar: _UIBarItemContainer?
@@ -451,6 +459,9 @@ public enum _UIBarMetrics {
     /// end). In item-view terms — each view already carries 4 pt of
     /// platter on either side — that is an 8 pt gap between the views.
     public static let groupedImageGap: CGFloat = 8
+    /// Item-view width of a SwiftUI toolbar symbol in a shared-platter run
+    /// (see `UIBarButtonItem._sharesSwiftUISymbolPlatter`).
+    public static let swiftUIGroupedSymbolWidth: CGFloat = 50
     /// Gap accounting (measured, `toolbar_basic`): a 12 pt gap separates
     /// consecutive bar items, EXCEPT after a space item — a fixed space of
     /// 40 pt shows up as 12 + 40 before the next item, and the item after a
@@ -634,6 +645,11 @@ final class _UIBarButtonItemView: UIControl {
 
     /// An item that shows only an image / symbol (no title, no custom
     /// view): iOS 26 merges runs of these into one platter.
+    /// Joins a run of adjacent items drawn on one shared platter.
+    var joinsSharedPlatter: Bool {
+        (isImageOnly || item._sharesSwiftUISymbolPlatter) && !item._isolatesPlatter
+    }
+
     var isImageOnly: Bool {
         item.customView == nil && item.title == nil && !item._isSpace
             && (item.image != nil || item._symbol != nil
@@ -659,6 +675,9 @@ final class _UIBarButtonItemView: UIControl {
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
+        if OpenUIKitRuntime.systemFontCut == .iOS, item._sharesSwiftUISymbolPlatter {
+            return CGSize(width: _UIBarMetrics.swiftUIGroupedSymbolWidth, height: platterHeight)
+        }
         if item.customView != nil {
             return CGSize(width: contentSize.width, height: platterHeight)
         }
@@ -822,9 +841,7 @@ enum _UIBarItemLayout {
     static func gapBefore(_ views: [_UIBarButtonItemView], _ i: Int) -> CGFloat {
         guard i > 0, !views[i - 1].item._isSpace else { return 0 }
         if OpenUIKitRuntime.systemFontCut == .iOS,
-           views[i - 1].isImageOnly, views[i].isImageOnly,
-           !views[i - 1].item._isolatesPlatter,
-           !views[i].item._isolatesPlatter {
+           views[i - 1].joinsSharedPlatter, views[i].joinsSharedPlatter {
             return _UIBarMetrics.groupedImageGap
         }
         return _UIBarMetrics.gap
@@ -847,7 +864,7 @@ enum _UIBarItemLayout {
             for v in run { v._platterHiddenByGroup = true }
         }
         for v in views {
-            if v.isImageOnly && !v.isHidden && !v.item._isolatesPlatter {
+            if v.joinsSharedPlatter && !v.isHidden {
                 run.append(v)
             } else {
                 flush()

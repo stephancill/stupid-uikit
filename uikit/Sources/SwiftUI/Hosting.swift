@@ -1150,7 +1150,7 @@ final class _SwiftUINavigationStackController: UINavigationController,
             return
         }
         setNavigationBarHidden(destination.configuration.barHidden, animated: animated)
-        navigationBar.prefersLargeTitles = destination.configuration.titleDisplayMode == .large
+        navigationBar.prefersLargeTitles = displaysLargeTitle(for: destination)
     }
 
     func navigationController(
@@ -1188,7 +1188,30 @@ final class _SwiftUINavigationStackController: UINavigationController,
             return
         }
         setNavigationBarHidden(controller.configuration.barHidden, animated: animated)
-        navigationBar.prefersLargeTitles = controller.configuration.titleDisplayMode == .large
+        navigationBar.prefersLargeTitles = displaysLargeTitle(for: controller)
+    }
+
+    /// SwiftUI's title display modes on iOS: a NavigationStack prefers large
+    /// titles, `.inline` opts a destination out, `.large` in, and
+    /// `.automatic` inherits the mode of the closest destination below it
+    /// (the root's automatic mode is large). A destination without a title
+    /// keeps the inline bar. The macOS cut keeps the explicit-`.large`-only
+    /// rule (no large titles on macOS).
+    private func displaysLargeTitle(for controller: _SwiftUINavigationNodeController) -> Bool {
+        guard OpenUIKitRuntime.systemFontCut == .iOS else {
+            return controller.configuration.titleDisplayMode == .large
+        }
+        guard let title = controller.configuration.title, !title.isEmpty else { return false }
+        let stack = viewControllers.compactMap { $0 as? _SwiftUINavigationNodeController }
+        let chain = stack.firstIndex { $0 === controller }.map { stack[...$0] } ?? [controller]
+        for candidate in chain.reversed() {
+            switch candidate.configuration.titleDisplayMode {
+            case .large: return true
+            case .inline: return false
+            case .automatic: continue
+            }
+        }
+        return true
     }
 }
 
@@ -1329,29 +1352,41 @@ private func _openApplyNavigationChrome(
     configuration: _OpenNavigationConfiguration,
     existingTitleHost: _SwiftUIHostingView?
 ) -> _SwiftUIHostingView? {
-    var leading: [UIBarButtonItem] = []
-    var trailing: [UIBarButtonItem] = []
+    // Both sides in declaration (leading-to-trailing) order; nil marks a
+    // toolbar spacer, which ends a shared-platter run.
+    var leading: [UIBarButtonItem?] = []
+    var trailing: [UIBarButtonItem?] = []
     var principal: _OpenViewNode?
     var titleHost = existingTitleHost
 
     if let toolbar = configuration.toolbar {
         for (placement, content) in _openToolbarEntries(toolbar) {
             if placement == .bottomBar { continue }
-            if _openNodeIsSpacer(content) { continue }
+            let isLeading = placement == .navigationBarLeading
+                || placement == .cancellationAction
+            if _openNodeIsSpacer(content) {
+                if isLeading { leading.append(nil) } else { trailing.append(nil) }
+                continue
+            }
             if placement == .principal {
                 principal = content
                 continue
             }
             let barItem = _openImageBarButtonItem(from: content)
                 ?? _openCustomBarButtonItem(from: content)
-            if placement == .navigationBarLeading
-                || placement == .cancellationAction {
+            if isLeading {
                 leading.append(barItem)
             } else {
                 trailing.append(barItem)
             }
         }
     }
+    _openGroupAdjacentSymbolItems(leading)
+    _openGroupAdjacentSymbolItems(trailing)
+    // UIKit's rightBarButtonItems run trailing-to-leading: the first
+    // declared trailing item sits furthest from the edge, as in SwiftUI.
+    var right = Array(trailing.compactMap { $0 }.reversed())
+    let left = leading.compactMap { $0 }
 
     if configuration.searchIsToolbar {
         // MEASURED realapp_hackers_feed_light, iPhone 16 @3x / iOS 26.1:
@@ -1364,7 +1399,7 @@ private func _openApplyNavigationChrome(
         let searchItem = UIBarButtonItem(
             barButtonSystemItem: .search, target: nil, action: nil)
         searchItem._isolatesPlatter = true
-        trailing.insert(searchItem, at: 0)
+        right.insert(searchItem, at: 0)
     }
 
     if let principal {
@@ -1409,9 +1444,37 @@ private func _openApplyNavigationChrome(
         item.titleView = nil
     }
 
-    item.leftBarButtonItems = leading.isEmpty ? nil : leading
-    item.rightBarButtonItems = trailing.isEmpty ? nil : trailing
+    item.leftBarButtonItems = left.isEmpty ? nil : left
+    item.rightBarButtonItems = right.isEmpty ? nil : right
     return titleHost
+}
+
+/// iOS 26: adjacent SwiftUI toolbar symbol items on one side of the bar
+/// (a ToolbarItemGroup, or neighbouring ToolbarItems) share one glass
+/// platter; a ToolbarSpacer (nil) or a non-symbol item ends the run. A
+/// lone symbol item keeps its isolated 44 pt platter (MEASURED Hackers
+/// settings gear). The search item `.searchable(placement: .toolbar)`
+/// adds is never part of a run.
+@MainActor
+private func _openGroupAdjacentSymbolItems(_ items: [UIBarButtonItem?]) {
+    guard OpenUIKitRuntime.systemFontCut == .iOS else { return }
+    // Runs as index ranges; nil (a spacer) and non-symbol items end a run.
+    var start = 0
+    while start < items.count {
+        var end = start
+        while end < items.count, let item = items[end],
+              item._isolatesPlatter || item._showsPlatterWithCustomView {
+            end += 1
+        }
+        if end - start >= 2 {
+            for index in start..<end {
+                guard let item = items[index] else { continue }
+                item._isolatesPlatter = false
+                item._sharesSwiftUISymbolPlatter = true
+            }
+        }
+        start = max(end, start + 1)
+    }
 }
 
 /// OpenUIKit-backed host for the SwiftUI tree and its retained dynamic state.
@@ -4844,6 +4907,10 @@ private enum _ViewRenderer {
         let plainSections = _isPlainListSection(environment)
         func rowInsets(_ row: _OpenViewNode) -> UIEdgeInsets {
             if plainSections, case .section = row.kind { return .zero }
+            // A plain list row's own listRowInsets replace the default
+            // insets (laid out as padding inside the row), as for the rows
+            // of a plain Section (placeSection).
+            if plainSections, _hasListRowInsets(row) { return .zero }
             return iOSPlainRowInsets
         }
         for row in rows {
