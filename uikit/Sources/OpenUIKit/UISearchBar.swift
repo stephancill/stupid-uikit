@@ -300,6 +300,13 @@ open class UISearchTextField: UITextField {
     public override func textRect(forBounds bounds: CGRect) -> CGRect {
         let right = (text ?? "").isEmpty ? 0
             : _UISearchFieldMetrics.clearTrailingInset + _UISearchFieldMetrics.clearTextGap
+        if _bottomFloating, UISearchBar.BottomDock.usesIOS27Field {
+            let dock = UISearchBar.BottomDock.self
+            let left = dock.iOS27TextLeftInset
+            return CGRect(x: bounds.minX + left, y: bounds.minY,
+                          width: max(0, bounds.width - left - right),
+                          height: bounds.height)
+        }
         let left = _bottomFloating
             ? UISearchBar.BottomDock.textLeftInset(compatibleWith: traitCollection)
             : UISearchTextField.textLeftInset
@@ -313,8 +320,15 @@ open class UISearchTextField: UITextField {
     /// `secondaryLabel` — (60, 60, 67) at alpha 0.6, twice the alpha of
     /// `placeholderText`, which is what a plain field uses and what this
     /// field drew before (ink 195 where the golden has 137).
+    override var _textLineDrop: CGFloat {
+        _bottomFloating && UISearchBar.BottomDock.usesIOS27Field ? UISearchBar.BottomDock.iOS27TextDrop : 0
+    }
+
     override var defaultPlaceholderColor: UIColor {
-        _UISearchFieldMetrics.isIOS ? .secondaryLabel : super.defaultPlaceholderColor
+        if _bottomFloating, UISearchBar.BottomDock.usesIOS27Field {
+            return UISearchBar.BottomDock.iOS27PlaceholderColor
+        }
+        return _UISearchFieldMetrics.isIOS ? .secondaryLabel : super.defaultPlaceholderColor
     }
 
     /// Measured clear-button box (`_UISearchFieldMetrics.clear*`); UITextField's
@@ -382,13 +396,15 @@ open class UISearchTextField: UITextField {
     }
 
     private func drawMagnifier(in canvas: Canvas, bounds: CGRect) {
+        let iOS27 = _bottomFloating && UISearchBar.BottomDock.usesIOS27Field
         let icon = _bottomFloating
-            ? UISearchBar.BottomDock.iconFrame : UISearchTextField.iconFrame
+            ? (iOS27 ? UISearchBar.BottomDock.iOS27IconFrame : UISearchBar.BottomDock.iconFrame)
+            : UISearchTextField.iconFrame
         let box = icon.offsetBy(dx: bounds.minX, dy: bounds.minY)
         let c = CGPoint(x: box.minX + UISearchTextField.ringCenter.x,
                         y: box.minY + UISearchTextField.ringCenter.y)
-        let color = (_tintColor ?? _UISearchFieldMetrics.glyphColor)
-            .resolvedCGColor(with: traitCollection)
+        let glyph = iOS27 ? UISearchBar.BottomDock.iOS27GlyphColor : _UISearchFieldMetrics.glyphColor
+        let color = (_tintColor ?? glyph).resolvedCGColor(with: traitCollection)
         let w = UISearchTextField.strokeWidth
         let mid = UISearchTextField.ringOuterRadius - w / 2
         // A square with cornerRadius == half its side IS a circle in Path.
@@ -480,6 +496,52 @@ open class UISearchBar: UIView {
         static var iconFrame: CGRect {
             CGRect(x: iconX, y: iconY, width: 20.5, height: 20)
         }
+
+        // MARK: iOS 27 field (`OpenUIKitRuntime.chromeRelease == .iOS27`)
+        //
+        // MEASURED stupid social's Search screen, iPhone 16e @3x / iOS 27.0
+        // simulator, light (2026-10-31): the platter is unchanged
+        // ([28, 768, 334, 48], glass from 768 to 816), but the search text
+        // field (accessibility frame) is the platter's whole width and 28 pt
+        // tall, centred: [28, 778, 334, 28]. In it the magnifier's ring
+        // (outer radius 6.667, 2 pt strokes, the same vector as iOS 26.1's)
+        // has its centre at (20.667, 11.333) — ink [42, 783.33, 58.67, 800]
+        // — and is drawn in `label` (full-coverage pixels (0, 0, 0)), not
+        // `secondaryLabel`; the "Search" placeholder (17 pt medium, as
+        // before) has its "S" ink at x 69.67 and y 786 ... 798.67, i.e. the
+        // text box starts 40.667 pt into the field and its 20.33 pt line
+        // box's top is at 5 (783), 1 pt below UILabel's rounded centring (4). iOS 26.1 put the field 5 pt
+        // inside the platter, 38 pt tall, and the text 41.5 pt into it
+        // (abs 74.5 on this screen). Portrait only; compact height is not
+        // measured and keeps the iOS 26.1 numbers.
+        static var usesIOS27Field: Bool {
+            OpenUIKitRuntime.chromeRelease == .iOS27 && OpenUIKitRuntime.systemFontCut == .iOS
+                && !isCompact
+        }
+        static let iOS27FieldHeight: CGFloat = 28
+        static let iOS27TextLeftInset: CGFloat = 40 + 2.0 / 3.0
+        static let iOS27TextDrop: CGFloat = 1
+        /// Ring centre (20.667, 11.333) in the field, minus the vector's
+        /// own ring centre (8.833, 8) in its box.
+        static var iOS27IconFrame: CGRect {
+            CGRect(x: 20 + 2.0 / 3.0 - UISearchTextField.ringCenter.x,
+                   y: 11 + 1.0 / 3.0 - UISearchTextField.ringCenter.y,
+                   width: 20.667, height: 19.333)
+        }
+        /// Light: `label`. Dark is not measured (iOS 26.1's secondaryLabel).
+        static let iOS27GlyphColor = UIColor(dynamicProvider: { traits in
+            traits.userInterfaceStyle == .dark ? .secondaryLabel : .label
+        })
+        /// The placeholder is a vibrant grey: every channel of the glass
+        /// under it drops by 102 ((248, 247, 252) -> (146, 145, 150), a
+        /// plus-darker 0.6 grey). Drawn here as black at 0.41, which gives
+        /// (146, 146, 149) on that glass. Dark is not measured
+        /// (secondaryLabel as on iOS 26.1).
+        static let iOS27PlaceholderColor = UIColor(dynamicProvider: { traits in
+            traits.userInterfaceStyle == .dark
+                ? .secondaryLabel
+                : UIColor(red: 0, green: 0, blue: 0, alpha: 0.41)
+        })
     }
 
     public weak var delegate: UISearchBarDelegate?

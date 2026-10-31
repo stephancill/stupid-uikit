@@ -539,6 +539,10 @@ open class UITextField: UIControl, UITextInput, UITextKeyHandling, UITextCaretHo
 #endif
     dynamic var defaultPlaceholderColor: UIColor { .placeholderText }
 
+    /// Points the text/placeholder line box sits below its rounded centre
+    /// in the field (0; the iOS 27 docked search field overrides it).
+    var _textLineDrop: CGFloat { 0 }
+
     private final func makeDefaultAttributedPlaceholder(_ text: String) -> NSAttributedString {
         NSAttributedString(string: text,
                            attributes: [.font: _font,
@@ -1139,7 +1143,7 @@ open class UITextField: UIControl, UITextInput, UITextKeyHandling, UITextCaretHo
         let lineH = lineHeight
         // Label line box centered in the BOUNDS with UILabel's rounding
         // (golden: y = 7 at h = 34 / 17 pt, y = 9 at h = 34 / 13 pt).
-        let labelY = ((bounds.height - lineH) / 2 + 0.5).rounded(.down)
+        let labelY = ((bounds.height - lineH) / 2 + 0.5).rounded(.down) + _textLineDrop
         let labelYInCanvas = labelY - tr.minY
 
         placeholderLabel.frame = CGRect(x: 0, y: labelYInCanvas,
@@ -1443,7 +1447,7 @@ open class UITextField: UIControl, UITextInput, UITextKeyHandling, UITextCaretHo
         if scroll != textScrollOffset {
             textScrollOffset = scroll
             // Re-place the text label with the new offset.
-            let labelY = ((bounds.height - lineHeight) / 2 + 0.5).rounded(.down) - tr.minY
+            let labelY = ((bounds.height - lineHeight) / 2 + 0.5).rounded(.down) + _textLineDrop - tr.minY
             let w = Swift.max(FontEngine.measure(renderedText, font: _font).rounded(.up) + 2,
                               tr.width)
             textLabel.frame = CGRect(x: -textScrollOffset,
