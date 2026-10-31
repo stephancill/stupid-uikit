@@ -905,6 +905,89 @@ private func _enclosingViewController(for view: UIView) -> UIViewController? {
     return nil
 }
 
+/// Follows a NavigationLink from `source` (the view controller that shows
+/// the link, or the navigation controller itself for a link in its bar):
+/// pushes a destination link's controller, or appends a value link's value
+/// to the enclosing NavigationStack's path. Fails loudly without a stack.
+@MainActor
+func _openFollowNavigationLink(_ target: _OpenNavigationLinkTarget, from source: UIViewController?) {
+    let navigationController = (source as? UINavigationController) ?? source?.navigationController
+    switch target {
+    case .inert:
+        return
+    case .destination(let makeDestinationController):
+        guard let navigationController else {
+            preconditionFailure("SwiftUI.NavigationLink requires an enclosing UINavigationController")
+        }
+        let destination = makeDestinationController()
+        destination.loadViewIfNeeded()
+        navigationController.pushViewController(destination, animated: true)
+    case .value(let value):
+        guard let stack = navigationController as? _SwiftUINavigationStackController else {
+            preconditionFailure(
+                "SwiftUI.NavigationLink(value:) requires an enclosing NavigationStack (value \(value))"
+            )
+        }
+        stack.appendPathValue(value)
+    }
+}
+
+/// The navigation-stack child whose navigation item docks a SwiftUI
+/// `.searchable` field at the bottom: iOS cut, `.automatic` placement, a
+/// phone navigation controller outside a tab bar controller (the rule
+/// `UINavigationBar.usesBottomSearch` applies). Nil keeps the field inline.
+@MainActor
+private func _openBottomSearchOwner(for surface: UIView, placement: SearchFieldPlacement) -> UIViewController? {
+    guard OpenUIKitRuntime.systemFontCut == .iOS, placement == .automatic,
+          UITraitCollection.current.userInterfaceIdiom != .pad,
+          UIDevice.current.userInterfaceIdiom != .pad else { return nil }
+    var controller = _enclosingViewController(for: surface)
+    while let current = controller {
+        if let nav = current.parent as? UINavigationController {
+            return nav.tabBarController == nil ? current : nil
+        }
+        controller = current.parent
+    }
+    return nil
+}
+
+/// A search controller bound to a SwiftUI `.searchable` text binding.
+@MainActor
+private final class _SwiftUIDockedSearchController: UISearchController, UISearchResultsUpdating {
+    var setText: (@MainActor (String) -> Void)?
+
+    init() {
+        super.init(searchResultsController: nil)
+        searchResultsUpdater = self
+        obscuresBackgroundDuringPresentation = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func updateSearchResults(for searchController: UISearchController) {
+        setText?(searchController.searchBar.text ?? "")
+    }
+}
+
+@MainActor
+private func _openInstallDockedSearch(on owner: UIViewController, configuration: _OpenSearchConfiguration) {
+    let controller: _SwiftUIDockedSearchController
+    if let existing = owner.navigationItem.searchController as? _SwiftUIDockedSearchController {
+        controller = existing
+    } else {
+        controller = _SwiftUIDockedSearchController()
+    }
+    controller.setText = configuration.setText
+    let text = configuration.getText()
+    if controller.searchBar.text != text { controller.searchBar.text = text }
+    if controller.searchBar.placeholder != configuration.prompt {
+        controller.searchBar.placeholder = configuration.prompt
+    }
+    if owner.navigationItem.searchController !== controller {
+        owner.navigationItem.searchController = controller
+    }
+}
+
 /// Hosts one already-evaluated navigation node while preserving the UIKit
 /// controller/appearance boundary required by UIViewControllerRepresentable.
 /// Dynamic state remains in the parent SwiftUI graph; this controller owns
@@ -1066,11 +1149,14 @@ private final class _SwiftUINavigationNodeController: UIViewController {
     }
 
     private func applyNavigationMetadata() {
-        title = configuration.title
+        // UIViewController.title re-installs the whole bar item stack (the
+        // bar rebuilds its item views), so assign it only when it changes.
+        if title != configuration.title { title = configuration.title }
         navigationItem.subtitle = configuration.subtitle
         navigationItem.hidesBackButton = configuration.backButtonHidden
         toolbarHost = _openApplyNavigationChrome(
             to: navigationItem,
+            owner: self,
             configuration: configuration,
             existingTitleHost: toolbarHost
         )
@@ -1155,6 +1241,18 @@ final class _SwiftUINavigationStackController: UINavigationController,
         }
         isSynchronizing = false
         applyVisibleConfiguration(animated: false)
+    }
+
+    /// `NavigationLink(value:)`: the value joins the stack's path; the
+    /// path's owner re-evaluates and `update` pushes the destination its
+    /// `navigationDestination(for:)` registration builds.
+    func appendPathValue(_ value: AnyHashable) {
+        guard let pathBinding else {
+            preconditionFailure(
+                "SwiftUI.NavigationLink(value:) needs NavigationStack(path:); a stack without a path binding is not supported (value \(value))"
+            )
+        }
+        pathBinding.setElements(pathBinding.getElements() + [value])
     }
 
     func dismantleStack() {
@@ -1306,17 +1404,22 @@ private func _openFirstSystemImageName(in node: _OpenViewNode) -> String? {
 
 @MainActor
 private func _openFirstButtonAction(
-    in node: _OpenViewNode
+    in node: _OpenViewNode,
+    owner: UIViewController?
 ) -> (@MainActor () -> Void)? {
     switch node.kind {
     case .button(_, _, _, let action):
         return action
+    case .navigationLink(_, let target):
+        // A toolbar NavigationLink (stupid social's search and settings
+        // items) follows from the controller whose navigation item shows it.
+        return { [weak owner] in _openFollowNavigationLink(target, from: owner) }
     case .modified(let content, _):
-        return _openFirstButtonAction(in: content)
+        return _openFirstButtonAction(in: content, owner: owner)
     case .group(let children), .hStack(let children, _, _),
          .vStack(let children, _, _), .zStack(let children, _):
         for child in children {
-            if let action = _openFirstButtonAction(in: child) { return action }
+            if let action = _openFirstButtonAction(in: child, owner: owner) { return action }
         }
         return nil
     default:
@@ -1325,7 +1428,10 @@ private func _openFirstButtonAction(
 }
 
 @MainActor
-private func _openImageBarButtonItem(from node: _OpenViewNode) -> UIBarButtonItem? {
+private func _openImageBarButtonItem(
+    from node: _OpenViewNode,
+    owner: UIViewController?
+) -> UIBarButtonItem? {
     guard let name = _openFirstSystemImageName(in: node) else { return nil }
     let item: UIBarButtonItem
     if name == "magnifyingglass", OpenUIKitRuntime.chromeRelease != .iOS27 {
@@ -1350,7 +1456,7 @@ private func _openImageBarButtonItem(from node: _OpenViewNode) -> UIBarButtonIte
     } else {
         return nil
     }
-    if let action = _openFirstButtonAction(in: node) {
+    if let action = _openFirstButtonAction(in: node, owner: owner) {
         item.primaryAction = UIAction(title: "", handler: { _ in action() })
     }
     item._isolatesPlatter = true
@@ -1377,6 +1483,7 @@ private func _openCustomBarButtonItem(from node: _OpenViewNode) -> UIBarButtonIt
 @MainActor
 private func _openApplyNavigationChrome(
     to item: UINavigationItem,
+    owner: UIViewController,
     configuration: _OpenNavigationConfiguration,
     existingTitleHost: _SwiftUIHostingView?
 ) -> _SwiftUIHostingView? {
@@ -1400,7 +1507,7 @@ private func _openApplyNavigationChrome(
                 principal = content
                 continue
             }
-            let barItem = _openImageBarButtonItem(from: content)
+            let barItem = _openImageBarButtonItem(from: content, owner: owner)
                 ?? _openCustomBarButtonItem(from: content)
             if isLeading {
                 leading.append(barItem)
@@ -1472,9 +1579,51 @@ private func _openApplyNavigationChrome(
         item.titleView = nil
     }
 
-    item.leftBarButtonItems = left.isEmpty ? nil : left
-    item.rightBarButtonItems = right.isEmpty ? nil : right
+    // Re-applying the chrome on every evaluation must not replace items
+    // that did not change: the bar rebuilds its item views on assignment,
+    // which drops a touch that began on the old view (stupid social's
+    // toolbar NavigationLinks never fired while the root kept animating).
+    if !_openReuseBarItems(item.leftBarButtonItems ?? [], with: left) {
+        item.leftBarButtonItems = left.isEmpty ? nil : left
+    }
+    if !_openReuseBarItems(item.rightBarButtonItems ?? [], with: right) {
+        item.rightBarButtonItems = right.isEmpty ? nil : right
+    }
     return titleHost
+}
+
+/// Moves the actions and SwiftUI content of `fresh` onto `current` when both
+/// describe the same items (same kind, symbol and platter treatment), so
+/// the bar keeps its item views. False when they differ.
+@MainActor
+private func _openReuseBarItems(_ current: [UIBarButtonItem], with fresh: [UIBarButtonItem]) -> Bool {
+    guard current.count == fresh.count else { return false }
+    for (old, new) in zip(current, fresh) {
+        guard old.systemItem == new.systemItem,
+              old.image?._openSystemSymbolName == new.image?._openSystemSymbolName,
+              (old.image == nil) == (new.image == nil),
+              old.title == new.title,
+              (old.customView is _SwiftUIHostingView) == (new.customView is _SwiftUIHostingView),
+              (old.customView == nil) == (new.customView == nil),
+              old._isolatesPlatter == new._isolatesPlatter,
+              old._sharesSwiftUISymbolPlatter == new._sharesSwiftUISymbolPlatter,
+              old._showsPlatterWithCustomView == new._showsPlatterWithCustomView,
+              old.isEnabled == new.isEnabled
+        else { return false }
+        if new.customView != nil, !(new.customView is _SwiftUIHostingView) { return false }
+        if let oldView = old.customView, let newView = new.customView,
+           oldView.frame.size != newView.frame.size { return false }
+    }
+    for (old, new) in zip(current, fresh) {
+        old.primaryAction = new.primaryAction
+        old.target = new.target
+        old.action = new.action
+        if let oldHost = old.customView as? _SwiftUIHostingView,
+           let newHost = new.customView as? _SwiftUIHostingView {
+            oldHost.node = newHost.node
+        }
+    }
+    return true
 }
 
 /// iOS 26: adjacent SwiftUI toolbar symbol items on one side of the bar
@@ -1592,7 +1741,8 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
         let (node, configuration) = _openExtractNavigationConfiguration(evaluated)
         // Remove metadata that SwiftUI previously owned, but do not erase an
         // unrelated title/navigation-item value an embedding UIKit app set.
-        if configuration.title != nil || title == appliedRootNavigationTitle {
+        if (configuration.title != nil || title == appliedRootNavigationTitle),
+           title != configuration.title {
             title = configuration.title
         }
         if configuration.subtitle != nil || navigationItem.subtitle == appliedRootNavigationSubtitle {
@@ -1609,6 +1759,7 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
         if hasChrome || appliedSwiftUINavigationChrome {
             navigationChromeTitleHost = _openApplyNavigationChrome(
                 to: navigationItem,
+                owner: self,
                 configuration: configuration,
                 existingTitleHost: navigationChromeTitleHost
             )
@@ -2117,6 +2268,9 @@ private struct _RenderEnvironment {
     /// `.scrollContentBackground(_:)`: `.hidden` clears the List/Form
     /// container background (rows and sections keep theirs).
     var scrollContentBackground: Visibility = .automatic
+    /// Set while an iOS inset-grouped list places a row whose
+    /// `listRowBackground` it already drew behind the whole row.
+    var listRowBackgroundDrawnByList = false
     var menuIndicatorVisibility: Visibility = .automatic
     /// MEASURED realapp_hackers_feed_light, iPhone 16 @3x: the principal
     /// `HostedViewWrapper` is 36 pt (`_UINavigationBarTitleControl`); the
@@ -3616,7 +3770,7 @@ private enum _ViewRenderer {
                     setSelection(next.tag)
                 }
             }
-        case .navigationLink(let label, let makeDestinationController):
+        case .navigationLink(let label, let target):
             let control = UIControl(frame: rect)
             control.isOpaque = false
             control.backgroundColor = .clear
@@ -3624,16 +3778,8 @@ private enum _ViewRenderer {
             control._automationAccessibility = _UIAutomationAccessibility(role: .button)
             control.isEnabled = environment.isEnabled
             control.addTarget(for: .touchUpInside) { [weak control] _, _ in
-                guard let control,
-                      let source = _enclosingViewController(for: control),
-                      let navigationController = source.navigationController else {
-                    preconditionFailure(
-                        "SwiftUI.NavigationLink requires an enclosing UINavigationController"
-                    )
-                }
-                let destination = makeDestinationController()
-                destination.loadViewIfNeeded()
-                navigationController.pushViewController(destination, animated: true)
+                guard let control else { return }
+                _openFollowNavigationLink(target, from: _enclosingViewController(for: control))
             }
             surface.addSubview(control)
             place(
@@ -3882,6 +4028,10 @@ private enum _ViewRenderer {
                 place(background, in: rect, on: surface, environment: environment)
                 place(content, in: rect, on: surface, environment: environment)
             case .listRowBackground(let background):
+                if environment.listRowBackgroundDrawnByList {
+                    place(content, in: rect, on: surface, environment: environment)
+                    break
+                }
                 let host = _SwiftUIPassthroughView(frame: rect)
                 host.accessibilityIdentifier = "SwiftUI.ListRowBackground"
                 surface.addSubview(host)
@@ -4422,6 +4572,19 @@ private enum _ViewRenderer {
                 // boundary. Outside a list it is layout-transparent.
                 place(content, in: rect, on: surface, environment: environment)
             case .searchable(let configuration):
+                if let owner = _openBottomSearchOwner(for: surface, placement: configuration.placement) {
+                    // iOS 26+ iPhone: `.automatic` docks the field at the
+                    // bottom as a glass capsule; UIKit's bottom-docked
+                    // `navigationItem.searchController` (MEASURED Ledger,
+                    // iOS 26.1: slot 86, platter [28, H - 76, W - 56, 48])
+                    // draws it. MEASURED stupid social's Search, iPhone 16e
+                    // @3x / iOS 27.0: capsule [28, 768, 334, 48] over the
+                    // full-height content (the same numbers). The content
+                    // keeps the whole rect.
+                    _openInstallDockedSearch(on: owner, configuration: configuration)
+                    place(content, in: rect, on: surface, environment: environment)
+                    break
+                }
                 let isToolbar = configuration.placement == .toolbar
                 // MEASURED realapp_hackers_feed_light, iPhone 16 @3x / iOS 26.1:
                 // `.searchable(..., placement: .toolbar)` does not insert a
@@ -4890,6 +5053,12 @@ private enum _ViewRenderer {
         on surface: UIView,
         environment: _RenderEnvironment
     ) {
+        if OpenUIKitRuntime.systemFontCut == .iOS {
+            // A Form is an inset-grouped list on iOS.
+            placeIOSInsetGroupedList(rows, in: rect, on: surface, environment: environment,
+                                     identifier: "SwiftUI.Form")
+            return
+        }
         let formView = UIView(frame: rect)
         formView.backgroundColor = environment.scrollContentBackground == .hidden
             ? .clear : .systemGroupedBackground
@@ -4952,6 +5121,11 @@ private enum _ViewRenderer {
         environment: _RenderEnvironment,
         retainedState: _OpenLazyStackState? = nil
     ) {
+        if OpenUIKitRuntime.systemFontCut == .iOS, case .insetGrouped = environment.listStyle.storage {
+            placeIOSInsetGroupedList(rows, in: rect, on: surface, environment: environment,
+                                     identifier: "SwiftUI.List")
+            return
+        }
         let list = UIScrollView(frame: rect)
         switch environment.listStyle.storage {
         case .grouped, .insetGrouped:
@@ -5146,6 +5320,269 @@ private enum _ViewRenderer {
             }
             y += layout.height
         }
+    }
+
+    // MARK: iOS inset-grouped lists (Form, `.listStyle(.insetGrouped)`)
+    //
+    // MEASURED stupid social's Settings, notification detail and Search
+    // screens, iPhone 16e @3x / iOS 27.0 simulator (390 pt wide, large-title
+    // bar bottom at 153; stupidsim ui-tree frames and pixels):
+    //   - cards 16 pt from both edges, radius 26, secondarySystemGrouped-
+    //     Background on systemGroupedBackground;
+    //   - rows at least 52 pt (one 17 pt line: Add Account, Network), content
+    //     16 pt from the card's sides and 15 pt from a row's top (the Post
+    //     row's avatar at card + 21 inside the app's own 6 pt padding);
+    //   - a 1 pt separator from the row's text column to 16 pt before the
+    //     card's trailing edge, over the bottom of the row above (no
+    //     separator after a section's last row);
+    //   - a titled header is a 40.33 pt block (Heading frame [16, y, 358,
+    //     40.33]) whose 17 pt semibold secondary label ends 8.67 pt above the
+    //     card (cap top 167.33 for a block at 153);
+    //   - the first section starts at the content top (an untitled one at
+    //     153, a titled one's header at 153); 17.5 pt (rounded to the pixel)
+    //     separates a card from the next section's header (245.33 -> 263,
+    //     257 -> 274.67, 407.33 -> 424.67);
+    //   - a header-only section (no rows) has no card.
+    // Not measured: an untitled later section (taken as 17.5 + 17.5, UIKit's
+    // measured iOS 26.1 inset-grouped gap) and section footers (UIKit's
+    // 7.67 + text + 6.67).
+    static let iOSInsetGroupedCardInset: CGFloat = 16
+    static let iOSInsetGroupedCornerRadius: CGFloat = 26
+    static let iOSInsetGroupedMinRowHeight: CGFloat = 52
+    static let iOSInsetGroupedRowInsets = UIEdgeInsets(top: 15, left: 16, bottom: 15, right: 16)
+    static let iOSInsetGroupedHeaderHeight: CGFloat = 40 + 1.0 / 3.0
+    static let iOSInsetGroupedHeaderBottomPadding: CGFloat = 8 + 2.0 / 3.0
+    static let iOSInsetGroupedSectionGap: CGFloat = 17.5
+
+    private static func _iOSPixelRound(_ value: CGFloat) -> CGFloat {
+        let scale = max(1, UIScreen.main.scale)
+        return (value * scale).rounded() / scale
+    }
+
+    /// The outermost content of `node` under modifiers.
+    private static func _peeledListRowContent(_ node: _OpenViewNode) -> _OpenViewNode {
+        if case .modified(let content, let modification) = node.kind {
+            if case .accessibilityElement = modification { return node }
+            return _peeledListRowContent(content)
+        }
+        return node
+    }
+
+    /// iOS makes a list row that is a control (Button, NavigationLink, Link)
+    /// one element spanning the row, and so is a row whose content combines
+    /// its children (LabeledContent).
+    private static func _listRowAccessibility(_ node: _OpenViewNode) -> _UIAutomationAccessibility? {
+        let root = _peeledListRowContent(node)
+        switch root.kind {
+        case .button, .navigationLink, .link:
+            return _UIAutomationAccessibility(addedTraits: .button, children: .combine)
+        case .modified(_, .accessibilityElement(let children)) where children == .combine:
+            return _UIAutomationAccessibility(children: .combine)
+        default:
+            return nil
+        }
+    }
+
+    /// SwiftUI drops rows that render nothing (an untaken `if`, an empty
+    /// ForEach) and expands groups (ForEach) into their rows.
+    private static func _listRows(_ nodes: [_OpenViewNode]) -> [_OpenViewNode] {
+        var out: [_OpenViewNode] = []
+        for node in nodes {
+            switch node.kind {
+            case .empty:
+                continue
+            case .group(let children):
+                out += _listRows(children)
+            default:
+                if !_isEmptyListContent(node) { out.append(node) }
+            }
+        }
+        return out
+    }
+
+    private static func _isEmptyListContent(_ node: _OpenViewNode) -> Bool {
+        switch node.kind {
+        case .empty: return true
+        case .group(let children): return children.allSatisfy(_isEmptyListContent)
+        case .modified(let content, _): return _isEmptyListContent(content)
+        default: return false
+        }
+    }
+
+    /// A default-styled Button row draws its label in the tint (a styled
+    /// button carries a pressed label from its style).
+    private static func _isDefaultStyledButtonRow(_ node: _OpenViewNode) -> Bool {
+        if case .button(_, let pressed, _, _) = _peeledListRowContent(node).kind {
+            return pressed == nil
+        }
+        return false
+    }
+
+    private static func _listRowBackground(_ node: _OpenViewNode) -> _OpenViewNode? {
+        guard case .modified(let content, let modification) = node.kind else { return nil }
+        if case .listRowBackground(let background) = modification { return background }
+        return _listRowBackground(content)
+    }
+
+    private static func placeIOSInsetGroupedList(
+        _ rows: [_OpenViewNode],
+        in rect: CGRect,
+        on surface: UIView,
+        environment: _RenderEnvironment,
+        identifier: String
+    ) {
+        let list = UIScrollView(frame: rect)
+        list.backgroundColor = environment.scrollContentBackground == .hidden
+            ? .clear : .systemGroupedBackground
+        list.clipsToBounds = true
+        list.accessibilityIdentifier = identifier
+        list.accessibilityValue = "style=insetGrouped"
+        surface.addSubview(list)
+        // Content starts under the navigation bar (or the top safe area),
+        // as placeList's measured plain lists.
+        var top = surface.safeAreaInsets.top
+        if top == 0, let controller = _enclosingViewController(for: surface) {
+            let nav = (controller as? UINavigationController) ?? controller.navigationController
+            if let bar = nav?.navigationBar, !bar.isHidden {
+                top = bar.convert(CGPoint(x: 0, y: bar.bounds.maxY), to: list).y
+            }
+        }
+        if top > 0, list.contentOffset.y == 0 {
+            list.contentOffset = CGPoint(x: 0, y: -top)
+        }
+
+        // Rows outside a Section form untitled sections of their own.
+        var sections: [(header: _OpenViewNode?, footer: _OpenViewNode?, rows: [_OpenViewNode])] = []
+        var loose: [_OpenViewNode] = []
+        for row in _listRows(rows) {
+            if case .section(let header, let footer, let sectionRows) = row.kind {
+                if !loose.isEmpty { sections.append((nil, nil, loose)); loose = [] }
+                let kept = _listRows(sectionRows)
+                // A section with no rows and no header or footer is not drawn.
+                if kept.isEmpty, header == nil, footer == nil { continue }
+                sections.append((header, footer, kept))
+            } else {
+                loose.append(row)
+            }
+        }
+        if !loose.isEmpty { sections.append((nil, nil, loose)) }
+
+        var rowEnvironment = environment
+        rowEnvironment.listRowBackgroundDrawnByList = true
+        // Rows take their ideal height: spacers in a row do not stretch it
+        // to the unbounded proposal (a ContentUnavailableView row).
+        var measureEnvironment = rowEnvironment
+        measureEnvironment.measuresUnboundedVerticalScroll = true
+        let cardInset = iOSInsetGroupedCardInset
+        let cardWidth = max(0, list.bounds.width - cardInset * 2)
+        var y: CGFloat = 0
+        for (sectionIndex, section) in sections.enumerated() {
+            if sectionIndex > 0 {
+                y += _iOSPixelRound(iOSInsetGroupedSectionGap)
+            }
+            if let header = section.header {
+                var headerEnvironment = environment
+                headerEnvironment.font = .headline
+                headerEnvironment.foregroundColor = .init(uiColor: .secondaryLabel)
+                let labelWidth = max(0, cardWidth - 32)
+                let labelSize = measure(header, proposed: CGSize(width: labelWidth, height: 10_000),
+                                        environment: headerEnvironment)
+                let blockHeight = max(iOSInsetGroupedHeaderHeight,
+                                      labelSize.height + iOSInsetGroupedHeaderHeight - 22)
+                let block = _SwiftUIPassthroughView(
+                    frame: CGRect(x: cardInset, y: y, width: cardWidth, height: blockHeight))
+                block.backgroundColor = .clear
+                block.accessibilityIdentifier = "\(identifier).header.\(sectionIndex)"
+                // A header is a heading; a control in the header stays a button.
+                let headerIsControl = _listRowAccessibility(header)?.addedTraits.contains(.button) == true
+                block._automationAccessibility = _UIAutomationAccessibility(
+                    addedTraits: headerIsControl ? .button : .header, children: .combine)
+                list.addSubview(block)
+                place(header, in: CGRect(
+                        x: 16,
+                        y: blockHeight - iOSInsetGroupedHeaderBottomPadding - labelSize.height,
+                        width: labelWidth,
+                        height: labelSize.height),
+                      on: block, environment: headerEnvironment)
+                y += blockHeight
+            } else if sectionIndex > 0 {
+                // Untitled later section (not measured on iOS 27; UIKit's
+                // iOS 26.1 inset-grouped tables put 35 pt between untitled
+                // sections).
+                y += _iOSPixelRound(iOSInsetGroupedSectionGap)
+            }
+
+            if !section.rows.isEmpty {
+                var rowFrames: [CGFloat] = []
+                for row in section.rows {
+                    let insets = _hasListRowInsets(row) ? UIEdgeInsets.zero : iOSInsetGroupedRowInsets
+                    let measured = measure(row, proposed: CGSize(
+                        width: max(0, cardWidth - insets.left - insets.right),
+                        height: selfSizingRowProposalHeight), environment: measureEnvironment)
+                    rowFrames.append(max(iOSInsetGroupedMinRowHeight,
+                                         _iOSPixelRound(measured.height + insets.top + insets.bottom)))
+                }
+                let cardHeight = rowFrames.reduce(0, +)
+                let card = UIView(frame: CGRect(x: cardInset, y: y, width: cardWidth, height: cardHeight))
+                card.backgroundColor = .clear
+                card.layer.cornerRadius = iOSInsetGroupedCornerRadius
+                card.clipsToBounds = true
+                card.accessibilityIdentifier = "\(identifier).card.\(sectionIndex)"
+                list.addSubview(card)
+                var rowY: CGFloat = 0
+                for (index, row) in section.rows.enumerated() {
+                    let height = rowFrames[index]
+                    let rowView = UIView(frame: CGRect(x: 0, y: rowY, width: cardWidth, height: height))
+                    rowView.accessibilityIdentifier = "\(identifier).row.\(sectionIndex).\(index)"
+                    if let background = _listRowBackground(row) {
+                        rowView.backgroundColor = .clear
+                        place(background, in: rowView.bounds, on: rowView, environment: environment)
+                    } else {
+                        rowView.backgroundColor = .secondarySystemGroupedBackground
+                    }
+                    if let note = _listRowAccessibility(row) {
+                        rowView._automationAccessibility = note
+                    }
+                    card.addSubview(rowView)
+                    let insets = _hasListRowInsets(row) ? UIEdgeInsets.zero : iOSInsetGroupedRowInsets
+                    var placeEnvironment = rowEnvironment
+                    if _isDefaultStyledButtonRow(row) {
+                        placeEnvironment.foregroundColor = environment.tintColor
+                            ?? .init(uiColor: .systemBlue)
+                    }
+                    place(row, in: rowView.bounds.inset(by: insets), on: rowView,
+                          environment: placeEnvironment)
+                    if index + 1 < section.rows.count,
+                       _listRowSeparatorVisibility(in: row, edge: .bottom) != .hidden,
+                       _listRowSeparatorVisibility(in: section.rows[index + 1], edge: .top) != .hidden {
+                        let leading = _rowTextLeading(in: rowView) ?? insets.left
+                        let separator = UIView(frame: CGRect(
+                            x: leading, y: height - 1,
+                            width: max(0, cardWidth - leading - 16), height: 1))
+                        separator.backgroundColor = .separator
+                        separator.isUserInteractionEnabled = false
+                        separator.accessibilityIdentifier = "\(identifier).separator"
+                        rowView.addSubview(separator)
+                    }
+                    rowY += height
+                }
+                y += cardHeight
+            }
+
+            if let footer = section.footer {
+                var footerEnvironment = environment
+                footerEnvironment.font = .footnote
+                footerEnvironment.foregroundColor = .init(uiColor: .secondaryLabel)
+                let width = max(0, cardWidth - 32)
+                let size = measure(footer, proposed: CGSize(width: width, height: 10_000),
+                                   environment: footerEnvironment)
+                y += 7 + 2.0 / 3.0
+                place(footer, in: CGRect(x: cardInset + 16, y: y, width: width, height: size.height),
+                      on: list, environment: footerEnvironment)
+                y += size.height + 6 + 2.0 / 3.0
+            }
+        }
+        list.contentSize = CGSize(width: list.bounds.width, height: max(list.bounds.height, y))
     }
 
     /// SwiftUI's default `listRowSeparatorLeading` guide: the leading edge
@@ -5542,6 +5979,21 @@ private enum _ViewRenderer {
                        .resolve(weight: environment.weight).pointSize
                ) {
                 natural = layout.size
+            } else if OpenUIKitRuntime.systemFontCut == .iOS, _SystemSymbolView.isHandDrawn(name),
+                      let font = environment.font {
+                // Hand-drawn symbols are 18 pt at the body size; like SF
+                // Symbols they scale with the font (stupid social's Settings
+                // "Advanced" chevron is caption2: ~12 pt, not 18).
+                let pointSize = font.resolve(weight: environment.weight).pointSize
+                if name == "chevron.right" {
+                    // SF's chevron is narrow: MEASURED the Settings
+                    // "Advanced" chevron (caption2 bold, 11 pt), iPhone 16e
+                    // @3x / iOS 27.0: ink 6.5 x 10.
+                    natural = CGSize(width: pointSize * 6.5 / 11, height: pointSize * 10 / 11)
+                } else {
+                    let side = 18 * pointSize / 17
+                    natural = CGSize(width: side, height: side)
+                }
             } else {
                 natural = CGSize(width: 18, height: 18)
             }
@@ -5948,6 +6400,13 @@ private enum _ViewRenderer {
             min(max(0, measured), min(max(0, maximum), max(0, proposed)))
         )
     }
+}
+
+/// Whether the renderer draws `name` by hand (it then ignores the font's
+/// point size; see measureImage).
+@MainActor
+func _openSymbolIsHandDrawn(_ name: String) -> Bool {
+    _SystemSymbolView.isHandDrawn(name)
 }
 
 @MainActor

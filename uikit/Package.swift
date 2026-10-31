@@ -699,6 +699,10 @@ let conformanceTargets: [Target] = [
     // Native gate for SwiftUI text metrics on the iOS cut
     // (docs/SWIFTUI_TEXT_METRICS.md).
     .executableTarget(name: "swiftuitextmetricsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    // Native gate for screens beyond a root (docs/SWIFTUI_PUSHED_SCREENS.md):
+    // value NavigationLinks, stable toolbar items, inset-grouped Form/List,
+    // the iOS 27 back control and the bottom-docked search field.
+    .executableTarget(name: "swiftuiscreensprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for the root-screen residuals pass (docs/ROOT_SCREEN_RESIDUALS.md).
     .executableTarget(name: "rootresidualsprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     .executableTarget(name: "objcparity",

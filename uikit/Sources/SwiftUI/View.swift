@@ -161,7 +161,7 @@ indirect enum _OpenViewNodeKind {
     )
     case navigationLink(
         label: _OpenViewNode,
-        makeDestinationController: @MainActor () -> UIViewController
+        target: _OpenNavigationLinkTarget
     )
     case link(label: _OpenViewNode, destination: URL)
     case navigation(content: _OpenViewNode, configuration: _OpenNavigationConfiguration)
@@ -264,6 +264,17 @@ struct _OpenNavigationResolvedDestination {
     let value: AnyHashable
     let node: _OpenViewNode
     let configuration: _OpenNavigationConfiguration
+}
+
+/// What following a NavigationLink does: push a destination view built for
+/// the link (`NavigationLink(destination:)`), or append a value to the
+/// enclosing NavigationStack's path, whose `navigationDestination(for:)`
+/// registration builds the destination (`NavigationLink(value:)`).
+enum _OpenNavigationLinkTarget {
+    case destination(@MainActor () -> UIViewController)
+    case value(AnyHashable)
+    /// `NavigationLink(value: nil)`: rendered, does nothing.
+    case inert
 }
 
 @MainActor

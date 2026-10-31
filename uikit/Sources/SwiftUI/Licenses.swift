@@ -63,7 +63,12 @@ public struct _OpenList<Content: _OpenView>: _OpenView {
 
 public struct _OpenNavigationLink<Destination: _OpenView, Label: _OpenView>: _OpenView {
     public typealias Body = Never
-    public let destination: Destination
+    /// Nil for a value link (`Destination == Never`).
+    let destination: Destination?
+    /// `NavigationLink(value:)`: appended to the enclosing NavigationStack's
+    /// path when the link is followed.
+    let value: AnyHashable?
+    let isValueLink: Bool
     public let label: Label
 
     public init(
@@ -72,6 +77,8 @@ public struct _OpenNavigationLink<Destination: _OpenView, Label: _OpenView>: _Op
     ) {
         self.destination = destination()
         self.label = label()
+        value = nil
+        isValueLink = false
     }
 
     public init(
@@ -80,20 +87,50 @@ public struct _OpenNavigationLink<Destination: _OpenView, Label: _OpenView>: _Op
     ) {
         self.destination = destination
         self.label = label()
+        value = nil
+        isValueLink = false
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
         let labelNode = _OpenGraphContext.withStructuralScope(.navigationLinkLabel) {
             label._makeOpenUIKitNode()
         }
+        if isValueLink {
+            // A nil value makes an inert link, as in SwiftUI (the label
+            // still renders as a link row).
+            return _OpenViewNode(
+                .navigationLink(label: labelNode, target: value.map { .value($0) } ?? .inert)
+            )
+        }
+        guard let destination else {
+            preconditionFailure("SwiftUI.NavigationLink has neither a destination nor a value")
+        }
         return _OpenViewNode(
             .navigationLink(
                 label: labelNode,
-                makeDestinationController: {
+                target: .destination {
                     _OpenUIHostingController(rootView: destination)
                 }
             )
         )
+    }
+}
+
+/// `NavigationLink(value:)`: following the link appends the value to the
+/// enclosing NavigationStack's path; the stack's `navigationDestination(for:)`
+/// registration for the value's type builds the destination.
+public extension _OpenNavigationLink where Destination == Never {
+    init<P: Hashable>(value: P?, @_OpenViewBuilder label: () -> Label) {
+        destination = nil
+        self.value = value.map(AnyHashable.init)
+        isValueLink = true
+        self.label = label()
+    }
+}
+
+public extension _OpenNavigationLink where Destination == Never, Label == _OpenText {
+    init<P: Hashable>(_ titleKey: String, value: P?) {
+        self.init(value: value) { _OpenText(titleKey) }
     }
 }
 

@@ -67,9 +67,36 @@ final class _UINavigationBarBackButton: UIControl {
     static let gap: CGFloat = 6
     static let trailing: CGFloat = 12
 
+    /// iOS 27 back control: a 44 pt glass circle holding only a chevron (the
+    /// previous title is the control's accessibility label, not drawn).
+    /// MEASURED stupid social's pushed screens, iPhone 16e @3x / iOS 27.0:
+    /// circle [16, 47, 44, 44] (bar-local x 16, top-aligned like the item
+    /// platters), chevron ink [31, 59.67, 11 x 19], label colour, about a
+    /// 2.33 pt round-capped stroke. Host-requested with
+    /// `OpenUIKitRuntime.chromeRelease = .iOS27` on the iOS cut; iOS 26.1's
+    /// back control was not re-measured, so `.iOS26` keeps chevron + title.
+    static var usesGlassPlatter: Bool {
+        OpenUIKitRuntime.systemFontCut == .iOS && OpenUIKitRuntime.chromeRelease == .iOS27
+    }
+    let isGlass: Bool
+    private var glassPlatter: _UIBarSharedPlatterView?
+    private var glassChevron: _UINavigationBarBackChevronView?
+
     init(title: String, tintColor: UIColor) {
+        isGlass = Self.usesGlassPlatter
         super.init(frame: .zero)
         isOpaque = false
+        if isGlass {
+            let platter = _UIBarSharedPlatterView(frame: .zero)
+            platter.accessibilityIdentifier = "UIKit.BackButtonPlatter"
+            addSubview(platter)
+            glassPlatter = platter
+            let chevronView = _UINavigationBarBackChevronView(frame: .zero)
+            platter.addSubview(chevronView)
+            glassChevron = chevronView
+            chevron.isHidden = true
+            backLabel.isHidden = true
+        }
         // Chevron: the harvested "‹" glyph path (UILabel falls back to the
         // stb_truetype rasterizer for sizes without an ink-table entry).
         chevron.text = "\u{2039}" // ‹
@@ -88,6 +115,9 @@ final class _UINavigationBarBackButton: UIControl {
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
+        if isGlass {
+            return CGSize(width: _UIBarMetrics.platterHeight, height: _UIBarMetrics.platterHeight)
+        }
         let c = chevron.intrinsicContentSize
         let t = backLabel.intrinsicContentSize
         return CGSize(width: Self.leading + c.width + Self.gap + t.width
@@ -97,6 +127,14 @@ final class _UINavigationBarBackButton: UIControl {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if isGlass {
+            glassPlatter?.frame = bounds
+            glassPlatter?.layer.cornerRadius = bounds.height / 2
+            glassChevron?.frame = bounds
+            // Bar items draw in `label` (UIBarButtonItemView.contentColor).
+            glassChevron?.color = .label
+            return
+        }
         let c = chevron.intrinsicContentSize
         let t = backLabel.intrinsicContentSize
         let midY = bounds.height / 2
@@ -116,6 +154,7 @@ final class _UINavigationBarBackButton: UIControl {
         let a: CGFloat = isHighlighted ? UIButton.systemHighlightedTitleAlpha : 1
         chevron.alpha = a
         backLabel.alpha = a
+        glassChevron?.alpha = a
     }
 
     /// Center x of the back TITLE label, in the bar's coordinates, for the
@@ -125,6 +164,55 @@ final class _UINavigationBarBackButton: UIControl {
         let c = chevron.intrinsicContentSize
         let t = backLabel.intrinsicContentSize
         return Self.leading + c.width + Self.gap + t.width / 2
+    }
+}
+
+/// The iOS 27 back chevron (see `_UINavigationBarBackButton.usesGlassPlatter`),
+/// stroked in a 44 pt platter: apex at (16.17, 22.17), arms to x 24.83 at
+/// y 13.83 / 30.5, 2.33 pt wide with round caps (ink [15, 12.67, 11 x 19]).
+@preconcurrency @MainActor
+final class _UINavigationBarBackChevronView: UIView {
+    var color: UIColor = .label { didSet { setNeedsDisplay() } }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not decodable") }
+
+    override func drawContent(in canvas: Canvas, bounds: CGRect) {
+        let sx = bounds.width / 44, sy = bounds.height / 44
+        let points = [CGPoint(x: 24.83 * sx, y: 13.83 * sy),
+                      CGPoint(x: 16.17 * sx, y: 22.17 * sy),
+                      CGPoint(x: 24.83 * sx, y: 30.5 * sy)]
+        let width: CGFloat = 2 + 1.0 / 3.0
+        let c = color.resolvedCGColor(with: traitCollection)
+        var path = Path()
+        path.move(to: points[0])
+        for p in points.dropFirst() { path.addLine(to: p) }
+        canvas.stroke(path, color: c, lineWidth: width)
+        for p in [points[0], points[2]] { Self.dot(at: p, radius: width / 2, in: canvas, color: c) }
+    }
+
+    /// A filled circle: the round cap the butt-capped backend stroke lacks.
+    private static func dot(at p: CGPoint, radius r: CGFloat, in canvas: Canvas, color: CanvasColor) {
+        let k: CGFloat = 0.5522847498307936 * r
+        var path = Path()
+        path.move(to: CGPoint(x: p.x + r, y: p.y))
+        path.addCurve(to: CGPoint(x: p.x, y: p.y + r),
+                      control1: CGPoint(x: p.x + r, y: p.y + k), control2: CGPoint(x: p.x + k, y: p.y + r))
+        path.addCurve(to: CGPoint(x: p.x - r, y: p.y),
+                      control1: CGPoint(x: p.x - k, y: p.y + r), control2: CGPoint(x: p.x - r, y: p.y + k))
+        path.addCurve(to: CGPoint(x: p.x, y: p.y - r),
+                      control1: CGPoint(x: p.x - r, y: p.y - k), control2: CGPoint(x: p.x - k, y: p.y - r))
+        path.addCurve(to: CGPoint(x: p.x + r, y: p.y),
+                      control1: CGPoint(x: p.x + k, y: p.y - r), control2: CGPoint(x: p.x + r, y: p.y - k))
+        path.close()
+        canvas.fill(path, color: color)
     }
 }
 
@@ -1183,7 +1271,9 @@ public final class UINavigationBar: UIView, _UIBarItemContainer, UIBarPositionin
         }
         if usesBottomSearch {
             titleLabel.isHidden = false
-            titleLabel.alpha = 1
+            // A large-title bar's inline title follows the scroll position
+            // (updateFromScroll): hidden while the large title shows.
+            if !displaysLargeTitles { titleLabel.alpha = 1 }
             return
         }
         let active = topItem?.searchController?.isActive == true
@@ -1322,6 +1412,9 @@ public final class UINavigationBar: UIView, _UIBarItemContainer, UIBarPositionin
     /// Width the back button reserves at the leading edge.
     var backButtonWidth: CGFloat {
         guard let b = backButton, !b.isHidden else { return 0 }
+        // The glass back circle is a leading platter: the next leading
+        // item follows it after the platter gap (not measured).
+        if b.isGlass { return b.sizeThatFits(bounds.size).width + _UIBarMetrics.gap }
         return b.sizeThatFits(bounds.size).width
     }
 
@@ -1410,6 +1503,15 @@ public final class UINavigationBar: UIView, _UIBarItemContainer, UIBarPositionin
                        dx: CGFloat = 0) {
         let s = b.sizeThatFits(bounds.size)
         b.bounds = CGRect(x: 0, y: 0, width: s.width, height: s.height)
+        if b.isGlass {
+            // A leading item platter: side margin, top-aligned with the
+            // item platters (`_UINavigationBarBackButton.usesGlassPlatter`).
+            let m = _UIBarMetrics.itemSideMargin
+            let cx = _layoutIsRTL ? bounds.width - m - s.width / 2 + dx : m + s.width / 2 + dx
+            b.center = CGPoint(x: cx, y: itemPlatterY + promptOffset + s.height / 2)
+            b.alpha = alpha
+            return
+        }
         // MEASURED NavFlow t3000.rtl, iPhone SE 2x / iOS 26.1: the back
         // control sits on the leading (right) edge. `dx` is the LTR
         // transition slide and is left unflipped (unmeasured in RTL).
