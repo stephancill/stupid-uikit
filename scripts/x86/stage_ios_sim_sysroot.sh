@@ -58,6 +58,11 @@ while IFS= read -r -d '' tbd; do
     rel=${tbd#"$work/out/sdk/"}
     [ -f "$MAC_SYS/$rel" ] || apple_only+=("$rel")
 done < <(find "$work/out/sdk/usr/lib" -name '*.tbd' -type f -print0)
+# Swift itself compiles against Apple's iOS-simulator interface, as on arm64.
+# The guest's source-built macOS interface cannot stand in: it was emitted for
+# macOS x86_64, which has no Float16, and Apple's Synchronization interface
+# needs Float16 on the iOS simulator (MEASURED: "value of type 'Float16' has no
+# member 'bitPattern'" building Synchronization for FoundationEssentials).
 leftover=$(grep -l 'x86_64-macos' -r "$work/out/sdk/usr/lib" --include='*.tbd' || true)
 [ -z "$leftover" ] || die "macOS .tbd left in the iOS sysroot: $leftover"
 
