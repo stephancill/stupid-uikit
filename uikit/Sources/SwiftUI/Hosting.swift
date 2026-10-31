@@ -164,6 +164,29 @@ private final class _SwiftUIMenuControl: UIButton {
 @MainActor
 private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
     var setText: (@MainActor (String) -> Void)?
+    var getPresented: (@MainActor () -> Bool)?
+    var setPresented: (@MainActor (Bool) -> Void)?
+    var submit: (@MainActor () -> Void)?
+
+    /// `isPresented == true` presents the search: the field takes focus
+    /// with its cancel button showing.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, getPresented?() == true {
+            setShowsCancelButton(true, animated: false)
+            _ = becomeFirstResponder()
+        }
+    }
+
+    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        _ = searchBar
+        if getPresented?() == false { setPresented?(true) }
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        _ = searchBar
+        submit?()
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -183,6 +206,7 @@ private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
         setText?("")
         _ = searchBar.resignFirstResponder()
+        setPresented?(false)
     }
 }
 
@@ -2067,6 +2091,9 @@ private struct _RenderEnvironment {
     var autocapitalizationType: UITextAutocapitalizationType = .sentences
     var autocorrectionDisabled = false
     var submitAction: (@MainActor () -> Void)?
+    /// `onSubmit(of: .search)`'s action, which a `searchable` field inside
+    /// it runs when the user submits a search.
+    var searchSubmitAction: (@MainActor () -> Void)?
     var submitLabel: SubmitLabel = .return
     var keyboardDismissMode: ScrollDismissesKeyboardMode = .automatic
     var controlSize: ControlSize = .regular
@@ -2589,9 +2616,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.autocorrectionDisabled = disabled
                 return measure(content, proposed: proposed, environment: next)
-            case .submit(let action):
+            case .submit(let triggers, let action):
                 var next = environment
-                next.submitAction = action
+                if triggers.contains(.text) { next.submitAction = action }
+                if triggers.contains(.search) { next.searchSubmitAction = action }
                 return measure(content, proposed: proposed, environment: next)
             case .scrollDismissesKeyboard(let mode):
                 var next = environment
@@ -3668,9 +3696,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.autocorrectionDisabled = disabled
                 place(content, in: rect, on: surface, environment: next)
-            case .submit(let action):
+            case .submit(let triggers, let action):
                 var next = environment
-                next.submitAction = action
+                if triggers.contains(.text) { next.submitAction = action }
+                if triggers.contains(.search) { next.searchSubmitAction = action }
                 place(content, in: rect, on: surface, environment: next)
             case .submitLabel(let label):
                 var next = environment
@@ -4367,6 +4396,9 @@ private enum _ViewRenderer {
                 search.text = configuration.getText()
                 search.placeholder = configuration.prompt
                 search.setText = configuration.setText
+                search.getPresented = configuration.getPresented
+                search.setPresented = configuration.setPresented
+                search.submit = environment.searchSubmitAction
                 search.accessibilityIdentifier = "SwiftUI.Searchable"
                 search.searchBarStyle = isToolbar
                     ? .minimal : .default

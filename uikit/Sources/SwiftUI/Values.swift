@@ -836,6 +836,16 @@ public enum _OpenSubmitLabel: UInt8, Hashable, Sendable {
     case `continue`
 }
 
+/// Which submissions an `onSubmit(of:_:)` action handles: `.text` from a
+/// text field or editor, `.search` from a `searchable` field.
+public struct SubmitTriggers: OptionSet, Hashable, Sendable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+
+    public static let text = SubmitTriggers(rawValue: 1 << 0)
+    public static let search = SubmitTriggers(rawValue: 1 << 1)
+}
+
 /// Relative symbol/image sizing carried through the SwiftUI render
 /// environment. The scale applies to non-resizable images and SF Symbols;
 /// explicit frames and resizable content continue to own their dimensions.

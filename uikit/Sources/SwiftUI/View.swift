@@ -280,6 +280,11 @@ struct _OpenSearchConfiguration {
     let setText: @MainActor (String) -> Void
     let prompt: String
     let placement: SearchFieldPlacement
+    /// `searchable(text:isPresented:…)`'s binding: true focuses the field
+    /// and shows its cancel button; the user beginning or cancelling a
+    /// search writes it back.
+    var getPresented: (@MainActor () -> Bool)? = nil
+    var setPresented: (@MainActor (Bool) -> Void)? = nil
 }
 
 struct _OpenPreferenceRecord {
@@ -397,7 +402,7 @@ enum _OpenViewModification {
     case textContentType(UITextContentType?)
     case autocapitalization(UITextAutocapitalizationType)
     case autocorrectionDisabled(Bool)
-    case submit(@MainActor () -> Void)
+    case submit(SubmitTriggers, @MainActor () -> Void)
     case submitLabel(SubmitLabel)
     case scrollDismissesKeyboard(ScrollDismissesKeyboardMode)
     case scrollDisabled(Bool)
@@ -528,7 +533,7 @@ fileprivate enum _OpenViewModifier {
     case textContentType(UITextContentType?)
     case autocapitalization(UITextAutocapitalizationType)
     case autocorrectionDisabled(Bool)
-    case submit(@MainActor () -> Void)
+    case submit(SubmitTriggers, @MainActor () -> Void)
     case submitLabel(SubmitLabel)
     case scrollDismissesKeyboard(ScrollDismissesKeyboardMode)
     case scrollDisabled(Bool)
@@ -699,7 +704,7 @@ fileprivate enum _OpenViewModifier {
         case .textContentType(let value): return .textContentType(value)
         case .autocapitalization(let value): return .autocapitalization(value)
         case .autocorrectionDisabled(let value): return .autocorrectionDisabled(value)
-        case .submit(let action): return .submit(action)
+        case .submit(let triggers, let action): return .submit(triggers, action)
         case .submitLabel(let label): return .submitLabel(label)
         case .scrollDismissesKeyboard(let mode): return .scrollDismissesKeyboard(mode)
         case .scrollDisabled(let disabled): return .scrollDisabled(disabled)
@@ -3679,6 +3684,21 @@ public extension _OpenView {
         )
     }
 
+    func accessibilityAction(
+        named nameKey: LocalizedStringKey,
+        _ handler: @escaping @MainActor () -> Void
+    ) -> some _OpenView {
+        accessibilityAction(named: Text(nameKey), handler)
+    }
+
+    @_disfavoredOverload
+    func accessibilityAction<S: StringProtocol>(
+        named name: S,
+        _ handler: @escaping @MainActor () -> Void
+    ) -> some _OpenView {
+        accessibilityAction(named: Text(verbatim: String(name)), handler)
+    }
+
     func allowsHitTesting(_ enabled: Bool) -> some _OpenView {
         _OpenModifiedContent(content: self, modification: .allowsHitTesting(enabled))
     }
@@ -3740,8 +3760,11 @@ public extension _OpenView {
         )
     }
 
-    func onSubmit(_ action: @escaping @MainActor () -> Void) -> some _OpenView {
-        _OpenModifiedContent(content: self, modification: .submit(action))
+    func onSubmit(
+        of triggers: SubmitTriggers = .text,
+        _ action: @escaping @MainActor () -> Void
+    ) -> some _OpenView {
+        _OpenModifiedContent(content: self, modification: .submit(triggers, action))
     }
 
     func submitLabel(_ label: SubmitLabel) -> some _OpenView {
@@ -4279,6 +4302,27 @@ public extension _OpenView {
                     setText: { text.wrappedValue = $0 },
                     prompt: prompt,
                     placement: placement
+                )
+            )
+        )
+    }
+
+    func searchable(
+        text: Binding<String>,
+        isPresented: Binding<Bool>,
+        placement: SearchFieldPlacement = .automatic,
+        prompt: String = "Search"
+    ) -> some _OpenView {
+        _OpenModifiedContent(
+            content: self,
+            modification: .searchable(
+                _OpenSearchConfiguration(
+                    getText: { text.wrappedValue },
+                    setText: { text.wrappedValue = $0 },
+                    prompt: prompt,
+                    placement: placement,
+                    getPresented: { isPresented.wrappedValue },
+                    setPresented: { isPresented.wrappedValue = $0 }
                 )
             )
         )
