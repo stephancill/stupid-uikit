@@ -308,7 +308,45 @@ struct PresentedSearch: View {
     }
 }
 
-// MARK: 5. Keyboard modes
+// MARK: 5. A principal title view keeps its place when the screen re-evaluates
+
+struct TitledComposer: View {
+    @State var draft = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack {
+                Spacer()
+                TextField("Message", text: $draft)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) { Text("Maya Chen") }
+            }
+        }
+    }
+}
+
+@MainActor func titleView() {
+    let (window, host) = mount(TitledComposer())
+    func titleFrame() -> CGRect? {
+        descendants(of: window).first { $0.accessibilityIdentifier == "SwiftUI.Navigation.titleView" }
+            .map { $0.convert($0.bounds, to: window) }
+    }
+    guard let before = titleFrame(),
+          let field = descendants(of: window).first(where: { $0 is UITextField }) else {
+        check(false, "title view and field mounted")
+        return
+    }
+    check(abs(before.midX - 195) < 1, "the principal title is centred: \(before)")
+    tap(window, field)
+    type(window, "see you")
+    let after = titleFrame()
+    check(after == before, "typing (re-evaluating the toolbar) keeps the title in place: \(before) -> \(String(describing: after))")
+    withExtendedLifetime((window, host)) {}
+}
+
+// MARK: 6. Keyboard modes
 
 @MainActor func keyboardModes() {
     func keyboardShowing() -> Bool {
@@ -348,6 +386,7 @@ let failures = MainActor.assumeIsolated { () -> Int in
     focusState()
     removal()
     search()
+    titleView()
     return Probe.failures
 }
 print(failures == 0 ? "TEXT_INPUT_PROBE=PASS" : "TEXT_INPUT_PROBE=FAIL (\(failures))")

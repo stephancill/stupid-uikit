@@ -1731,6 +1731,19 @@ private func _openApplyNavigationChrome(
             host.accessibilityIdentifier = "SwiftUI.Navigation.titleView"
             titleHost = host
         }
+        // A title view the bar already shows keeps the position the bar gave
+        // it: re-assigning the same view does not lay the bar out again, so
+        // resetting the origin left the title at the bar's leading edge
+        // after any re-evaluation (a typed character in a chat).
+        func sizeTitleHost(_ size: CGSize) {
+            if item.titleView === host {
+                guard host.frame.size != size else { return }
+                host.frame.size = size
+                host.superview?.setNeedsLayout()
+            } else {
+                host.frame = CGRect(origin: .zero, size: size)
+            }
+        }
         if OpenUIKitRuntime.systemFontCut == .iOS {
             host.collapsesToolbarVerticalPadding = true
             var environment = _RenderEnvironment.default
@@ -1740,21 +1753,11 @@ private func _openApplyNavigationChrome(
                 proposed: CGSize(width: 10_000, height: 10_000),
                 environment: environment
             )
-            host.frame = CGRect(
-                x: 0,
-                y: 0,
-                width: size.width,
-                height: _openIOSToolbarTitleViewHeight
-            )
+            sizeTitleHost(CGSize(width: size.width, height: _openIOSToolbarTitleViewHeight))
         } else {
             host.collapsesToolbarVerticalPadding = false
             let size = host.intrinsicContentSize
-            host.frame = CGRect(
-                x: 0,
-                y: 0,
-                width: max(44, size.width),
-                height: 44
-            )
+            sizeTitleHost(CGSize(width: max(44, size.width), height: 44))
         }
         host.layoutIfNeeded()
         item.titleView = host

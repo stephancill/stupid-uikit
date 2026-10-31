@@ -17,6 +17,7 @@ search field (`.searchable(placement: .navigationBarDrawer)`): only the first le
 | `searchable(isPresented:)` | The binding is applied on every placement of the drawer or inline bar (true focuses the field and shows Cancel, false ends the search); beginning a search and Cancel write it back as before. The drawer and inline bars now also run `onSubmit(of: .search)`. |
 | docked search | `.searchable` docked at the bottom (`.automatic` on a phone) already kept its `UISearchController` on the owning navigation item, so it kept focus before this change; unchanged. |
 | keyboard mode | `OpenUIKitRuntime.keyboard` (`.software` default, `.hardware`). `.hardware` models an iOS Simulator with a connected hardware keyboard, which is what `stupidsim type` drives: focus, caret and keys work, no software keyboard is drawn and no scroll view is inset for one. `.software` keeps the drawn keyboard every existing gate pins (measured on an iPhone SE / iOS 26.1). |
+| principal title view | Re-applying navigation chrome reset a reused principal title host's frame to (0, 0) while the item's `titleView` stayed the same object, so the bar never positioned it again: after any re-evaluation (a character typed into stupid social's chat composer) the chat's title pill sat at the bar's leading edge over the back button. A title view the bar already shows now keeps its origin and only takes a new size (with a bar layout when it changes). |
 | automation | `type` / `key` fail (exit 1) when keyboard focus goes away part-way ("keyboard focus was lost after N of M keys") instead of dropping the remaining keys; `--verify` passed before when only the first character landed. |
 
 `TextEditor` is not implemented in this SwiftUI layer (no app in the route uses it); a
@@ -40,6 +41,8 @@ not draw iOS's floating hardware-keyboard assistant bar (not measured).
   `@FocusState` true/false, moving `focused(equals:)` between fields with the binding kept; a
   focused field that leaves the tree resigns and leaves the window; drawer search filters a
   List while typing; docked search; `searchable(isPresented:)` true/false; software vs hardware
-  keyboard. It fails on the previous renderer (the first typed character drops focus).
+  keyboard; a principal title view staying in place while the screen re-evaluates. It fails on
+  the previous renderer (7 checks: the first typed character drops focus, focus bindings and
+  removal, the title view).
 - stupid social on the iOS triple (scripted and live), and phase 2 rung b on the macOS triple
   (default software keyboard; the Focus text-input gates are exact-match).
