@@ -1549,6 +1549,12 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
         host.didCompleteLayout = { [weak self] in
             self?.completeRepresentedControllerMounts()
         }
+        // UIHostingController's view is opaque .systemBackground on iOS (white in light mode), so
+        // an app's screen is never see-through. The macOS cut keeps the measured clear host.
+        if OpenUIKitRuntime.systemFontCut == .iOS {
+            host.backgroundColor = .systemBackground
+            host.isOpaque = true
+        }
         view = host
         install(node, animation: nil)
     }
