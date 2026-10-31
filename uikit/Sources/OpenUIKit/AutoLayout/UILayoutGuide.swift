@@ -376,8 +376,18 @@ extension UIView {
             changed = true
         }
         let b = bounds
+        // A scroll view that folds the safe area into its adjusted content
+        // inset has already moved its content clear of it: UIKit gives the
+        // content no safe area of its own. (MEASURED stupid social: a
+        // vertical ScrollView inside a List row scrolled under the bar took
+        // the bar's inset as its own adjusted inset, snapped to −145 and
+        // re-laid out every turn.)
+        var childInsets = mine
+        if let scrollView = self as? UIScrollView, scrollView.contentInsetAdjustmentBehavior != .never {
+            childInsets = .zero
+        }
         for sub in subviews {
-            let derived = UIView._derivedSafeArea(parentInsets: mine,
+            let derived = UIView._derivedSafeArea(parentInsets: childInsets,
                                                   parentBounds: b,
                                                   childFrame: sub.frame)
             if sub._propagateSafeArea(inherited: derived) { changed = true }

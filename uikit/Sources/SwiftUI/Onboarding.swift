@@ -791,6 +791,8 @@ final class _OpenLazyStackState {
     /// The enclosing scroll view's offset, restored when the host rebuilds
     /// the scroll view (every graph invalidation does).
     var contentOffset: CGPoint?
+    /// A List's scroll delegate recording `contentOffset` (Hosting.swift).
+    var listScrollTracker: AnyObject?
     /// Set by the first lazy layout. From then on the stack keeps producing
     /// the lazy node even when every element is built, so its viewport keeps
     /// being tracked and its scroll offset restored.

@@ -1296,8 +1296,10 @@ open class UIScrollView: UIView {
         if showsHorizontalScrollIndicator, canScrollX, horizontalIndicator == nil {
             horizontalIndicator = makeIndicator()
         }
-        for bar in [verticalIndicator, horizontalIndicator] {
-            guard let bar else { continue }
+        // compactMap, not `for bar in [optional, optional]` + `guard let`:
+        // see _UITransitionCoordinator.attach (the x86_64 iOS-simulator
+        // guest faulted iterating an array of optional class references).
+        for bar in [verticalIndicator, horizontalIndicator].compactMap({ $0 }) {
             bar.removeAllAnimations()
             bar.alpha = 1
         }
@@ -1307,8 +1309,8 @@ open class UIScrollView: UIView {
     final func fadeIndicators() {
         guard indicatorsVisible else { return }
         indicatorsVisible = false
-        for bar in [verticalIndicator, horizontalIndicator] {
-            guard let bar, bar.alpha > 0 else { continue }
+        for bar in [verticalIndicator, horizontalIndicator].compactMap({ $0 }) {
+            guard bar.alpha > 0 else { continue }
             UIView.animate(withDuration: UIScrollView.indicatorFadeDuration,
                            delay: 0, options: .curveLinear,
                            animations: { bar.alpha = 0 })

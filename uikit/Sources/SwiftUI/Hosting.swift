@@ -2099,6 +2099,37 @@ private struct _RenderEnvironment {
     static let `default` = _RenderEnvironment()
 }
 
+/// Records a List's scroll position in its retained graph state.
+@MainActor
+private final class _SwiftUIListScrollTracker: NSObject, UIScrollViewDelegate {
+    weak var state: _OpenLazyStackState?
+
+    init(state: _OpenLazyStackState) {
+        self.state = state
+        super.init()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        state?.contentOffset = scrollView.contentOffset
+    }
+}
+
+/// `.swipeActions(edge:)`: the row's pan begins only for a mostly
+/// horizontal drag toward the actions' edge.
+@MainActor
+private final class _SwiftUISwipeActionsPanGate: UIGestureRecognizerDelegate {
+    let edge: Edge
+
+    init(edge: Edge) { self.edge = edge }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let translation = pan.translation(in: pan.view)
+        guard translation.x.magnitude > translation.y.magnitude else { return false }
+        return edge == .leading ? translation.x > 0 : translation.x < 0
+    }
+}
+
 @MainActor
 private func _openInstallGesture(_ gesture: _OpenGestureNode, on host: UIView) {
     switch gesture.kind {
@@ -3357,7 +3388,8 @@ private enum _ViewRenderer {
         case .form(let rows):
             placeForm(rows, in: rect, on: surface, environment: environment)
         case .list(let rows):
-            placeList(rows, in: rect, on: surface, environment: environment)
+            placeList(rows, in: rect, on: surface, environment: environment,
+                      retainedState: node.retainedScrollState)
         case .section(let header, let footer, let rows):
             placeSection(
                 header: header,
@@ -4437,7 +4469,7 @@ private enum _ViewRenderer {
                           y: rect.minY, width: insetSize.width, height: rect.height),
                           on: surface, environment: environment)
                 }
-            case .swipeActions(_, _, let actions):
+            case .swipeActions(let edge, _, let actions):
                 let host = UIView(frame: rect)
                 host.clipsToBounds = true
                 host.accessibilityIdentifier = "SwiftUI.SwipeActions"
@@ -4463,7 +4495,13 @@ private enum _ViewRenderer {
                 actionHost.accessibilityIdentifier = "SwiftUI.SwipeActions.actions"
                 host.insertSubview(actionHost, belowSubview: contentHost)
                 place(actions, in: actionHost.bounds, on: actionHost, environment: environment)
+                // iOS reveals swipe actions only for a horizontal drag toward
+                // their edge; any other drag (a pager swipe, a scroll) is
+                // left to the recognizers behind the row. The recognizer's
+                // delegate is weak; its action keeps the gate alive.
+                let gate = _SwiftUISwipeActionsPanGate(edge: edge)
                 let pan = UIPanGestureRecognizer { recognizer in
+                    withExtendedLifetime(gate) {}
                     guard let pan = recognizer as? UIPanGestureRecognizer else { return }
                     let translation = pan.translation(in: host)
                     let x = min(0, max(-actionWidth, translation.x))
@@ -4480,6 +4518,7 @@ private enum _ViewRenderer {
                         }
                     }
                 }
+                pan.delegate = gate
                 host.addGestureRecognizer(pan)
             case .effect, .toolbarVisibility, .toolbarBackgroundVisibility,
                  .navigationTitle, .navigationSubtitle, .navigationBarHidden,
@@ -4868,7 +4907,8 @@ private enum _ViewRenderer {
         _ rows: [_OpenViewNode],
         in rect: CGRect,
         on surface: UIView,
-        environment: _RenderEnvironment
+        environment: _RenderEnvironment,
+        retainedState: _OpenLazyStackState? = nil
     ) {
         let list = UIScrollView(frame: rect)
         switch environment.listStyle.storage {
@@ -4977,6 +5017,20 @@ private enum _ViewRenderer {
             width: list.bounds.width,
             height: max(list.bounds.height, contentHeight)
         )
+        // The hosting view rebuilds this scroll view on every layout pass; a
+        // user's scroll position lives in the List's retained graph state, as
+        // UICollectionView's does on iOS (MEASURED: a feed scrolled by a drag
+        // snapped back to the top on the next rebuild).
+        if let retainedState {
+            if let saved = retainedState.contentOffset {
+                let inset = list.adjustedContentInset
+                let maxY = max(-inset.top, list.contentSize.height - list.bounds.height + inset.bottom)
+                list.contentOffset = CGPoint(x: list.contentOffset.x, y: min(max(saved.y, -inset.top), maxY))
+            }
+            let tracker = _SwiftUIListScrollTracker(state: retainedState)
+            retainedState.listScrollTracker = tracker
+            list.delegate = tracker
+        }
 
         var y: CGFloat = 0
         for (index, layout) in rowLayouts.enumerated() {

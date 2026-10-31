@@ -45,7 +45,9 @@ public struct _OpenList<Content: _OpenView>: _OpenView {
     }
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
-        _OpenViewNode(
+        // Retained at the List's own graph identity, before its content.
+        let scrollState = _OpenGraphContext.lazyStackState()
+        let node = _OpenViewNode(
             .list(
                 rows: _openFlattenGroup(
                     _OpenGraphContext.withStructuralScope(.listContent) {
@@ -54,6 +56,8 @@ public struct _OpenList<Content: _OpenView>: _OpenView {
                 )
             )
         )
+        node.retainedScrollState = scrollState
+        return node
     }
 }
 
