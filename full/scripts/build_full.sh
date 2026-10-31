@@ -100,6 +100,23 @@ echo "   -> $PINNED_SOURCE_STATE_BEFORE"
 UIHELPERS_SUBJECT_BEFORE=$(bash "$W/full/scripts/uihelpers_subject.sh" \
     "$W" "$UIKIT" "$SF" "$SC")
 FOCUS_SUBJECT_BEFORE=$(python3 "$W/full/focus-ios/guest_subject.py" "$W" "$UIKIT")
+
+# ---- incremental mode switches (see full/scripts/INCREMENTAL.md) ------------
+# BUILD_FULL_INCREMENTAL=1 memoizes every swiftc / clang -c / ld64.lld step by
+# the content of its complete input set (full/scripts/build_memo.py). Off by
+# default: the authority routes keep compiling everything.
+# BUILD_FULL_CLEAN=1 is the cold build: it deletes this script's outputs, the
+# step memo, the stage cache and the module cache before anything else runs.
+BUILD_FULL_INCREMENTAL=${BUILD_FULL_INCREMENTAL:-0}
+BUILD_FULL_CLEAN=${BUILD_FULL_CLEAN:-0}
+BUILD_FULL_MEMO_DIR=${BUILD_FULL_MEMO_DIR:-$OUT.memo}
+case "$BUILD_FULL_INCREMENTAL" in 0|1) ;; *) die "BUILD_FULL_INCREMENTAL must be 0 or 1" ;; esac
+case "$BUILD_FULL_CLEAN" in 0|1) ;; *) die "BUILD_FULL_CLEAN must be 0 or 1" ;; esac
+if [ "$BUILD_FULL_CLEAN" = 1 ]; then
+    echo "== BUILD_FULL_CLEAN=1: removing $OUT, its step memo, stage cache and module cache"
+    rm -rf -- "$OUT" "$BUILD_FULL_MEMO_DIR" \
+        "${BUILD_FULL_STAGE_CACHE_DIR:-$OUT.stage-cache}" "$MC"
+fi
 mkdir -p "$OUT" "$MC" "$FE_OUT" "$FE_COLLECTIONS" "$FE_OS" "$FE_CSHIMS"
 rm -f "$OUT/focus-guest-subject.sha256" "$OUT/focus-guest-executable.sha256"
 # These files are commit markers for a completely successful build. Remove
@@ -205,7 +222,8 @@ hash_inputs() {
     done
 }
 toolchain_identity() {
-    local tool
+    # The real tools, never the incremental-mode shims below.
+    local tool PATH=${BUILD_FULL_MEMO_REAL_PATH:-$PATH}
     swiftc -version 2>&1
     clang-18 --version 2>&1
     for tool in swiftc swift-frontend clang-18 clang++-18 ld64.lld-18; do
@@ -213,6 +231,39 @@ toolchain_identity() {
         sha256sum < "$(readlink -f "$(command -v "$tool")")"
     done
 }
+
+# ---- incremental mode: step memo shims --------------------------------------
+# Every later swiftc, clang-18, clang++-18 and ld64.lld-18 -- here and in the
+# FE / FI / host-bridge sub-builders -- resolves to a shim that runs
+# full/scripts/build_memo.py. The memo hashes each step's complete input set
+# (argv, every file it names, every file the tool reported reading last time,
+# negative lookups, toolchain identity) and either runs the tool or restores
+# the exact bytes the same inputs produced before. Shims live in a fake
+# <prefix>/usr/bin whose ../lib is the real toolchain's, so code that locates
+# the toolchain from `command -v swiftc` still finds it.
+if [ "$BUILD_FULL_INCREMENTAL" = 1 ]; then
+    BUILD_FULL_MEMO_TOOL=$W/full/scripts/build_memo.py
+    [ -f "$BUILD_FULL_MEMO_TOOL" ] || die "no step memo tool at $BUILD_FULL_MEMO_TOOL"
+    memo_real_swiftc=$(readlink -f "$(command -v swiftc)") \
+        || die "incremental: swiftc is not on PATH"
+    memo_bin=$BUILD_FULL_MEMO_DIR/toolchain/usr/bin
+    mkdir -p "$memo_bin" "$BUILD_FULL_MEMO_DIR/steps"
+    ln -sfn "$(dirname "$memo_real_swiftc")/../lib" "$BUILD_FULL_MEMO_DIR/toolchain/usr/lib"
+    for memo_tool in swiftc clang-18 clang++-18 ld64.lld-18; do
+        printf '#!/bin/sh\nexec python3 -B %q exec %s "$@"\n' \
+            "$BUILD_FULL_MEMO_TOOL" "$memo_tool" > "$memo_bin/$memo_tool.tmp"
+        chmod 755 "$memo_bin/$memo_tool.tmp"
+        mv -f "$memo_bin/$memo_tool.tmp" "$memo_bin/$memo_tool"
+    done
+    [ -f "$BUILD_FULL_MEMO_DIR/log" ] && mv -f "$BUILD_FULL_MEMO_DIR/log" "$BUILD_FULL_MEMO_DIR/log.prev"
+    : > "$BUILD_FULL_MEMO_DIR/log"
+    BUILD_FULL_MEMO_SALT=$( { toolchain_identity; sha256sum < "$BUILD_FULL_MEMO_TOOL"; } \
+        | sha256sum | cut -d' ' -f1)
+    export BUILD_FULL_MEMO_DIR BUILD_FULL_MEMO_SALT
+    export BUILD_FULL_MEMO_REAL_PATH=$PATH
+    export PATH=$memo_bin:$PATH
+    echo "== incremental: step memo at $BUILD_FULL_MEMO_DIR (salt ${BUILD_FULL_MEMO_SALT:0:12})"
+fi
 # >>> stage-cache functions (extracted by full/scripts/test_build_full_stage_cache.py)
 # Entries never go through cp or tar. Both trust the file system's inode
 # identity, and Docker Desktop's bind mount (virtiofs) does not keep it stable
@@ -1023,7 +1074,10 @@ echo "== FoundationEssentials production inputs ($TARGET)"
 # build_fe.sh also derives patched upstream sources here; they are part of the
 # stage's output tree (FoundationEssentials.swiftsourceinfo names them).
 FE_PORT_SOURCES=$W/build/foundationessentials-port-sources
-fe_stage_key=$(
+# The stage keys hash the whole sysroot; compute them only when the cache
+# that consumes them is on.
+fe_stage_key=stage-cache-off
+[ "$BUILD_FULL_STAGE_CACHE" = 1 ] && fe_stage_key=$(
     {
         echo 'fe-stage-v1'
         toolchain_identity
@@ -1297,6 +1351,10 @@ COREFOUNDATION_GUEST_MANIFEST=$W/full/foundation/corefoundation_guest_sources.tx
 EXPECTED_FOUNDATION_STRING_PROCESSING_UNDEFINEDS=19
 EXPECTED_FOUNDATION_SYNCHRONIZATION_UNDEFINEDS=2
 EXPECTED_FOUNDATION_REGEX_PARSER_UNDEFINEDS=0
+# APPMODS is a search path of nearly every compile below. Start it empty so
+# each compile sees exactly the modules this run has produced so far (as on a
+# fresh OUT), never a later step's output left by an earlier run.
+rm -rf -- "$APPMODS"
 mkdir -p "$APPMODS/include/CPortableIO" "$APPMODS/include/CSTBTrueType" \
     "$APPMODS/include/CHostClock" "$APPMODS/include/COpenCombineHelpers" \
     "$APPMODS/include/COpenDispatch" "$APPMODS/include/COpenRelativeTime" \
@@ -1628,7 +1686,8 @@ fi_stage_appmods_inputs() {
             esac
         done
 }
-fi_stage_key=$(
+fi_stage_key=stage-cache-off
+[ "$BUILD_FULL_STAGE_CACHE" = 1 ] && fi_stage_key=$(
     {
         echo 'fi-stage-v1'
         echo "$fe_stage_key"
@@ -1921,7 +1980,10 @@ for module in AudioToolbox CoreHaptics; do
     compile_app_module "$module" "$OUT/focus-$module.o" "$W/full/focus-ios/$module.swift"
     FOCUS_LINK_OBJECTS+=("$OUT/focus-$module.o")
 done
-env W="$W" SYS="$SYS" OUT="$OUT" TARGET="$TARGET" bash "$W/full/focus-ios/build_libxml_guest.sh"
+# CMake caches the absolute compiler path, so libxml2 always builds with the
+# real tools (its own ninja build is already incremental).
+env PATH="${BUILD_FULL_MEMO_REAL_PATH:-$PATH}" \
+    W="$W" SYS="$SYS" OUT="$OUT" TARGET="$TARGET" bash "$W/full/focus-ios/build_libxml_guest.sh"
 FOCUS_XML_FLAGS=(-I "$UIKIT/Sources/CLibXML2" -Xcc -I"$OUT/focus-libxml/include")
 compile_app_module Fuzi "$OUT/focus-fuzi.o" "${FOCUS_XML_FLAGS[@]}" "$UIKIT/Sources/Fuzi/"*.swift
 mapfile -d '' -t BLOCKZILLA_SOURCES < <(
@@ -2228,6 +2290,9 @@ mv "$OUT/uihelpers-artifacts.sha256.tmp" "$OUT/uihelpers-artifacts.sha256"
 mv "$OUT/uihelpers-subject.sha256.tmp" "$OUT/uihelpers-subject.sha256"
 
 echo "== done"; ls -l "$OUT/render_full" "$OUT/indexpath_identity_probe"
+if [ "$BUILD_FULL_INCREMENTAL" = 1 ]; then
+    echo "build_full: incremental steps $(python3 -B "$BUILD_FULL_MEMO_TOOL" summary "$BUILD_FULL_MEMO_DIR/log") (log $BUILD_FULL_MEMO_DIR/log)"
+fi
 
 # Bracket every app/module/resource input, including the real package targets.
 FOCUS_SUBJECT_AFTER=$(python3 "$W/full/focus-ios/guest_subject.py" "$W" "$UIKIT")
