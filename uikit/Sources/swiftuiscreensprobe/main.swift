@@ -1,7 +1,8 @@
 // Native gate for screens beyond a root (docs/SWIFTUI_PUSHED_SCREENS.md):
 // value NavigationLinks, stable toolbar items, iOS inset-grouped Form/List
 // geometry and accessibility, the iOS 27 glass back button and the
-// bottom-docked `.searchable` field.
+// bottom-docked `.searchable` field; section 6 the iOS 27 docked field,
+// palette and ContentUnavailableView description (docs/IOS27_CROSS_SCREEN.md).
 //
 //   swift run swiftuiscreensprobe     exits 0 when every check passes
 //
@@ -66,6 +67,25 @@ struct SettingsForm: View {
             .navigationTitle("Settings")
         }
     }
+}
+
+struct UnavailableScreen: View {
+    var body: some View {
+        ContentUnavailableView("Title", systemImage: "magnifyingglass",
+                               description: Text("Description"))
+    }
+}
+
+@MainActor func findLabel(_ text: String, in view: UIView) -> UILabel? {
+    if let label = view as? UILabel, label.text == text { return label }
+    for child in view.subviews {
+        if let found = findLabel(text, in: child) { return found }
+    }
+    return nil
+}
+
+func rgba255(_ c: CanvasColor) -> [Int] {
+    [c.red, c.green, c.blue].map { Int(($0 * 255).rounded()) } + [Int((c.alpha * 100).rounded())]
 }
 
 struct SearchStack: View {
@@ -255,7 +275,76 @@ struct SearchStack: View {
         check(near(list.minY, 153) && near(list.minX, 16), "inset-grouped list card under the bar: \(list)")
     }
 
-    withExtendedLifetime((linkWindow, pushWindow, classicWindow, formWindow, searchWindow, store)) {}
+    // 6. iOS 27 cross-screen values (docs/IOS27_CROSS_SCREEN.md), against the iOS 26 chrome.
+    let light = UITraitCollection(userInterfaceStyle: .light)
+    let dark = UITraitCollection(userInterfaceStyle: .dark)
+    let savedChrome = OpenUIKitRuntime.chromeRelease
+    var keep: [AnyObject] = []
+    for release in [OpenUIKitChromeRelease.iOS26, .iOS27] {
+        OpenUIKitRuntime.chromeRelease = release
+        let tag = release == .iOS27 ? "iOS 27" : "iOS 26"
+        let h = UIHostingController(rootView: SearchStack())
+        let w = host(h)
+        keep += [h, w]
+        guard let nav = navigationControllers(h).first,
+              let bar = nav.topViewController?.navigationItem.searchController?.searchBar,
+              let platter = bar.superview else {
+            check(false, "\(tag): docked search bar present")
+            continue
+        }
+        let field = bar.searchTextField
+        let ff = frame(field, in: w)
+        let text = field.textRect(forBounds: field.bounds)
+        let rim = platter.subviews.first { $0 is _UIBarPlatterRimView }
+        let sep = rgba255(UIColor.opaqueSeparator.resolvedCGColor(with: light))
+        let sepDark = rgba255(UIColor.opaqueSeparator.resolvedCGColor(with: dark))
+        let blue = rgba255(UIColor.systemBlue.resolvedCGColor(with: light))
+        let placeholder = rgba255(field.defaultPlaceholderColor.resolvedCGColor(with: light))
+        check(blue == [0, 136, 255, 100], "\(tag): systemBlue light (0, 136, 255): \(blue)")
+        if release == .iOS27 {
+            check(near(ff.minX, 28) && near(ff.minY, 778) && near(ff.width, 334) && near(ff.height, 28),
+                  "iOS 27: field [28, 778, 334, 28]: \(ff)")
+            let line = field.subviews.flatMap(\.subviews).first { ($0 as? UILabel)?.text == "Search" }
+            let lineY = line.map { frame($0, in: w).minY }
+            check(near(text.minX, 40.667) && lineY.map { near($0, 783) } == true,
+                  "iOS 27: text box x 40.667, placeholder line box top 783: \(text) \(String(describing: lineY))")
+            let icon = UISearchBar.BottomDock.iOS27IconFrame
+            check(near(icon.minX + UISearchTextField.ringCenter.x, 20.667)
+                  && near(icon.minY + UISearchTextField.ringCenter.y, 11.333),
+                  "iOS 27: magnifier ring centre (20.667, 11.333) in the field: \(icon)")
+            check(placeholder == [0, 0, 0, 41], "iOS 27: placeholder black at 0.41: \(placeholder)")
+            check(rim != nil && rim?.isHidden == false
+                  && rim.map { frame($0, in: w) == CGRect(x: 27.5, y: 767.5, width: 335, height: 49) } == true,
+                  "iOS 27: platter rim 0.5 pt outside: \(String(describing: rim.map { frame($0, in: w) }))")
+            check(platter.layer.shadowOpacity == _UIBarMetrics.iOS27ShadowOpacity, "iOS 27: light platter shadow")
+            check(sep == [231, 231, 232, 100] && sepDark == [42, 42, 44, 100],
+                  "iOS 27: opaqueSeparator (231, 231, 232) / (42, 42, 44): \(sep) \(sepDark)")
+        } else {
+            check(near(ff.minX, 33) && near(ff.minY, 773) && near(ff.width, 324) && near(ff.height, 38),
+                  "iOS 26: field [33, 773, 324, 38] unchanged: \(ff)")
+            let line = field.subviews.flatMap(\.subviews).first { ($0 as? UILabel)?.text == "Search" }
+            let lineY = line.map { frame($0, in: w).minY }
+            check(near(text.minX, 41.5) && lineY.map { near($0, 782) } == true,
+                  "iOS 26: text box x 41.5, line box top 782 unchanged: \(text) \(String(describing: lineY))")
+            check(placeholder == [60, 60, 67, 60], "iOS 26: placeholder secondaryLabel: \(placeholder)")
+            check(rim == nil, "iOS 26: no rim view")
+            check(platter.layer.shadowOpacity == UITabBar.shadowOpacity, "iOS 26: tab platter shadow unchanged")
+            check(sep == [198, 198, 200, 100] && sepDark == [56, 56, 58, 100],
+                  "iOS 26: opaqueSeparator (198, 198, 200) / (56, 56, 58): \(sep) \(sepDark)")
+        }
+        let cuv = UIHostingController(rootView: UnavailableScreen())
+        let cw = host(cuv)
+        keep += [cuv, cw]
+        let description = findLabel("Description", in: cuv.view)
+        let dc = description.map { rgba255($0.textColor.resolvedCGColor(with: light)) }
+        check(dc == [60, 60, 67, 60], "\(tag): ContentUnavailableView description is secondaryLabel: \(String(describing: dc))")
+        let title = findLabel("Title", in: cuv.view)
+        check(title.map { near($0.font.pointSize, 20) && $0.font.weight == .bold } == true,
+              "\(tag): ContentUnavailableView title is 20 pt bold: \(String(describing: title?.font))")
+    }
+    OpenUIKitRuntime.chromeRelease = savedChrome
+
+    withExtendedLifetime((linkWindow, pushWindow, classicWindow, formWindow, searchWindow, store, keep)) {}
 }
 
 let failures = MainActor.assumeIsolated { () -> Int in

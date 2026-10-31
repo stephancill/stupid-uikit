@@ -46,6 +46,7 @@ platter and large title; Search within 1 pt for the docked field, symbol, title 
 - `NavigationLink(value:)` in a `NavigationStack` without a `path:` binding fails loudly.
 - Untitled later sections and section footers in inset-grouped lists are not measured on iOS 27
   (taken from UIKit's iOS 26.1 table numbers).
-- The guest's `systemBlue` is iOS 26.1's (0, 145, 255); iOS 27 draws (0, 136, 255).
+- (Resolved, `IOS27_CROSS_SCREEN.md`: the guest's light `systemBlue` was already iOS 27's
+  (0, 136, 255); (0, 145, 255) is the dark value. The docked field's iOS 27 geometry is measured there.)
 - The simulator's tree for Search shows the navigation bar as one `Group id=Search` and omits the
   back and filter buttons; the guest lists them.
