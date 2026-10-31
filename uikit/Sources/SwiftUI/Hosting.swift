@@ -164,6 +164,29 @@ private final class _SwiftUIMenuControl: UIButton {
 @MainActor
 private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
     var setText: (@MainActor (String) -> Void)?
+    var getPresented: (@MainActor () -> Bool)?
+    var setPresented: (@MainActor (Bool) -> Void)?
+    var submit: (@MainActor () -> Void)?
+
+    /// `isPresented == true` presents the search: the field takes focus
+    /// with its cancel button showing.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, getPresented?() == true {
+            setShowsCancelButton(true, animated: false)
+            _ = becomeFirstResponder()
+        }
+    }
+
+    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        _ = searchBar
+        if getPresented?() == false { setPresented?(true) }
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        _ = searchBar
+        submit?()
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -183,6 +206,7 @@ private final class _SwiftUISearchBar: UISearchBar, UISearchBarDelegate {
     func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
         setText?("")
         _ = searchBar.resignFirstResponder()
+        setPresented?(false)
     }
 }
 
@@ -1304,7 +1328,7 @@ private func _openFirstButtonAction(
 private func _openImageBarButtonItem(from node: _OpenViewNode) -> UIBarButtonItem? {
     guard let name = _openFirstSystemImageName(in: node) else { return nil }
     let item: UIBarButtonItem
-    if name == "magnifyingglass" {
+    if name == "magnifyingglass", OpenUIKitRuntime.chromeRelease != .iOS27 {
         item = UIBarButtonItem(barButtonSystemItem: .search, target: nil, action: nil)
     } else if OpenUIKitRuntime.systemFontCut == .iOS {
         // MEASURED HackersRowMetrics / realapp_hackers_feed_light,
@@ -1314,6 +1338,10 @@ private func _openImageBarButtonItem(from node: _OpenViewNode) -> UIBarButtonIte
         // alignment box is 27.333 x 27, not the blank custom symbol's
         // 44 x 44. Use the existing oracle mask through UIKit's image
         // item path; unsupported symbols keep their custom view.
+        // iOS 27 (chromeRelease .iOS27): magnifyingglass takes this path
+        // too. MEASURED stupid social's toolbar, iPhone 16e @3x / iOS 27.0:
+        // its ink is 21 x 21 pt, the weight of this 17 / medium / large
+        // symbol, not the lighter 20.33 x 18.67 `.search` bar stamp.
         let configuration = UIImage.SymbolConfiguration(
             pointSize: 17, weight: .medium, scale: .large)
         guard let image = UIImage(systemName: name, withConfiguration: configuration)
@@ -2064,6 +2092,9 @@ private struct _RenderEnvironment {
     var autocapitalizationType: UITextAutocapitalizationType = .sentences
     var autocorrectionDisabled = false
     var submitAction: (@MainActor () -> Void)?
+    /// `onSubmit(of: .search)`'s action, which a `searchable` field inside
+    /// it runs when the user submits a search.
+    var searchSubmitAction: (@MainActor () -> Void)?
     var submitLabel: SubmitLabel = .return
     var keyboardDismissMode: ScrollDismissesKeyboardMode = .automatic
     var controlSize: ControlSize = .regular
@@ -2617,9 +2648,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.autocorrectionDisabled = disabled
                 return measure(content, proposed: proposed, environment: next)
-            case .submit(let action):
+            case .submit(let triggers, let action):
                 var next = environment
-                next.submitAction = action
+                if triggers.contains(.text) { next.submitAction = action }
+                if triggers.contains(.search) { next.searchSubmitAction = action }
                 return measure(content, proposed: proposed, environment: next)
             case .scrollDismissesKeyboard(let mode):
                 var next = environment
@@ -3698,9 +3730,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.autocorrectionDisabled = disabled
                 place(content, in: rect, on: surface, environment: next)
-            case .submit(let action):
+            case .submit(let triggers, let action):
                 var next = environment
-                next.submitAction = action
+                if triggers.contains(.text) { next.submitAction = action }
+                if triggers.contains(.search) { next.searchSubmitAction = action }
                 place(content, in: rect, on: surface, environment: next)
             case .submitLabel(let label):
                 var next = environment
@@ -4407,6 +4440,9 @@ private enum _ViewRenderer {
                 search.text = configuration.getText()
                 search.placeholder = configuration.prompt
                 search.setText = configuration.setText
+                search.getPresented = configuration.getPresented
+                search.setPresented = configuration.setPresented
+                search.submit = environment.searchSubmitAction
                 search.accessibilityIdentifier = "SwiftUI.Searchable"
                 search.searchBarStyle = isToolbar
                     ? .minimal : .default

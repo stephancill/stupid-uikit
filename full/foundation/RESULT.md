@@ -13,7 +13,7 @@ each one are named beside it.**
 | flags | upstream's own, copied: `-package-name SwiftFoundation`, seven feature flags, three `AvailabilityMacro=FoundationPreview`; and NOT `-disable-implicit-string-processing-module-import` |
 | `_FoundationCShims` | swift-foundation's own, via `-Xcc -fmodule-map-file=` (it otherwise resolves from the **Linux toolchain's** `/usr/lib/swift`) |
 | `os` | `full/foundation/os-module/` — ours, three declarations, not Apple's overlay |
-| file surface | 36 symbols stubbed by `fm_unimplemented.c`: 4 implemented (mktemp since the automation work), 1 delegated to upstream's own fallback, 31 loud-abort. **URL never reaches them; a stub firing during a run is itself a finding.** |
+| file surface | 36 symbols stubbed by `fm_unimplemented.c`: 3 implemented, 1 delegated to upstream's own fallback, 32 loud-abort. **URL never reaches them; a stub firing during a run is itself a finding.** |
 
 ## Production source identity
 

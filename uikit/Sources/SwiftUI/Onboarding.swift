@@ -1355,6 +1355,38 @@ public struct _OpenAnimation: Hashable, Sendable {
         )
     }
 
+    /// SwiftUI's duration/bounce spring (iOS 17). It is the same spring as
+    /// `spring(response:dampingFraction:)` with `response == duration` and
+    /// `dampingFraction == 1 - bounce` for a non-negative bounce, or
+    /// `1 / (1 + bounce)` for a negative (overdamped) one, which is how
+    /// SwiftUI's `Spring(duration:bounce:)` maps to response/damping.
+    public static func spring(
+        duration: Double = 0.5,
+        bounce: Double = 0,
+        blendDuration: Double = 0
+    ) -> _OpenAnimation {
+        let damping = bounce >= 0 ? 1 - bounce : 1 / (1 + bounce)
+        return spring(response: duration, dampingFraction: damping, blendDuration: blendDuration)
+    }
+
+    /// `.smooth`, `.snappy` and `.bouncy`: SwiftUI's named springs, bounce
+    /// 0, 0.15 and 0.3 at a 0.5 s duration; `extraBounce` adds to the bounce.
+    public static var smooth: _OpenAnimation { smooth() }
+    public static var snappy: _OpenAnimation { snappy() }
+    public static var bouncy: _OpenAnimation { bouncy() }
+
+    public static func smooth(duration: Double = 0.5, extraBounce: Double = 0) -> _OpenAnimation {
+        spring(duration: duration, bounce: extraBounce)
+    }
+
+    public static func snappy(duration: Double = 0.5, extraBounce: Double = 0) -> _OpenAnimation {
+        spring(duration: duration, bounce: 0.15 + extraBounce)
+    }
+
+    public static func bouncy(duration: Double = 0.5, extraBounce: Double = 0) -> _OpenAnimation {
+        spring(duration: duration, bounce: 0.3 + extraBounce)
+    }
+
     /// Repeats the receiver for as long as it remains installed in the view
     /// graph. Each leg keeps the receiver's exact timing curve; autoreverse
     /// alternates the presentation direction without changing the model.

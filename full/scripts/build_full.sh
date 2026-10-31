@@ -1431,7 +1431,8 @@ echo "== Foundation/UIKit notification identity compile proof"
 # below is emitted into APPINC / APPMODS, which those invocations never saw.
 #
 # Combine + SwiftUI match the widget-gate sources (full/oracle-opencombine,
-# Sources/SwiftUI). Foundation is the core-guest 38-file facade
+# Sources/SwiftUI); the app-facing Combine also carries operators the pinned
+# OpenCombine lacks (full/combine), beside the hash-pinned re-export shim. Foundation is the core-guest 38-file facade
 # (full/foundation/foundation_guest_sources.txt), compiled after Combine,
 # Dispatch and FoundationInternationalization exist — the same order as
 # full/frameworks/build_core_guest_package.sh after it calls this script.
@@ -1552,12 +1553,17 @@ clang++-18 -target "$TARGET" -isysroot "$SYS" -stdlib=libc++ -std=c++17 -O2 \
     -I "$APPMODS" \
     -module-name Combine -emit-module -emit-module-path "$APPMODS/Combine.swiftmodule" \
     -emit-object -o "$OUT/combine.o" \
-    "$W/full/oracle-opencombine/Combine.swift"
+    "$W/full/oracle-opencombine/Combine.swift" \
+    "$W/full/combine/Publishers.MergeMany.swift"
+# full/combine's operators reference the Swift runtime and Objective-C class
+# metadata: the system libraries come before the re-export so their symbols
+# bind to them, not to libOpenCombine.
 "${LD[@]}" -dylib -install_name @rpath/libCombine.dylib \
     -rpath @loader_path -ignore_auto_link -dead_strip \
+    "$SYS/usr/lib/swift/libswiftCore.tbd" "$SYS/usr/lib/libSystem.tbd" \
+    "$SYS/usr/lib/libobjc.tbd" \
     -reexport_library "$APPMODS/libOpenCombine.dylib" \
-    -o "$APPMODS/libCombine.dylib" "$OUT/combine.o" \
-    "$SYS/usr/lib/swift/libswiftCore.tbd" "$SYS/usr/lib/libSystem.tbd"
+    -o "$APPMODS/libCombine.dylib" "$OUT/combine.o"
 cp "$APPMODS/Combine.swiftmodule" "$APPINC/"
 cp "$APPMODS/OpenCombine.swiftmodule" "$APPINC/"
 cp "$APPMODS/libCombine.dylib" "$APPMODS/libOpenCombine.dylib" "$OUT/"

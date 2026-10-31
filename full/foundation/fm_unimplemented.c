@@ -13,8 +13,7 @@
  * Three categories only:
  *
  *   IMPLEMENTED   the answer is defined and machine-independent, so it is
- *                 simply computed: abs, labs, strncasecmp_l in the C locale,
- *                 mktemp.
+ *                 simply computed: abs, labs, strncasecmp_l in the C locale.
  *   DELEGATED     the caller ALREADY has a designed fallback for failure, so
  *                 the honest answer is to report failure and let upstream take
  *                 the path it wrote for exactly this: vm_copy.
@@ -69,29 +68,38 @@ int strncasecmp_l(const char *a, const char *b, unsigned long n, void *loc)
     return 0;
 }
 
-/* mktemp(3): replace the template's trailing X's with a name no file has.
- * FoundationEssentials' atomic Data.write creates its temporary with it
- * (MEASURED stupid social: the Chats page aborted here on its first cache
- * write).  The name is the process id and a counter, checked with
- * access(F_OK) as BSD mktemp does; Foundation then creates the file itself.
- * No free name in 10000 tries is BSD's failure answer: an empty string. */
-extern int getpid(void);
+/* mktemp(3): replace the template's trailing X's so that it names a path that
+ * does not exist when checked.  swift-foundation's atomic Data write
+ * (createTemporaryFile) is the caller: it opens the name with O_CREAT|O_EXCL
+ * and asks for a new one on EEXIST, so mktemp's own race is handled upstream,
+ * exactly as with libSystem's.  The letters come from a per-process counter
+ * mixed with the pid and the template address (no randomness source is
+ * assumed); mktemp promises uniqueness at check time, not unpredictability.
+ * stupid social writes its caches with `.atomic` at launch. */
 extern int access(const char *, int);
+extern int getpid(void);
+extern int *__error(void);
+
 char *mktemp(char *template_)
 {
-    static unsigned long counter;
-    static const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-    unsigned long length = 0, xs = 0;
-    while (template_[length]) length++;
-    while (xs < length && template_[length - 1 - xs] == 'X') xs++;
-    for (int attempt = 0; attempt < 10000; attempt++) {
-        unsigned long value = (unsigned long)getpid() * 1000003UL + ++counter * 2654435761UL;
+    static const char alphabet[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    static unsigned long long counter;
+    unsigned long n = 0, xs = 0;
+    while (template_[n]) n++;
+    while (xs < n && template_[n - 1 - xs] == 'X') xs++;
+    if (xs == 0) { *__error() = 22; /* EINVAL */ return template_; }
+    for (int attempt = 0; attempt < 1 << 16; attempt++) {
+        unsigned long long v = (++counter) * 0x9E3779B97F4A7C15ull
+            ^ ((unsigned long long)getpid() << 32)
+            ^ (unsigned long long)(unsigned long)template_;
         for (unsigned long i = 0; i < xs; i++) {
-            template_[length - 1 - i] = digits[value % 36];
-            value /= 36;
+            template_[n - xs + i] = alphabet[v % 62];
+            v = v / 62 ^ (v * 0x2545F4914F6CDD1Dull);
         }
         if (access(template_, 0 /* F_OK */) != 0) return template_;
     }
+    *__error() = 17; /* EEXIST */
     template_[0] = 0;
     return template_;
 }

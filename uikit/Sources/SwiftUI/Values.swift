@@ -447,22 +447,27 @@ extension _OpenColor: _OpenShapeStyle {
 /// `.foregroundStyle(.white)`).  Keep semantic primary/secondary on the
 /// hierarchical style below so those spellings retain adaptive label colors.
 public extension _OpenShapeStyle where Self == _OpenColor {
-    static var clear: _OpenColor { .clear }
-    static var black: _OpenColor { .black }
-    static var white: _OpenColor { .white }
-    static var red: _OpenColor { .red }
-    static var green: _OpenColor { .green }
-    static var blue: _OpenColor { .blue }
-    static var gray: _OpenColor { .gray }
-    static var orange: _OpenColor { .orange }
-    static var yellow: _OpenColor { .yellow }
-    static var mint: _OpenColor { .mint }
-    static var teal: _OpenColor { .teal }
-    static var cyan: _OpenColor { .cyan }
-    static var indigo: _OpenColor { .indigo }
-    static var purple: _OpenColor { .purple }
-    static var pink: _OpenColor { .pink }
-    static var brown: _OpenColor { .brown }
+    // nonisolated: the protocol is @MainActor, but these are Sendable values
+    // (SwiftUI's are usable anywhere, e.g. `.foregroundStyle(.white)` in a
+    // nonisolated helper). stupid social's compat module had a concrete
+    // `foregroundStyle(_: Color)` overload to dodge the isolation error,
+    // which also captured `.secondary` as `Color.secondary`.
+    nonisolated static var clear: _OpenColor { .clear }
+    nonisolated static var black: _OpenColor { .black }
+    nonisolated static var white: _OpenColor { .white }
+    nonisolated static var red: _OpenColor { .red }
+    nonisolated static var green: _OpenColor { .green }
+    nonisolated static var blue: _OpenColor { .blue }
+    nonisolated static var gray: _OpenColor { .gray }
+    nonisolated static var orange: _OpenColor { .orange }
+    nonisolated static var yellow: _OpenColor { .yellow }
+    nonisolated static var mint: _OpenColor { .mint }
+    nonisolated static var teal: _OpenColor { .teal }
+    nonisolated static var cyan: _OpenColor { .cyan }
+    nonisolated static var indigo: _OpenColor { .indigo }
+    nonisolated static var purple: _OpenColor { .purple }
+    nonisolated static var pink: _OpenColor { .pink }
+    nonisolated static var brown: _OpenColor { .brown }
 }
 
 /// SwiftUI's `AnyShapeStyle`: a type-erased shape style.
@@ -487,7 +492,7 @@ public struct _OpenLinkShapeStyle: _OpenShapeStyle, Sendable {
 }
 
 public extension _OpenShapeStyle where Self == _OpenLinkShapeStyle {
-    static var link: _OpenLinkShapeStyle { _OpenLinkShapeStyle() }
+    nonisolated static var link: _OpenLinkShapeStyle { _OpenLinkShapeStyle() }
 }
 
 public typealias AnyShapeStyle = _OpenAnyShapeStyle
@@ -526,7 +531,19 @@ public struct _OpenHierarchicalShapeStyle: _OpenShapeStyle, Sendable {
     enum Level: Sendable { case primary, secondary, tertiary, quaternary }
     let level: Level
 
+    nonisolated init(level: Level) {
+        self.level = level
+    }
+
     public func _openResolvedForegroundColor() -> _OpenColor {
+        if OpenUIKitRuntime.chromeRelease == .iOS27, let opacity = iOS27PrimaryOpacity {
+            let uikit = uikitColor
+            return _OpenColor(uiColor: UIColor(dynamicProvider: { traits in
+                traits.userInterfaceStyle == .dark
+                    ? uikit.resolvedColor(with: traits)
+                    : UIColor.label.resolvedColor(with: traits).withAlphaComponent(CGFloat(opacity))
+            }))
+        }
         switch level {
         case .primary: return .primary
         case .secondary: return .secondary
@@ -536,22 +553,51 @@ public struct _OpenHierarchicalShapeStyle: _OpenShapeStyle, Sendable {
             return _OpenColor(uiColor: .quaternaryLabel)
         }
     }
+
+    /// iOS 27 (`OpenUIKitRuntime.chromeRelease == .iOS27`): a hierarchical
+    /// level is the primary label colour at an opacity, not UIKit's
+    /// secondary/tertiary label colour. MEASURED stupid social's root
+    /// screen, iPhone 16e @3x / iOS 27.0, light: `.foregroundStyle(.secondary)`
+    /// text ("All Stories", timestamps, previews) draws its full-coverage
+    /// pixels at exactly (127, 127, 127) — black at 0.5 over white — where
+    /// UIKit's `secondaryLabel` is (138, 138, 142) (the app's UIKit page
+    /// dots, same screenshot); the `.tertiary` chevron symbol is (191, 191,
+    /// 191), black at 0.25 (`tertiaryLabel` is (197, 197, 199)). Quaternary
+    /// and dark appearance are unmeasured and keep the UIKit colours; the
+    /// iOS 26 chrome (every existing gate) is unchanged.
+    private var uikitColor: UIColor {
+        switch level {
+        case .primary: return .label
+        case .secondary: return .secondaryLabel
+        case .tertiary: return .tertiaryLabel
+        case .quaternary: return .quaternaryLabel
+        }
+    }
+
+    var iOS27PrimaryOpacity: Double? {
+        switch level {
+        case .primary: return nil
+        case .secondary: return 0.5
+        case .tertiary: return 0.25
+        case .quaternary: return nil
+        }
+    }
 }
 
 public extension _OpenShapeStyle where Self == _OpenHierarchicalShapeStyle {
-    static var primary: _OpenHierarchicalShapeStyle {
+    nonisolated static var primary: _OpenHierarchicalShapeStyle {
         _OpenHierarchicalShapeStyle(level: .primary)
     }
 
-    static var secondary: _OpenHierarchicalShapeStyle {
+    nonisolated static var secondary: _OpenHierarchicalShapeStyle {
         _OpenHierarchicalShapeStyle(level: .secondary)
     }
 
-    static var tertiary: _OpenHierarchicalShapeStyle {
+    nonisolated static var tertiary: _OpenHierarchicalShapeStyle {
         _OpenHierarchicalShapeStyle(level: .tertiary)
     }
 
-    static var quaternary: _OpenHierarchicalShapeStyle {
+    nonisolated static var quaternary: _OpenHierarchicalShapeStyle {
         _OpenHierarchicalShapeStyle(level: .quaternary)
     }
 }
@@ -788,6 +834,16 @@ public enum _OpenSubmitLabel: UInt8, Hashable, Sendable {
     case `return`
     case next
     case `continue`
+}
+
+/// Which submissions an `onSubmit(of:_:)` action handles: `.text` from a
+/// text field or editor, `.search` from a `searchable` field.
+public struct SubmitTriggers: OptionSet, Hashable, Sendable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+
+    public static let text = SubmitTriggers(rawValue: 1 << 0)
+    public static let search = SubmitTriggers(rawValue: 1 << 1)
 }
 
 /// Relative symbol/image sizing carried through the SwiftUI render

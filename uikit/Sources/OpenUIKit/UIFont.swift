@@ -81,10 +81,17 @@ public final class UIFont: NSObject, @unchecked Sendable {
     /// symbolic trait, not a weight. The glyph weight OpenUIKit draws is
     /// unchanged (`.bold`; the text goldens own that).
     let isSymbolicBold: Bool
+    /// `monospacedDigitSystemFont(ofSize:weight:)`: the system font with
+    /// SF's tabular figures (the `tnum` feature) selected. Identity only for
+    /// now: font_metrics.json carries SF's default proportional digit
+    /// advances and no tabular ones, so digits are measured and drawn
+    /// proportionally (uikit/docs/APP_CATCHUP_APIS.md).
+    let isMonospacedDigit: Bool
 
     init(pointSize: CGFloat, weight: Weight, design: Design,
          textStyleLeading: CGFloat? = nil, customFontName: String? = nil,
-         textStyle: String? = nil, isSymbolicBold: Bool = false) {
+         textStyle: String? = nil, isSymbolicBold: Bool = false,
+         isMonospacedDigit: Bool = false) {
         self.pointSize = pointSize
         self.weight = weight
         self.design = design
@@ -92,6 +99,7 @@ public final class UIFont: NSObject, @unchecked Sendable {
         self.customFontName = customFontName
         self.textStyle = textStyle
         self.isSymbolicBold = isSymbolicBold
+        self.isMonospacedDigit = isMonospacedDigit
         super.init()
     }
 
@@ -100,13 +108,15 @@ public final class UIFont: NSObject, @unchecked Sendable {
     func _withPointSize(_ size: CGFloat) -> UIFont {
         UIFont(pointSize: size, weight: weight, design: design,
                textStyleLeading: textStyleLeading, customFontName: customFontName,
-               textStyle: textStyle, isSymbolicBold: isSymbolicBold)
+               textStyle: textStyle, isSymbolicBold: isSymbolicBold,
+               isMonospacedDigit: isMonospacedDigit)
     }
 
     func _withTextStyleLeading(_ leading: CGFloat?) -> UIFont {
         UIFont(pointSize: pointSize, weight: weight, design: design,
                textStyleLeading: leading, customFontName: customFontName,
-               textStyle: textStyle, isSymbolicBold: isSymbolicBold)
+               textStyle: textStyle, isSymbolicBold: isSymbolicBold,
+               isMonospacedDigit: isMonospacedDigit)
     }
 
     /// UIKit's `withSize(_:)` (`-fontWithSize:`). iOS 26.1:
@@ -126,6 +136,9 @@ public final class UIFont: NSObject, @unchecked Sendable {
     }
     public static func monospacedSystemFont(ofSize size: CGFloat, weight: Weight) -> UIFont {
         UIFont(pointSize: size, weight: weight, design: .monospaced)
+    }
+    public static func monospacedDigitSystemFont(ofSize size: CGFloat, weight: Weight) -> UIFont {
+        UIFont(pointSize: size, weight: weight, design: .default, isMonospacedDigit: true)
     }
 
     // Metrics — table lookups through FontEngine (exact for table sizes,
@@ -149,6 +162,7 @@ public final class UIFont: NSObject, @unchecked Sendable {
         return pointSize == other.pointSize && weight == other.weight && design == other.design
             && textStyleLeading == other.textStyleLeading && customFontName == other.customFontName
             && textStyle == other.textStyle && isSymbolicBold == other.isSymbolicBold
+            && isMonospacedDigit == other.isMonospacedDigit
     }
 
     public override var hash: Int {
@@ -159,6 +173,7 @@ public final class UIFont: NSObject, @unchecked Sendable {
         hasher.combine(customFontName)
         hasher.combine(textStyle)
         hasher.combine(isSymbolicBold)
+        hasher.combine(isMonospacedDigit)
         return hasher.finalize()
     }
 }
