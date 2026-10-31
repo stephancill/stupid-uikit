@@ -51,8 +51,9 @@ frame is [267.33, 47, 106.67, 44] with the 16 pt trailing margin, not [266.67, 1
 | gear ink | [336, 57, 360.67, 81.67] | [337, 57, 360.5, 80.5] | unchanged |
 
 The capsule's left edge and the search glyph stay 0.8 pt right because the guest's gear image is
-the iOS 26.1 one (28 pt at 2x): its item is ~1.3 pt narrower than iOS 27's. An iOS 27 symbol
-harvest of `gear|17|medium|large` would close both.
+the iOS 26.1 one (27.67 pt at 3x): its item is ~1.3 pt narrower than iOS 27's. Closed by the iOS 27
+symbol harvest (`SYMBOL_INK_IOS27.md`): gear image 29 pt, capsule left edge and search ink on the
+reference.
 
 ## iOS 27 hierarchical styles
 
