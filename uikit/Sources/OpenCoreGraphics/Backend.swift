@@ -40,6 +40,9 @@ protocol CanvasBackend: AnyObject {
 
     func beginTransparencyLayer(alpha: CGFloat)
     func beginMaskedTransparencyLayer(alpha: CGFloat, mask: Path)
+    /// Begin a transparency group multiplied, once at its end, by a
+    /// full-surface device-pixel coverage mask (`width * height` bytes).
+    func beginMaskedTransparencyLayer(coverage: [UInt8])
     func endTransparencyLayer()
 
     func fill(_ path: Path, color: CanvasColor, evenOdd: Bool, hardEdges: Bool)
@@ -101,6 +104,9 @@ final class SwiftRasterizerBackend: CanvasBackend {
     func beginTransparencyLayer(alpha: CGFloat) { canvas._beginLayer(alpha) }
     func beginMaskedTransparencyLayer(alpha: CGFloat, mask: Path) {
         canvas._beginLayer(1, mask: canvas._coverageMask(mask, alpha: alpha))
+    }
+    func beginMaskedTransparencyLayer(coverage: [UInt8]) {
+        canvas._beginLayer(1, mask: coverage)
     }
     func endTransparencyLayer() { canvas._endLayer() }
 

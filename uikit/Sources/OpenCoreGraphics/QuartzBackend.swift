@@ -150,6 +150,12 @@ final class QuartzBackend: CanvasBackend {
                                mask: rasterizedMask(mask, alpha: alpha))
     }
 
+    func beginMaskedTransparencyLayer(coverage: [UInt8]) {
+        precondition(coverage.count == width * height,
+                     "mask coverage must cover the whole surface")
+        beginTransparencyLayer(alpha: 1, mask: coverage)
+    }
+
     private func beginTransparencyLayer(alpha: CGFloat, mask: [UInt8]?) {
         // CG semantics: the alpha in effect at Begin is captured as the group
         // alpha and applied when the layer is composited at End.

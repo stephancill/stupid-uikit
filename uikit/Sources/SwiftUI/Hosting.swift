@@ -3857,11 +3857,20 @@ private enum _ViewRenderer {
                     in: host.bounds,
                     alignment: alignment
                 )
-                let layer = CALayer()
-                layer.bounds = CGRect(origin: .zero, size: maskRect.size)
-                layer.position = CGPoint(x: maskRect.midX, y: maskRect.midY)
-                layer.backgroundColor = UIColor.white.cgColor
-                host.layer.mask = layer
+                if let shapeMask = _shapeMaskLayer(
+                    maskNode,
+                    in: maskRect,
+                    hostBounds: host.bounds,
+                    environment: environment
+                ) {
+                    host.layer.mask = shapeMask
+                } else {
+                    let layer = CALayer()
+                    layer.bounds = CGRect(origin: .zero, size: maskRect.size)
+                    layer.position = CGPoint(x: maskRect.midX, y: maskRect.midY)
+                    layer.backgroundColor = UIColor.white.cgColor
+                    host.layer.mask = layer
+                }
             case .multilineTextAlignment(let alignment):
                 var next = environment
                 next.textAlignment = alignment
@@ -5468,6 +5477,98 @@ private enum _ViewRenderer {
             imageView.accessibilityIdentifier = "SwiftUI.Image.uiImage"
             surface.addSubview(imageView)
         }
+    }
+
+    /// SwiftUI masks by the alpha its mask content draws. When that content
+    /// is built only from shapes (filled or stroked Rectangle,
+    /// RoundedRectangle, Capsule, Circle), colours and layout containers
+    /// (stacks, frame, padding, offset, opacity), place it on a scratch
+    /// surface and mirror the placed views as a layer tree: CAShapeLayers
+    /// with exactly the geometry each shape view renders, under plain
+    /// container layers. The renderers composite that tree's alpha as the
+    /// mask. Returns nil (the caller keeps the rectangular mask) when there is
+    /// no shape or any other content appears: text, images, gradients and
+    /// custom-drawn views would need a rasterised alpha mask of the placed
+    /// views instead (docs/SHAPE_MASKS.md).
+    private static func _shapeMaskLayer(
+        _ node: _OpenViewNode,
+        in maskRect: CGRect,
+        hostBounds: CGRect,
+        environment: _RenderEnvironment
+    ) -> CALayer? {
+        guard _isShapeMaskContent(node) else { return nil }
+        let scratch = _SwiftUIPassthroughView(frame: hostBounds)
+        place(node, in: maskRect, on: scratch, environment: environment)
+        var sawShape = false
+        let root = CALayer()
+        root.bounds = CGRect(origin: .zero, size: hostBounds.size)
+        root.position = CGPoint(x: hostBounds.midX, y: hostBounds.midY)
+        for view in scratch.subviews {
+            guard let layer = _maskLayer(mirroring: view, sawShape: &sawShape)
+            else { return nil }
+            root.addSublayer(layer)
+        }
+        return sawShape ? root : nil
+    }
+
+    private static func _isShapeMaskContent(_ node: _OpenViewNode) -> Bool {
+        switch node.kind {
+        case .empty, .color, .roundedRectangle, .capsule, .spacer:
+            return true
+        case .group(let children), .zStack(let children, _),
+             .hStack(let children, _, _), .vStack(let children, _, _):
+            return children.allSatisfy(_isShapeMaskContent)
+        case .modified(let content, _):
+            return _isShapeMaskContent(content)
+        default:
+            return false
+        }
+    }
+
+    /// A plain placed view (background, corner radius, border, alpha,
+    /// clipping, subviews) as mask layers; nil for anything else.
+    private static func _maskLayer(
+        mirroring view: UIView,
+        sawShape: inout Bool
+    ) -> CALayer? {
+        guard type(of: view) == UIView.self
+                || type(of: view) == _SwiftUIPassthroughView.self,
+              view.transform == .identity,
+              view.layer.mask == nil,
+              view.layer.shadowOpacity == 0,
+              (view.layer.sublayers ?? []).isEmpty
+        else { return nil }
+        let container = CALayer()
+        container.bounds = view.bounds
+        container.position = view.center
+        container.isHidden = view.isHidden
+        container.opacity = Float(view.alpha)
+        container.masksToBounds = view.clipsToBounds
+        container.cornerRadius = view.layer.cornerRadius
+        let local = CGRect(origin: view.bounds.origin, size: view.bounds.size)
+        let radius = view.layer.cornerRadius
+        if let background = view.backgroundColor?
+            .resolvedCGColor(with: view.traitCollection),
+           background.alpha > 0 {
+            container.addSublayer(CAShapeLayer._openLayerShape(
+                frame: local, cornerRadius: radius, borderWidth: nil,
+                alpha: background.alpha))
+            sawShape = true
+        }
+        let borderWidth = view.layer.borderWidth
+        if borderWidth > 0, let border = view.layer.borderColor,
+           CanvasColor(border).alpha > 0 {
+            container.addSublayer(CAShapeLayer._openLayerShape(
+                frame: local, cornerRadius: radius, borderWidth: borderWidth,
+                alpha: CanvasColor(border).alpha))
+            sawShape = true
+        }
+        for subview in view.subviews {
+            guard let layer = _maskLayer(mirroring: subview, sawShape: &sawShape)
+            else { return nil }
+            container.addSublayer(layer)
+        }
+        return container
     }
 
     private static func alignedRect(

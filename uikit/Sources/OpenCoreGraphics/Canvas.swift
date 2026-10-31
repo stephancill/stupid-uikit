@@ -359,12 +359,17 @@ public final class Canvas: NSObject {
     private var externalBitmapData: UnsafeMutableRawPointer?
     private var externalBitmapBytesPerRow = 0
 
-    public init(bitmap: Bitmap, scale: CGFloat) {
+    public convenience init(bitmap: Bitmap, scale: CGFloat) {
+        self.init(bitmap: bitmap, scale: scale,
+                  backend: CanvasBackendSelection.current)
+    }
+
+    init(bitmap: Bitmap, scale: CGFloat, backend selection: RenderBackend) {
         self.bitmap = bitmap
         self.scale = scale
         self.state = CanvasState(ctm: CGAffineTransform(scaleX: scale, y: scale))
         super.init()
-        switch CanvasBackendSelection.current {
+        switch selection {
         case .quartz:
             // Falls back to the Swift rasterizer for degenerate (empty)
             // surfaces that a QZBitmapContext cannot represent.
@@ -513,6 +518,28 @@ public final class Canvas: NSObject {
     /// attenuate every overlapping draw independently at antialiased edges.
     public func beginMaskedTransparencyLayer(alpha: CGFloat, mask: Path) {
         backend.beginMaskedTransparencyLayer(alpha: alpha, mask: mask)
+    }
+
+    /// Begin an offscreen transparency group masked by whatever `drawMask`
+    /// paints: like CALayer.mask, only the alpha of the drawing counts, and
+    /// it multiplies the completed group exactly once at
+    /// `endTransparencyLayer()`. `drawMask` receives a scratch surface of
+    /// this canvas's size, backend and scale, starting at this canvas's
+    /// current CTM with no clip, so arbitrary mask content (paths, strokes,
+    /// gradients, nested groups) masks with the backend's own coverage.
+    public func beginMaskedTransparencyLayer(drawingMask drawMask: (Canvas) -> Void) {
+        let scratch = Canvas(
+            bitmap: Bitmap(width: bitmap.width, height: bitmap.height),
+            scale: scale,
+            backend: backend is QuartzBackend ? .quartz : .swift)
+        scratch.concatenate(state.ctm.concatenating(scratch.state.ctm.inverted()))
+        drawMask(scratch)
+        let count = bitmap.width * bitmap.height
+        var coverage = [UInt8](repeating: 0, count: count)
+        scratch.bitmap.pixels.withUnsafeBufferPointer { pixels in
+            for i in 0..<count { coverage[i] = pixels[i * 4 + 3] }
+        }
+        backend.beginMaskedTransparencyLayer(coverage: coverage)
     }
     public func endTransparencyLayer() { backend.endTransparencyLayer() }
 

@@ -678,8 +678,9 @@ public enum LayerBridge {
                                    arena: inout Arena) -> QZLayerRef? {
         let gradient = layer as? CAGradientLayer
         let gradientColors = gradient?._colorValues ?? []
-        guard let raw = gradientColors.count >= 2
-                ? QZGradientLayerCreate() : QZLayerCreate()
+        let shape = (layer as? CAShapeLayer)?._shapeRenderState
+        guard let raw = gradientColors.count >= 2 ? QZGradientLayerCreate()
+                : shape != nil ? QZShapeLayerCreate() : QZLayerCreate()
         else { return nil }
         let qz = arena.track(raw)
 
@@ -724,6 +725,9 @@ public enum LayerBridge {
         if let gradient, gradientColors.count >= 2 {
             configureGradient(qz, layer: gradient, colors: gradientColors,
                               locations: presentation.locations)
+        }
+        if let shape {
+            configureShape(qz, shape: shape)
         }
         if let mask = layer.mask,
            let maskLayer = buildExplicitLayer(mask, arena: &arena) {
@@ -907,6 +911,49 @@ public enum LayerBridge {
                                                 y: view.startPoint.y))
         QZGradientLayerSetEndPoint(l, QZPoint(x: view.endPoint.x,
                                               y: view.endPoint.y))
+    }
+
+    /// CAShapeLayer -> QZShapeLayer (quartz copies the path).
+    static func configureShape(_ l: QZLayerRef, shape: _CAShapeRenderState) {
+        guard let path = QZPathCreateMutable() else { return }
+        defer { QZPathRelease(path) }
+        for element in shape.path.elements {
+            switch element {
+            case .move(let p):
+                QZPathMoveToPoint(path, nil, QZFloat(p.x), QZFloat(p.y))
+            case .line(let p):
+                QZPathAddLineToPoint(path, nil, QZFloat(p.x), QZFloat(p.y))
+            case .quad(let c, let p):
+                QZPathAddQuadCurveToPoint(path, nil, QZFloat(c.x), QZFloat(c.y),
+                                          QZFloat(p.x), QZFloat(p.y))
+            case .cubic(let c1, let c2, let p):
+                QZPathAddCurveToPoint(path, nil, QZFloat(c1.x), QZFloat(c1.y),
+                                      QZFloat(c2.x), QZFloat(c2.y),
+                                      QZFloat(p.x), QZFloat(p.y))
+            case .close:
+                QZPathCloseSubpath(path)
+            }
+        }
+        QZShapeLayerSetPath(l, path)
+        let fill = shape.fill ?? CanvasColor(red: 0, green: 0, blue: 0, alpha: 0)
+        QZShapeLayerSetFillColor(l, QZFloat(fill.red), QZFloat(fill.green),
+                                 QZFloat(fill.blue), QZFloat(fill.alpha))
+        QZShapeLayerSetFillEvenOdd(l, shape.evenOdd)
+        let stroke = shape.stroke ?? CanvasColor(red: 0, green: 0, blue: 0, alpha: 0)
+        QZShapeLayerSetStrokeColor(l, QZFloat(stroke.red), QZFloat(stroke.green),
+                                   QZFloat(stroke.blue), QZFloat(stroke.alpha))
+        QZShapeLayerSetLineWidth(l, QZFloat(shape.lineWidth))
+        switch shape.cap {
+        case .butt: QZShapeLayerSetLineCap(l, kQZLineCapButt)
+        case .round: QZShapeLayerSetLineCap(l, kQZLineCapRound)
+        case .square: QZShapeLayerSetLineCap(l, kQZLineCapSquare)
+        }
+        switch shape.join {
+        case .miter: QZShapeLayerSetLineJoin(l, kQZLineJoinMiter)
+        case .round: QZShapeLayerSetLineJoin(l, kQZLineJoinRound)
+        case .bevel: QZShapeLayerSetLineJoin(l, kQZLineJoinBevel)
+        }
+        QZShapeLayerSetMiterLimit(l, QZFloat(shape.miterLimit))
     }
 
     static func configureGradient(_ l: QZLayerRef, layer: CAGradientLayer,

@@ -1902,6 +1902,65 @@ public struct _OpenStrokedCapsule: _OpenView {
     }
 }
 
+/// A shape stroked with a ShapeStyle. A style that is itself a view (a
+/// gradient) fills the shape's frame and is masked by the stroke drawn in
+/// black, which `.mask` turns into a shape mask (docs/SHAPE_MASKS.md); any
+/// other style strokes in its resolved colour.
+public struct _OpenShapeStyleStroke<Style: ShapeStyle>: _OpenView {
+    public typealias Body = Never
+    let style: Style
+    let stroke: @MainActor (Color) -> _OpenViewNode
+
+    public func _makeOpenUIKitNode() -> _OpenViewNode {
+        if let view = style as? any _OpenView {
+            return masked(view)
+        }
+        return stroke(style._openResolvedForegroundColor())
+    }
+
+    private func masked<Content: _OpenView>(_ content: Content) -> _OpenViewNode {
+        let strokeNode = stroke(.black)
+        return _OpenViewNode(.modified(
+            content._makeOpenUIKitNode(),
+            .mask(strokeNode, alignment: .center)
+        ))
+    }
+}
+
+public extension _OpenCircle {
+    @_disfavoredOverload
+    func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke(style: content) {
+            _OpenStrokedCapsule(color: $0, lineWidth: lineWidth)._makeOpenUIKitNode()
+        }
+    }
+}
+
+public extension _OpenCapsule {
+    @_disfavoredOverload
+    func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke(style: content) {
+            _OpenStrokedCapsule(color: $0, lineWidth: lineWidth)._makeOpenUIKitNode()
+        }
+    }
+}
+
+public extension _OpenRoundedRectangle {
+    @_disfavoredOverload
+    func stroke<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        _OpenShapeStyleStroke(style: content) { [cornerRadius] in
+            _OpenRoundedRectangleStroke(
+                cornerRadius: cornerRadius, color: $0, lineWidth: lineWidth
+            )._makeOpenUIKitNode()
+        }
+    }
+
+    @_disfavoredOverload
+    func strokeBorder<Style: ShapeStyle>(_ content: Style, lineWidth: CGFloat = 1) -> some _OpenView {
+        stroke(content, lineWidth: lineWidth)
+    }
+}
+
 public extension _OpenShape where Self == _OpenRoundedRectangle {
     static func rect(
         cornerRadius: CGFloat,

@@ -300,13 +300,11 @@ public enum UIRenderer {
         let alpha = min(CGFloat(backingPresentation.opacity), 1)
         if alpha <= 0 { return }
 
-        var maskAlpha: CGFloat = 1
-        var maskClip: Path?
-        if let mask = v.layer.mask {
-            guard let maskState = solidMaskPresentation(
-                mask, honorsMaskedCorners: honorsMaskedCorners) else { return }
-            maskAlpha = maskState.alpha
-            maskClip = maskState.clip
+        var mask: MaskPresentation?
+        if let maskLayer = v.layer.mask {
+            guard let presented = maskPresentation(
+                maskLayer, honorsMaskedCorners: honorsMaskedCorners) else { return }
+            mask = presented
         }
 
         c.save()
@@ -314,8 +312,8 @@ public enum UIRenderer {
         // as well as content and sublayers. Keep its transparency group open
         // around both the group-opacity shadow and the view opacity group so
         // partial mask alpha is multiplied into the final result exactly once.
-        if let maskClip {
-            c.beginMaskedTransparencyLayer(alpha: maskAlpha, mask: maskClip)
+        if let mask {
+            beginMask(mask, into: c, honorsMaskedCorners: honorsMaskedCorners)
         }
         let adjustsColor = v._openUIKitBrightness != 0
             || v._openUIKitSaturation != 1
@@ -459,7 +457,7 @@ public enum UIRenderer {
             )
         }
         if grouped { c.endTransparencyLayer() }
-        if maskClip != nil { c.endTransparencyLayer() }
+        if mask != nil { c.endTransparencyLayer() }
         c.restore()
     }
 
@@ -475,26 +473,21 @@ public enum UIRenderer {
         let alpha = Swift.min(Swift.max(CGFloat(presentation.opacity), 0), 1)
         guard alpha > 0 else { return }
 
-        var maskAlpha: CGFloat = 1
-        var maskClip: Path?
-        if let mask = layer.mask {
-            guard let maskState = solidMaskPresentation(
-                mask, honorsMaskedCorners: honorsMaskedCorners) else { return }
-            maskAlpha = maskState.alpha
-            maskClip = maskState.clip
+        var mask: MaskPresentation?
+        if let maskLayer = layer.mask {
+            guard let presented = maskPresentation(
+                maskLayer, honorsMaskedCorners: honorsMaskedCorners) else { return }
+            mask = presented
         }
 
         c.save()
-        if let maskClip {
-            c.beginMaskedTransparencyLayer(alpha: maskAlpha, mask: maskClip)
+        if let mask {
+            beginMask(mask, into: c, honorsMaskedCorners: honorsMaskedCorners)
         }
         if alpha < 1 { c.beginTransparencyLayer(alpha: alpha) }
 
         let bounds = presentation.bounds
         let corners = honorsMaskedCorners ? layer.maskedCorners : ._allKnown
-        // The pure-Swift fallback can exactly alpha-mask with the Focus-used
-        // solid rounded rectangle. Arbitrary alpha-mask layer trees are
-        // handled by the CQuartz layers compositor (`QZLayerSetMask`).
         if layer.masksToBounds {
             c.clip(to: layerRoundedRect(bounds,
                                         cornerRadius: presentation.cornerRadius,
@@ -522,6 +515,19 @@ public enum UIRenderer {
             c.restore()
         }
 
+        // CAShapeLayer content: fill, then stroke, above the background and
+        // below sublayers and border.
+        if let shape = (layer as? CAShapeLayer)?._shapeRenderState {
+            if let fill = shape.fill {
+                c.fill(shape.path, color: fill, evenOdd: shape.evenOdd)
+            }
+            if let stroke = shape.stroke {
+                c.stroke(shape.path, color: stroke, lineWidth: shape.lineWidth,
+                         cap: shape.cap, join: shape.join,
+                         miterLimit: shape.miterLimit)
+            }
+        }
+
         renderSublayers(of: layer, into: c,
                         honorsMaskedCorners: honorsMaskedCorners)
         renderBorder(of: layer, bounds: bounds,
@@ -531,18 +537,62 @@ public enum UIRenderer {
                      cornerRadii: presentation.cornerRadii, into: c)
 
         if alpha < 1 { c.endTransparencyLayer() }
-        if maskClip != nil { c.endTransparencyLayer() }
+        if mask != nil { c.endTransparencyLayer() }
         c.restore()
     }
 
-    /// Presented alpha and geometry of the solid mask subset supported by
-    /// the dependency-free renderer. Quartz handles arbitrary mask trees.
+    /// How a `CALayer.mask` is applied. A plain solid layer (background
+    /// colour only) keeps the analytic single-path mask; any other mask
+    /// (CAShapeLayer, CAGradientLayer, sublayers, a border, a nested mask)
+    /// is rendered by `renderLayer` into a scratch surface and its alpha
+    /// becomes the mask coverage, as Core Animation composites masks.
+    enum MaskPresentation {
+        case solid(alpha: CGFloat, clip: Path)
+        case rendered(CALayer)
+    }
+
+    /// nil when the mask hides its layer entirely.
+    static func maskPresentation(
+        _ mask: CALayer,
+        honorsMaskedCorners: Bool
+    ) -> MaskPresentation? {
+        if mask is CAShapeLayer || mask is CAGradientLayer
+            || !mask._orderedSublayers.isEmpty || mask.mask != nil
+            || mask._presentationState(at: OpenUIKitRuntime.animationTime)
+                .borderWidth > 0 {
+            guard !mask.isHidden else { return nil }
+            return .rendered(mask)
+        }
+        guard let solid = solidMaskPresentation(
+            mask, honorsMaskedCorners: honorsMaskedCorners) else { return nil }
+        return .solid(alpha: solid.alpha, clip: solid.clip)
+    }
+
+    static func beginMask(_ mask: MaskPresentation, into c: Canvas,
+                          honorsMaskedCorners: Bool) {
+        switch mask {
+        case .solid(let alpha, let clip):
+            c.beginMaskedTransparencyLayer(alpha: alpha, mask: clip)
+        case .rendered(let layer):
+            c.beginMaskedTransparencyLayer { mc in
+                // The mask sits in the masked layer's bounds space at its
+                // own position/anchor, like a sublayer.
+                let p = layer._presentationState(at: OpenUIKitRuntime.animationTime)
+                let b = p.bounds
+                mc.translate(x: p.position.x, y: p.position.y)
+                mc.translate(x: -(b.minX + p.anchorPoint.x * b.width),
+                             y: -(b.minY + p.anchorPoint.y * b.height))
+                renderLayer(layer, into: mc,
+                            honorsMaskedCorners: honorsMaskedCorners)
+            }
+        }
+    }
+
+    /// Presented alpha and geometry of a solid (background-only) mask.
     private static func solidMaskPresentation(
         _ mask: CALayer,
         honorsMaskedCorners: Bool
     ) -> (alpha: CGFloat, clip: Path)? {
-        precondition(mask._orderedSublayers.isEmpty,
-                     "OpenUIKit's pure-Swift renderer supports only a solid CALayer mask")
         guard !mask.isHidden, let color = mask._backgroundColorValue else { return nil }
         let state = mask._presentationState(at: OpenUIKitRuntime.animationTime)
         let alpha = CGFloat(Swift.min(Swift.max(
