@@ -437,7 +437,8 @@ private enum _UISystemImageRenderer {
                          bounds: CGRect(x: 0, y: 0,
                                         width: CGFloat(pixelSize.width) / scale,
                                         height: CGFloat(pixelSize.height) / scale),
-                         color: CanvasColor.black)
+                         color: CanvasColor.black,
+                         weight: configuration?._weight ?? .regular)
         return UIImage(bitmap: bitmap, scale: scale)
     }
 

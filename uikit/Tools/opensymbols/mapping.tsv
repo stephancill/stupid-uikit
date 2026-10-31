@@ -1,7 +1,12 @@
 # SF Symbol name -> Phosphor Icons 2.1.1 glyph. Columns (tab-separated):
-#   sf_name  phosphor_icon  weight(regular|fill)  composite(-|ring|disc)  note
+#   sf_name  phosphor_icon  weight(regular|regular-only|fill)  composite(-|ring|disc|mirror)  note
 # composite ring: Phosphor `circle` (regular) with the icon (regular) at half size in its centre.
 # composite disc: Phosphor `circle` (fill) with the icon (fill) at half size cut out (even-odd).
+# composite mirror: the icon mirrored horizontally (facing the other way).
+# Every regular-weight row also vendors the icon's Phosphor bold drawing, used for SF semibold
+# and heavier. regular-only draws the regular glyph at every weight: SF draws the symbol lighter
+# than Phosphor bold even at semibold (MEASURED `at`, title2 semibold, iPhone 16e @3x iOS 27:
+# Phosphor regular has 0.91x the reference ink, bold 1.37x).
 # A note marks an approximation: the Phosphor glyph is a different drawing of the same idea.
 # Numbered symbols (1.circle.fill ...) are deliberately absent: Focus onboarding uses them
 # and its pixel gate pins their current (blank) SwiftUI render.
@@ -15,9 +20,9 @@ arrow.up.circle.fill	arrow-circle-up	fill	-
 arrow.up.forward.app	arrow-square-out	regular	-	square with outgoing arrow
 arrow.up.forward.square	arrow-square-up-right	regular	-
 arrow.up.right.square	arrow-square-up-right	regular	-
-arrowshape.turn.up.left	arrow-bend-up-left	regular	-	thin bent arrow, SF draws a fat arrow shape
-arrowshape.turn.up.left.fill	arrow-bend-up-left	fill	-	thin bent arrow, SF draws a fat arrow shape
-at	at	regular	-
+arrowshape.turn.up.left	share-fat	regular	mirror	Phosphor share arrow, mirrored
+arrowshape.turn.up.left.fill	share-fat	fill	mirror	Phosphor share arrow, mirrored
+at	at	regular-only	-
 bell	bell	regular	-
 bell.fill	bell	fill	-
 bell.slash	bell-slash	regular	-
@@ -136,12 +141,12 @@ arrow.uturn.backward	arrow-u-up-left	regular	-
 arrow.uturn.left	arrow-u-up-left	regular	-
 arrow.uturn.forward	arrow-u-up-right	regular	-
 arrow.uturn.right	arrow-u-up-right	regular	-
-arrowshape.turn.up.backward	arrow-bend-up-left	regular	-	thin bent arrow, SF draws a fat arrow shape
-arrowshape.turn.up.backward.fill	arrow-bend-up-left	fill	-	thin bent arrow, SF draws a fat arrow shape
-arrowshape.turn.up.forward	arrow-bend-up-right	regular	-	thin bent arrow, SF draws a fat arrow shape
-arrowshape.turn.up.forward.fill	arrow-bend-up-right	fill	-	thin bent arrow, SF draws a fat arrow shape
-arrowshape.turn.up.right	arrow-bend-up-right	regular	-	thin bent arrow, SF draws a fat arrow shape
-arrowshape.turn.up.right.fill	arrow-bend-up-right	fill	-	thin bent arrow, SF draws a fat arrow shape
+arrowshape.turn.up.backward	share-fat	regular	mirror	Phosphor share arrow, mirrored
+arrowshape.turn.up.backward.fill	share-fat	fill	mirror	Phosphor share arrow, mirrored
+arrowshape.turn.up.forward	share-fat	regular	-	Phosphor share arrow
+arrowshape.turn.up.forward.fill	share-fat	fill	-	Phosphor share arrow
+arrowshape.turn.up.right	share-fat	regular	-	Phosphor share arrow
+arrowshape.turn.up.right.fill	share-fat	fill	-	Phosphor share arrow
 bag	bag	regular	-
 bag.fill	bag	fill	-
 banknote	money	regular	-

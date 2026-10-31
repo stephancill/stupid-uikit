@@ -1,7 +1,8 @@
 # Phosphor Icons (open symbol fallback)
 
 - What: SVG path data for the glyphs listed in `uikit/Tools/opensymbols/mapping.tsv`,
-  regular and fill weights only, generated into
+  regular, bold (for every regular-weight row except `regular-only`) and fill weights,
+  generated into
   `uikit/Sources/OpenUIKit/OpenSymbols/OpenSymbolCatalog.generated.swift`.
   Nothing else from the package is vendored.
 - Source: npm package `@phosphor-icons/core` 2.1.1
@@ -10,7 +11,8 @@
   https://registry.npmjs.org/@phosphor-icons/core/-/core-2.1.1.tgz,
   sha256 `313332be6190b724da24107addd781799b48bf76b13963f24501112ffe1baadd`,
   npm integrity `sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ==`.
-  Files read: `assets/regular/<icon>.svg` and `assets/fill/<icon>-fill.svg`.
+  Files read: `assets/regular/<icon>.svg`, `assets/bold/<icon>-bold.svg` and
+  `assets/fill/<icon>-fill.svg`.
 - Licence: MIT, Copyright (c) 2023 Phosphor Icons — `PhosphorIcons-LICENSE`.
 - Why: SwiftUI `Image(systemName:)` / UIKit `UIImage(systemName:)` need real icons
   for SF Symbol names; Apple's SF Symbols may not be copied or shipped, so open

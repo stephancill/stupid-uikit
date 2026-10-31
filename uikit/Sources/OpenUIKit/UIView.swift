@@ -1566,6 +1566,14 @@ open class UIView: UIResponder, CALayerDelegate {
 
     final func _layoutSubtree() {
         if needsLayout {
+            if LayoutEngine.constraintsChangedSinceSolve {
+                // Constraints were installed earlier in this pass, after
+                // layoutIfNeeded's solve (LayoutEngine.constraintsChangedSinceSolve).
+                var top: UIView = self
+                while let sv = top.superview { top = sv }
+                top._propagateSafeArea()
+                LayoutEngine.solveIfNeeded(root: top)
+            }
             // Clear before callbacks so setNeedsLayout() from inside an
             // override schedules a subsequent pass instead of being erased.
             needsLayout = false

@@ -27,6 +27,13 @@ enum LayoutEngine {
     /// Global count of active constraints — fast bail-out so hierarchies
     /// without Auto Layout pay one integer compare per layoutIfNeeded.
     static var installedConstraintCount = 0
+    /// Set when a constraint is activated or deactivated, cleared by a
+    /// whole-hierarchy solve. A constraint installed DURING a layout pass
+    /// (a UIViewControllerRepresentable's controller loading its view from
+    /// a SwiftUI host's layoutSubviews) arrives after that pass's solve;
+    /// `UIView._layoutSubtree` re-solves before laying out the next dirty
+    /// view, as UIKit's engine applies the new constraints in the same pass.
+    static var constraintsChangedSinceSolve = false
     /// Print the intrinsic entry order per solve (tie-break debugging).
     static var trace = false
 
@@ -77,6 +84,7 @@ enum LayoutEngine {
     /// already-solved hierarchy computes identical frames (the solve reads
     /// only constraints, intrinsic sizes and frame-based views' frames).
     static func solveIfNeeded(root: UIView) {
+        if root.superview == nil { constraintsChangedSinceSolve = false }
         guard installedConstraintCount > 0 else { return }
         var constraints: [NSLayoutConstraint] = []
         collectConstraints(root, into: &constraints)
