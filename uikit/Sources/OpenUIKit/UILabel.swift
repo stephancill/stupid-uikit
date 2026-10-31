@@ -597,8 +597,10 @@ open class UILabel: UIView {
             // NumberFormatter currency is `4,50` + U+00A0 + `€`; harvest of
             // `system-regular|13|light|F0.0|160` is "no ink". Same skip as
             // SPACE so a guest without SFNS does not OPENUIKIT_IOS_INK_MISS
-            // on the Ledger subtitle NBSP.
-            if ch == " " || ch.value == 0x00A0 { continue }
+            // on the Ledger subtitle NBSP. U+202F (NARROW NO-BREAK SPACE,
+            // the space before "PM" in en_US times) is "no ink" in the
+            // inkprobe harvest too (iPhone SE 2x / iOS 27.0, 2026-10-31).
+            if ch == " " || ch.value == 0x00A0 || ch.value == 0x202F { continue }
             drawGlyph(ch, penX: penX, baselineY: origin.y, in: canvas, font: font,
                       dark: dark, color: color, glyphFont: glyphFont,
                       inkEligible: inkEligible, famKey: famKey, sizeKey: sizeKey,
