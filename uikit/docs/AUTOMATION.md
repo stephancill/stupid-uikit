@@ -119,7 +119,13 @@ Found by driving stupid social with this module (each general, none app-specific
   `Data.write`; the Chats page aborted on its first cache write).
 - A List's scroll offset is retained in its graph state (`_OpenViewNode.retainedScrollState`,
   `_SwiftUIListScrollTracker`): the hosting view rebuilds the List's scroll view, so a scrolled feed
-  snapped back to the top.
+  snapped back to the top. Only the user's scrolling (drag, deceleration) is retained, as a
+  distance from the rest offset each rebuild computes, clamped to that rest. The first version
+  stored raw offsets and also recorded the scroll view's own inset rebase (-116 -> -153); a plain
+  render (no automation, which settles through more rebuilds) restored it against the new view's
+  still-zero inset and drew the feed at offset 0 under the status bar and large title. Gate:
+  `swift run swiftuilistrestprobe` (plain host turns only: rest below the bar, rest kept across
+  rebuilds, a non-user offset not restored, a user drag kept); it fails on the first version.
 - Subviews of a scroll view that folds the safe area into its adjusted content inset get no safe
   area of their own (UIKit's rule; a nested ScrollView in a scrolled List row adopted the bar's
   inset and re-laid out every turn).

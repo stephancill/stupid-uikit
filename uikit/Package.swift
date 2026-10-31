@@ -686,6 +686,7 @@ let conformanceTargets: [Target] = [
     // Native gate for iOS navigation chrome parity (docs/SWIFTUI_NAV_CHROME.md):
     // large titles, ToolbarItemGroup platters, device safe area, status bar.
     .executableTarget(name: "swiftuinavchromeprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
+    .executableTarget(name: "swiftuilistrestprobe", dependencies: ["SwiftUI", "OpenUIKit"]),
     // Native gate for shape masks (docs/SHAPE_MASKS.md): CAShapeLayer in
     // both compositors and SwiftUI `.mask { shape }`.
     .executableTarget(name: "swiftuishapemaskprobe", dependencies: ["SwiftUI", "OpenUIKit"]),

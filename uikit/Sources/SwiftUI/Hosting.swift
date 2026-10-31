@@ -2134,14 +2134,20 @@ private struct _RenderEnvironment {
 @MainActor
 private final class _SwiftUIListScrollTracker: NSObject, UIScrollViewDelegate {
     weak var state: _OpenLazyStackState?
+    let restY: CGFloat
 
-    init(state: _OpenLazyStackState) {
+    init(state: _OpenLazyStackState, restY: CGFloat) {
         self.state = state
+        self.restY = restY
         super.init()
     }
 
+    /// Only the user's scrolling is retained (a drag and its deceleration);
+    /// the scroll view's own inset rebases are not a position to restore.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        state?.contentOffset = scrollView.contentOffset
+        guard scrollView.isDragging || scrollView.isDecelerating || scrollView.isTracking else { return }
+        let delta = scrollView.contentOffset.y - restY
+        state?.listOffsetFromRest = delta == 0 ? nil : delta
     }
 }
 
@@ -5058,12 +5064,21 @@ private enum _ViewRenderer {
         // UICollectionView's does on iOS (MEASURED: a feed scrolled by a drag
         // snapped back to the top on the next rebuild).
         if let retainedState {
-            if let saved = retainedState.contentOffset {
-                let inset = list.adjustedContentInset
-                let maxY = max(-inset.top, list.contentSize.height - list.bounds.height + inset.bottom)
-                list.contentOffset = CGPoint(x: list.contentOffset.x, y: min(max(saved.y, -inset.top), maxY))
+            // Restored relative to the rest offset this pass computed, and
+            // clamped to it: the rest moves when the bar's inset arrives after
+            // the first layout, and this new scroll view has no safe area yet
+            // (its adjustedContentInset is still zero), so neither a raw
+            // offset nor that inset is a valid bound. MEASURED (plain
+            // 300-turn render): the first pass rested at -116, UIKit's inset
+            // rebase moved it to -153, and restoring that against the new
+            // view's zero inset clamped the feed to 0, under the status bar.
+            let restY = list.contentOffset.y
+            if let delta = retainedState.listOffsetFromRest {
+                let bottom = list.contentInset.bottom + surface.safeAreaInsets.bottom
+                let maxY = max(restY, list.contentSize.height - list.bounds.height + bottom)
+                list.contentOffset = CGPoint(x: list.contentOffset.x, y: min(max(restY + delta, restY), maxY))
             }
-            let tracker = _SwiftUIListScrollTracker(state: retainedState)
+            let tracker = _SwiftUIListScrollTracker(state: retainedState, restY: restY)
             retainedState.listScrollTracker = tracker
             list.delegate = tracker
         }
