@@ -230,6 +230,24 @@ nscf_objs=("$NSCF_OBJ"/*.o)
 if [ "${#nscf_objs[@]}" -eq 0 ]; then
     need_nscf=1
 fi
+# Objects compiled for another architecture are not reused: pass 1 skips them as incompatible,
+# which silently moves their definitions and references out of the derived stub set (measured on
+# aarch64: x86_64 nscfobj left __CFConstantStringClassReference extra and five CFRunLoopTimer
+# names missing).
+case "$TRIPLE" in
+    x86_64-*) nscf_cpu=X86_64 ;;
+    arm64-* | aarch64-*) nscf_cpu=ARM64 ;;
+    *) echo "build_cftest_harness: no object architecture for TRIPLE=$TRIPLE" >&2; exit 2 ;;
+esac
+for o in "${nscf_objs[@]}"; do
+    [ -f "$o" ] || continue
+    if ! llvm-otool-18 -hv "$o" 2>/dev/null | grep -Eq "MH_MAGIC_64[[:space:]]+$nscf_cpu[[:space:]]"; then
+        echo "nscf rebuild reason=arch $(basename "$o") is not $nscf_cpu"
+        rm -f "$NSCF_OBJ"/*.o
+        need_nscf=1
+        break
+    fi
+done
 if [ "$need_nscf" -eq 1 ] || [ "${CFOBJC_REBUILD_NSCF:-0}" = 1 ]; then
     compile_nscf || exit 2
 fi

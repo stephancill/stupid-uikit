@@ -2000,7 +2000,7 @@ else
     ok "ud-guest-x86 does not compile FE a second time"
 fi
 expect_grep 'scratch/ud-guest-x86_64' "$UDINC" "work tree is suffixed"
-expect_grep 'refusing unsuffixed/arm64 ud-guest work tree' "$UDINC" \
+expect_grep 'refusing unsuffixed or foreign-architecture ud-guest work tree' "$UDINC" \
     "unsuffixed work tree is a named CANNOT"
 expect_grep 'export UD_GUEST_BIN' "$PHASE2" "successful link exports UD_GUEST_BIN for rung a"
 expect_grep 'phase2_stage_cftest_into_run_root' "$UDINC" \
@@ -2197,7 +2197,7 @@ fi
 
 unsuf=$(phase2_ud_guest_refuse_unsuffixed "$UDWORK/scratch/ud-guest" || true)
 case "$unsuf" in
-    CANNOT_UD_GUEST_WORKTREE\ file=*reason=refusing\ unsuffixed/arm64*)
+    CANNOT_UD_GUEST_WORKTREE\ file=*reason=refusing\ unsuffixed\ or\ foreign-architecture*)
         ok "unsuffixed work tree is CANNOT_UD_GUEST_WORKTREE"
         ;;
     *) die_test "unsuffixed refusal got: $unsuf" ;;
