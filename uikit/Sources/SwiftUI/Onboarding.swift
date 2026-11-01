@@ -566,6 +566,30 @@ public struct _OpenButton<Label: _OpenView>: _OpenView {
         self.role = role
     }
 
+    /// iOS 17 `Button(_:systemImage:action:)`: a button whose label is
+    /// `Label(title, systemImage:)`, as SwiftUI declares it.
+    nonisolated public init(
+        _ title: String,
+        systemImage: String,
+        action: @escaping @MainActor () -> Void
+    ) where Label == _OpenLabel<_OpenText, _OpenImage> {
+        self.action = action
+        label = _OpenLabel(title, systemImage: systemImage)
+        role = nil
+    }
+
+    /// iOS 17 `Button(_:systemImage:role:action:)`.
+    nonisolated public init(
+        _ title: String,
+        systemImage: String,
+        role: ButtonRole?,
+        action: @escaping @MainActor () -> Void
+    ) where Label == _OpenLabel<_OpenText, _OpenImage> {
+        self.action = action
+        label = _OpenLabel(title, systemImage: systemImage)
+        self.role = role
+    }
+
     /// iOS 26 label-less role button. MEASURED iPhone 16 / iOS 26.1
     /// (nnwswiftuiprobe): `.close` in the toolbar draws the "xmark" symbol.
     /// Other roles' glyphs were not measured and draw no glyph (KNOWN_GAPS).

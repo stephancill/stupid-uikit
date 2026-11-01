@@ -1924,6 +1924,8 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
         install(node, animation: nil)
     }
 
+    private var appliedInteractiveDismissDisabled = false
+
     private func evaluateRoot() -> _OpenViewNode {
         let evaluated = graph.evaluate(rootView)
         let (node, configuration) = _openExtractNavigationConfiguration(evaluated)
@@ -1943,6 +1945,15 @@ open class _OpenUIHostingController<Content: _OpenView>: UIViewController {
             navigationItem.hidesBackButton = configuration.backButtonHidden
         }
         appliedRootBackButtonHidden = configuration.backButtonHidden
+        // interactiveDismissDisabled: UIKit consults the presented controller, which for a
+        // SwiftUI sheet is the presentation container above this host.
+        let modal = configuration.interactiveDismissDisabled ?? false
+        if modal || appliedInteractiveDismissDisabled {
+            var presented: UIViewController = self
+            while let parent = presented.parent { presented = parent }
+            if presented.presentingViewController != nil { presented.isModalInPresentation = modal }
+        }
+        appliedInteractiveDismissDisabled = modal
         if OpenUIKitRuntime.systemFontCut == .iOS {
             let mode: UINavigationItem.LargeTitleDisplayMode
             switch configuration.titleDisplayMode {
@@ -3245,7 +3256,7 @@ private enum _ViewRenderer {
                 return measure(content, proposed: proposed, environment: next)
             case .accessibilityHidden:
                 return measure(content, proposed: proposed, environment: environment)
-            case .effect, .navigationTitle, .navigationSubtitle, .navigationBarHidden,
+            case .effect, .navigationTitle, .interactiveDismissDisabled, .navigationSubtitle, .navigationBarHidden,
                  .navigationBackButtonHidden, .navigationTitleDisplayMode,
                  .navigationDestination, .toolbar, .toolbarItem, .tag,
                  .pageTabViewStyle:
@@ -5036,7 +5047,7 @@ private enum _ViewRenderer {
                 pan.delegate = gate
                 host.addGestureRecognizer(pan)
             case .effect, .toolbarVisibility, .toolbarBackgroundVisibility,
-                 .navigationTitle, .navigationSubtitle, .navigationBarHidden,
+                 .navigationTitle, .interactiveDismissDisabled, .navigationSubtitle, .navigationBarHidden,
                  .navigationBackButtonHidden, .navigationTitleDisplayMode,
                  .navigationDestination, .toolbar, .toolbarItem, .tag,
                  .pageTabViewStyle:
@@ -5283,9 +5294,17 @@ private enum _ViewRenderer {
             // In a plain list a row's own listRowInsets replace the default
             // row insets, as in SwiftUI (the insets are laid out as padding
             // inside the row node).
-            let rowInsets = plain && _hasListRowInsets(row)
-                ? UIEdgeInsets.zero
-                : UIEdgeInsets(top: rowVerticalInset, left: 16, bottom: rowVerticalInset, right: 16)
+            // An edge the row's insets leave unset (NaN, `listRowInsets(_:_:)`) keeps the default.
+            let defaultInsets = UIEdgeInsets(top: rowVerticalInset, left: 16,
+                                             bottom: rowVerticalInset, right: 16)
+            let rowInsets = plain
+                ? _listRowInsets(row).map { explicit in
+                    UIEdgeInsets(top: explicit.top.isNaN ? defaultInsets.top : 0,
+                                 left: explicit.leading.isNaN ? defaultInsets.left : 0,
+                                 bottom: explicit.bottom.isNaN ? defaultInsets.bottom : 0,
+                                 right: explicit.trailing.isNaN ? defaultInsets.right : 0)
+                } ?? defaultInsets
+                : defaultInsets
             let proposal = CGSize(
                 width: max(0, section.bounds.width - rowInsets.left - rowInsets.right),
                 height: selfSizingRowProposalHeight
@@ -5915,6 +5934,14 @@ private enum _ViewRenderer {
     }
 
     /// Whether a row carries `listRowInsets(_:)` (outermost modifier chain).
+    static func _listRowInsets(_ node: _OpenViewNode) -> EdgeInsets? {
+        guard case .modified(let content, let modification) = node.kind else {
+            return nil
+        }
+        if case .listRowInsets(let insets) = modification { return insets }
+        return _listRowInsets(content)
+    }
+
     static func _hasListRowInsets(_ node: _OpenViewNode) -> Bool {
         guard case .modified(let content, let modification) = node.kind else {
             return false

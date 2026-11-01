@@ -325,6 +325,20 @@ open class NSItemProvider: OpenUIKit.NSItemProvider, NSCopying, NSSecureCoding,
 }
 #endif
 
+#if !FOUNDATION_EXTENSION_HOST
+/// On iOS `UIDragItem.itemProvider` is Foundation's `NSItemProvider`. OpenUIKit is built without
+/// Foundation, so its property has OpenUIKit's provider type, which app code cannot pass where it
+/// names Foundation's (stupid social's `stageImage(from: NSItemProvider)` in a drop handler). This
+/// module imports OpenUIKit, so this declaration takes precedence for code that sees both. A
+/// provider created by OpenUIKit itself is copied into this subclass rather than force-cast.
+extension UIDragItem {
+    public var itemProvider: NSItemProvider {
+        let provider = _openUIKitItemProvider
+        return provider as? NSItemProvider ?? NSItemProvider(_openUIKitCopying: provider)
+    }
+}
+
+#endif
 // MARK: - Extension item
 
 open class NSExtensionItem: NSObject, NSCopying, NSSecureCoding {

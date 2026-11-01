@@ -160,6 +160,21 @@ public final class UIImage: NSObject {
             || (renderingMode == .automatic && _isSystemSymbol)
     }
 
+    /// The symbol configuration `init(systemName:withConfiguration:)` rendered with; kept by the
+    /// immutable copies so `applyingSymbolConfiguration(_:)` can combine with it.
+    @available(iOS 13.0, *)
+    var _symbolConfiguration: UIImage.SymbolConfiguration? {
+        get { _symbolConfigurationStorage as? UIImage.SymbolConfiguration }
+        set { _symbolConfigurationStorage = newValue }
+    }
+    private var _symbolConfigurationStorage: AnyObject?
+
+    /// Sets the rendering mode of an image under construction (a palette symbol draws its own
+    /// colours, so it is `.alwaysOriginal` from the start).
+    func _forceRenderingMode(_ mode: UIImageRenderingMode) {
+        renderingMode = mode
+    }
+
     func _markAsSystemSymbol(_ name: String) {
         _isSystemSymbol = true
         _systemSymbolName = name
@@ -196,12 +211,14 @@ public final class UIImage: NSObject {
     private init(bitmap: Bitmap, scale: CGFloat,
                  renderingMode: UIImageRenderingMode,
                  isSystemSymbol: Bool,
-                 systemSymbolName: String?) {
+                 systemSymbolName: String?,
+                 symbolConfiguration: AnyObject? = nil) {
         self.bitmap = bitmap
         self.scale = scale > 0 ? scale : 1
         self.renderingMode = renderingMode
         self._isSystemSymbol = isSystemSymbol
         self._systemSymbolName = systemSymbolName
+        self._symbolConfigurationStorage = symbolConfiguration
     }
 
     // MARK: Rendering mode / tinting
@@ -211,7 +228,8 @@ public final class UIImage: NSObject {
     public func withRenderingMode(_ mode: UIImageRenderingMode) -> UIImage {
         UIImage(bitmap: bitmap, scale: scale, renderingMode: mode,
                 isSystemSymbol: _isSystemSymbol,
-                systemSymbolName: _systemSymbolName)
+                systemSymbolName: _systemSymbolName,
+                symbolConfiguration: _symbolConfigurationStorage)
     }
 
     /// A copy whose pixels are recolored with `color`, keeping the original
@@ -257,7 +275,8 @@ public final class UIImage: NSObject {
         }
         return UIImage(bitmap: out, scale: scale, renderingMode: mode,
                        isSystemSymbol: _isSystemSymbol,
-                       systemSymbolName: _systemSymbolName)
+                       systemSymbolName: _systemSymbolName,
+                       symbolConfiguration: _symbolConfigurationStorage)
     }
 
     // MARK: Loading (PNG / JPEG plus indexed vector PDF via ImageCodec)

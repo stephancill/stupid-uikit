@@ -813,7 +813,9 @@ open class UIButton: UIControl {
         // measured, `setTitle(_:for:)` on a configured button leaves
         // `configuration.title` nil while still driving the label, so the two
         // stores stay separate and the configuration wins when it has a title.
-        if let image = configuration.image {
+        if let configured = configuration.image {
+            let image = configuration.preferredSymbolConfigurationForImage
+                .flatMap { configured.applyingSymbolConfiguration($0) } ?? configured
             // A configuration tints its image like a template unless the app
             // asked for the original colours (custom emoji in stupid social's
             // reaction chips, iOS 27 simulator: drawn in colour, not as a

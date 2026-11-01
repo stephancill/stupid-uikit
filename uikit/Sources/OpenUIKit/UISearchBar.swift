@@ -920,3 +920,18 @@ open class UISearchBar: UIView {
     }
     let bridge = Bridge()
 }
+
+/// iOS 13's search-field delegate: UITextFieldDelegate plus search-specific callbacks. Search
+/// tokens and suggestion menus are not modelled, so the search callbacks are never sent; a
+/// delegate's text-field callbacks are, through `UITextField.delegate`.
+@preconcurrency @MainActor
+public protocol UISearchTextFieldDelegate: UITextFieldDelegate {
+    /// iOS 16. Not sent: this UISearchTextField presents no suggestion menu.
+    func searchTextField(_ searchTextField: UISearchTextField,
+                         didSelect suggestion: any UISearchSuggestion)
+}
+
+public extension UISearchTextFieldDelegate {
+    func searchTextField(_ searchTextField: UISearchTextField,
+                         didSelect suggestion: any UISearchSuggestion) {}
+}

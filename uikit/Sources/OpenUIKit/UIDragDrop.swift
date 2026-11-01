@@ -131,6 +131,11 @@ open class UIDragItem {
         self.itemProvider = itemProvider
     }
 
+    /// The stored provider under OpenUIKit's own type. The guest Foundation's `NSItemProvider`
+    /// subclasses OpenUIKit's and redeclares `itemProvider` with its type (NSExtensionHost.swift),
+    /// which app code then sees; that accessor reads the storage through this one.
+    public var _openUIKitItemProvider: NSItemProvider { itemProvider }
+
     public func setNeedsDropPreviewUpdate() {}
 }
 

@@ -434,6 +434,9 @@ enum _OpenViewModification {
     case clipped
     case hidden
     case navigationTitle(String)
+    /// `interactiveDismissDisabled(_:)`: read into the screen's navigation configuration; the
+    /// hosting controller sets `isModalInPresentation` on the controller presenting it.
+    case interactiveDismissDisabled(Bool)
     case navigationSubtitle(String)
     case navigationBarHidden(Bool)
     case navigationBackButtonHidden(Bool)
@@ -565,6 +568,9 @@ fileprivate enum _OpenViewModifier {
     case clipped
     case hidden
     case navigationTitle(String)
+    /// `interactiveDismissDisabled(_:)`: read into the screen's navigation configuration; the
+    /// hosting controller sets `isModalInPresentation` on the controller presenting it.
+    case interactiveDismissDisabled(Bool)
     case navigationSubtitle(String)
     case navigationBarHidden(Bool)
     case navigationBackButtonHidden(Bool)
@@ -730,6 +736,7 @@ fileprivate enum _OpenViewModifier {
         case .clipped: return .clipped
         case .hidden: return .hidden
         case .navigationTitle(let title): return .navigationTitle(title)
+        case .interactiveDismissDisabled(let disabled): return .interactiveDismissDisabled(disabled)
         case .navigationSubtitle(let subtitle): return .navigationSubtitle(subtitle)
         case .navigationBarHidden(let hidden): return .navigationBarHidden(hidden)
         case .navigationBackButtonHidden(let hidden):
@@ -4659,6 +4666,26 @@ public extension _OpenView {
         return _OpenModifiedContent(content: self, modification: .listRowInsets(insets))
     }
 
+    /// iOS 26: the given edges' row insets set to `length`; the other edges keep the list's
+    /// default row insets (stored as NaN, resolved by the plain list's row layout; padding
+    /// layout reads NaN as 0 through `max(0, _)`). A nil length leaves every edge at the default.
+    func listRowInsets(_ edges: Edge.Set = .all, _ length: CGFloat?) -> some _OpenView {
+        guard let length else {
+            return _OpenModifiedContent(content: self, modification: .effect)
+        }
+        return _OpenModifiedContent(content: self, modification: .listRowInsets(EdgeInsets(
+            top: edges.contains(.top) ? length : .nan,
+            leading: edges.contains(.leading) ? length : .nan,
+            bottom: edges.contains(.bottom) ? length : .nan,
+            trailing: edges.contains(.trailing) ? length : .nan)))
+    }
+
+    /// Whether the sheet presenting this view can be dismissed by dragging it down
+    /// (`isModalInPresentation` on the presented controller).
+    func interactiveDismissDisabled(_ isDisabled: Bool = true) -> some _OpenView {
+        _OpenModifiedContent(content: self, modification: .interactiveDismissDisabled(isDisabled))
+    }
+
     func tag<Value: Hashable>(_ tag: Value) -> some _OpenView {
         _OpenModifiedContent(content: self, modification: .tag(AnyHashable(tag)))
     }
@@ -4709,6 +4736,8 @@ private func _flattenGroup(_ node: _OpenViewNode) -> [_OpenViewNode] {
 @MainActor
 struct _OpenNavigationConfiguration {
     var title: String?
+    /// `interactiveDismissDisabled(_:)` on the screen (nil: not set).
+    var interactiveDismissDisabled: Bool?
     /// iOS 26 `navigationSubtitle`. MEASURED (nnwswiftuiprobe): lands on
     /// the hosting controller's navigationItem.subtitle.
     var subtitle: String?
@@ -4733,6 +4762,8 @@ func _openExtractNavigationConfiguration(
         switch modification {
         case .navigationTitle(let title):
             configuration.title = title
+        case .interactiveDismissDisabled(let disabled):
+            configuration.interactiveDismissDisabled = disabled
         case .navigationSubtitle(let subtitle):
             configuration.subtitle = subtitle
         case .navigationBarHidden(let hidden):
@@ -4830,6 +4861,9 @@ private func _extractNavigationChildren(
     let nodes = children.map { child -> _OpenViewNode in
         let (node, childConfiguration) = _openExtractNavigationConfiguration(child)
         if let title = childConfiguration.title { configuration.title = title }
+        if let disabled = childConfiguration.interactiveDismissDisabled {
+            configuration.interactiveDismissDisabled = disabled
+        }
         configuration.barHidden = configuration.barHidden || childConfiguration.barHidden
         configuration.backButtonHidden = configuration.backButtonHidden
             || childConfiguration.backButtonHidden

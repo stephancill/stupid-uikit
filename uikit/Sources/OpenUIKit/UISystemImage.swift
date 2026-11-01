@@ -114,16 +114,19 @@ extension UIImage {
 /// keyed seed and return non-nil.
 @available(iOS 13.0, *)
 private final class _UIImageSymbolConfigurationSeedCoder: NSCoder {
-    let pointSize: Double
-    let weight: Int
-    let scale: Int
+    let seed: _UISymbolConfigurationSeed
+    var pointSize: Double { Double(seed.pointSize) }
+    var weight: Int { seed.weight.rawValue }
+    var scale: Int { seed.scale.rawValue }
 
-    init(pointSize: CGFloat, weight: UIImage.SymbolWeight,
-         scale: UIImage.SymbolScale = .unspecified) {
-        self.pointSize = Double(pointSize)
-        self.weight = weight.rawValue
-        self.scale = scale.rawValue
+    init(_ seed: _UISymbolConfigurationSeed) {
+        self.seed = seed
         super.init()
+    }
+
+    convenience init(pointSize: CGFloat, weight: UIImage.SymbolWeight,
+                     scale: UIImage.SymbolScale = .unspecified) {
+        self.init(_UISymbolConfigurationSeed(pointSize: pointSize, weight: weight, scale: scale))
     }
 
     override var allowsKeyedCoding: Bool { true }
@@ -131,6 +134,7 @@ private final class _UIImageSymbolConfigurationSeedCoder: NSCoder {
     override func containsValue(forKey key: String) -> Bool {
         key == "OpenUIKit.pointSize" || key == "OpenUIKit.weight"
             || key == "OpenUIKit.scale"
+            || (key == "OpenUIKit.textStyle" && seed.textStyle != nil)
     }
 
     override func decodeDouble(forKey key: String) -> Double {
@@ -164,8 +168,7 @@ private final class _UIImageSymbolConfigurationSeedCoder: NSCoder {
     }
 
     override func decodeObject(forKey key: String) -> Any? {
-        _ = key
-        return nil
+        key == "OpenUIKit.textStyle" ? seed.textStyle?.rawValue : nil
     }
 }
 
@@ -174,23 +177,16 @@ open class _UIImageSymbolConfiguration: _UIImageConfiguration, @unchecked Sendab
     let _pointSize: CGFloat
     let _weight: UIImage.SymbolWeight
     let _scale: UIImage.SymbolScale
+    let _textStyle: UIFont.TextStyle?
+    let _paletteColors: [UIColor]?
 
-    public convenience init(pointSize: CGFloat,
-                            weight: UIImage.SymbolWeight) {
-        self.init(coder: _UIImageSymbolConfigurationSeedCoder(
-            pointSize: pointSize,
-            weight: weight
-        ))!
+    convenience init(_seed seed: _UISymbolConfigurationSeed) {
+        self.init(coder: _UIImageSymbolConfigurationSeedCoder(seed))!
     }
 
-    public convenience init(pointSize: CGFloat,
-                            weight: UIImage.SymbolWeight,
-                            scale: UIImage.SymbolScale) {
-        self.init(coder: _UIImageSymbolConfigurationSeedCoder(
-            pointSize: pointSize,
-            weight: weight,
-            scale: scale
-        ))!
+    var _seed: _UISymbolConfigurationSeed {
+        _UISymbolConfigurationSeed(pointSize: _pointSize, weight: _weight, scale: _scale,
+                                   textStyle: _textStyle, paletteColors: _paletteColors)
     }
 
     open override class var supportsSecureCoding: Bool { true }
@@ -201,14 +197,20 @@ open class _UIImageSymbolConfiguration: _UIImageConfiguration, @unchecked Sendab
         // through the dynamic metatype keeps copy distinct and preserves an
         // external subclass. See the class note for the bounded coder-routing
         // divergence from Objective-C's class factory.
-        return type(of: self).init(coder: _UIImageSymbolConfigurationSeedCoder(
-            pointSize: _pointSize,
-            weight: _weight,
-            scale: _scale
-        ))!
+        return type(of: self).init(coder: _UIImageSymbolConfigurationSeedCoder(_seed))!
     }
 
     public required init?(coder: NSCoder) {
+        if let seeded = coder as? _UIImageSymbolConfigurationSeedCoder {
+            let seed = seeded.seed
+            _pointSize = seed.pointSize
+            _weight = seed.weight
+            _scale = seed.scale
+            _textStyle = seed.textStyle
+            _paletteColors = seed.paletteColors
+            super.init(coder: coder)
+            return
+        }
         let pointSize = CGFloat(coder.decodeDouble(forKey: "OpenUIKit.pointSize"))
         let rawWeight = coder.decodeInteger(forKey: "OpenUIKit.weight")
         guard let weight = UIImage.SymbolWeight(rawValue: rawWeight) else {
@@ -219,6 +221,10 @@ open class _UIImageSymbolConfiguration: _UIImageConfiguration, @unchecked Sendab
         _pointSize = pointSize
         _weight = weight
         _scale = scale
+        _textStyle = (coder.decodeObject(forKey: "OpenUIKit.textStyle") as? String)
+            .map { UIFont.TextStyle(rawValue: $0) }
+        // Palette colours are not archived: UIColor has no coder conformance here.
+        _paletteColors = nil
         super.init(coder: coder)
     }
 
@@ -226,6 +232,9 @@ open class _UIImageSymbolConfiguration: _UIImageConfiguration, @unchecked Sendab
         coder.encode(Double(_pointSize), forKey: "OpenUIKit.pointSize")
         coder.encode(_weight.rawValue, forKey: "OpenUIKit.weight")
         coder.encode(_scale.rawValue, forKey: "OpenUIKit.scale")
+        if let textStyle = _textStyle {
+            coder.encode(textStyle.rawValue, forKey: "OpenUIKit.textStyle")
+        }
         super.encode(with: coder)
     }
 
@@ -233,16 +242,12 @@ open class _UIImageSymbolConfiguration: _UIImageConfiguration, @unchecked Sendab
         guard let other = object as? _UIImageSymbolConfiguration else {
             return false
         }
-        return _pointSize == other._pointSize
-            && _weight == other._weight
-            && _scale == other._scale
+        return _seed == other._seed
     }
 
     open override var hash: Int {
         var hasher = Hasher()
-        hasher.combine(_pointSize)
-        hasher.combine(_weight.rawValue)
-        hasher.combine(_scale.rawValue)
+        hasher.combine(_seed)
         return hasher.finalize()
     }
 }
@@ -252,29 +257,133 @@ open class _UIImageSymbolConfiguration: _UIImageConfiguration, @unchecked Sendab
     let _pointSize: CGFloat
     let _weight: UIImage.SymbolWeight
     let _scale: UIImage.SymbolScale
+    let _textStyle: UIFont.TextStyle?
+    let _paletteColors: [UIColor]?
 
-    internal init(_systemPointSize pointSize: CGFloat,
-                  weight: UIImage.SymbolWeight,
-                  scale: UIImage.SymbolScale) {
-        _pointSize = pointSize
-        _weight = weight
-        _scale = scale
+    internal init(_seed seed: _UISymbolConfigurationSeed) {
+        _pointSize = seed.pointSize
+        _weight = seed.weight
+        _scale = seed.scale
+        _textStyle = seed.textStyle
+        _paletteColors = seed.paletteColors
         super.init(_systemImageConfiguration: ())
     }
 
-    public convenience init(pointSize: CGFloat,
-                            weight: UIImage.SymbolWeight) {
-        self.init(_systemPointSize: pointSize, weight: weight,
-                  scale: .unspecified)
-    }
-
-    public convenience init(pointSize: CGFloat,
-                            weight: UIImage.SymbolWeight,
-                            scale: UIImage.SymbolScale) {
-        self.init(_systemPointSize: pointSize, weight: weight, scale: scale)
+    var _seed: _UISymbolConfigurationSeed {
+        _UISymbolConfigurationSeed(pointSize: _pointSize, weight: _weight, scale: _scale,
+                                   textStyle: _textStyle, paletteColors: _paletteColors)
     }
 }
 #endif
+
+/// Every field a symbol configuration carries. A zero point size and the `.unspecified` weight and
+/// scale are UIKit's "not specified" values: `applying(_:)` lets the other configuration's
+/// specified fields win, and rendering resolves what is left to the defaults (17 pt, regular).
+@available(iOS 13.0, *)
+struct _UISymbolConfigurationSeed: Hashable {
+    var pointSize: CGFloat = 0
+    var weight: UIImage.SymbolWeight = .unspecified
+    var scale: UIImage.SymbolScale = .unspecified
+    var textStyle: UIFont.TextStyle?
+    var paletteColors: [UIColor]?
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.pointSize == b.pointSize && a.weight == b.weight && a.scale == b.scale
+            && a.textStyle == b.textStyle
+            && a.paletteColors.map { $0.map(ObjectIdentifier.init) }
+                == b.paletteColors.map { $0.map(ObjectIdentifier.init) }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(pointSize)
+        hasher.combine(weight.rawValue)
+        hasher.combine(scale.rawValue)
+        hasher.combine(textStyle)
+        hasher.combine(paletteColors?.map(ObjectIdentifier.init))
+    }
+
+    /// UIImage.Configuration.applying(_:): each field the other configuration specifies replaces
+    /// this one's. A text style and an explicit point size exclude each other, as in UIKit.
+    func applying(_ other: Self) -> Self {
+        var result = self
+        if other.pointSize > 0 { result.pointSize = other.pointSize; result.textStyle = other.textStyle }
+        if let style = other.textStyle { result.textStyle = style; result.pointSize = other.pointSize }
+        if other.weight != .unspecified { result.weight = other.weight }
+        if other.scale != .unspecified { result.scale = other.scale }
+        if let colors = other.paletteColors { result.paletteColors = colors }
+        return result
+    }
+
+    var specifiesGeometry: Bool { pointSize > 0 || weight != .unspecified || scale != .unspecified }
+}
+
+@available(iOS 13.0, *)
+extension _UIImageSymbolConfiguration {
+    public convenience init(pointSize: CGFloat, weight: UIImage.SymbolWeight) {
+        self.init(_seed: _UISymbolConfigurationSeed(pointSize: pointSize, weight: weight))
+    }
+
+    public convenience init(pointSize: CGFloat, weight: UIImage.SymbolWeight,
+                            scale: UIImage.SymbolScale) {
+        self.init(_seed: _UISymbolConfigurationSeed(pointSize: pointSize, weight: weight,
+                                                    scale: scale))
+    }
+
+    /// Sized like the text style's preferred font at the default content size (body: 17 pt).
+    public convenience init(textStyle: UIFont.TextStyle) {
+        self.init(_seed: _UISymbolConfigurationSeed(
+            pointSize: UIFont.preferredFont(forTextStyle: textStyle).pointSize,
+            textStyle: textStyle))
+    }
+
+    public convenience init(textStyle: UIFont.TextStyle, scale: UIImage.SymbolScale) {
+        self.init(_seed: _UISymbolConfigurationSeed(
+            pointSize: UIFont.preferredFont(forTextStyle: textStyle).pointSize, scale: scale,
+            textStyle: textStyle))
+    }
+
+    public convenience init(pointSize: CGFloat) {
+        self.init(_seed: _UISymbolConfigurationSeed(pointSize: pointSize))
+    }
+
+    public convenience init(weight: UIImage.SymbolWeight) {
+        self.init(_seed: _UISymbolConfigurationSeed(weight: weight))
+    }
+
+    public convenience init(scale: UIImage.SymbolScale) {
+        self.init(_seed: _UISymbolConfigurationSeed(scale: scale))
+    }
+
+    /// iOS 15. Symbols here are single-layer masks (no layer model), so a palette draws the whole
+    /// mask in its last colour: the colour iOS gives the enclosing layer of a two-layer symbol
+    /// (`arrow.up.circle.fill`: the circle), whose cut-out shows the inner layer's shape. A
+    /// one-colour palette is exact.
+    public convenience init(paletteColors: [UIColor]) {
+        self.init(_seed: _UISymbolConfigurationSeed(paletteColors: paletteColors))
+    }
+
+    /// `UIImage.Configuration.applying(_:)` for symbol configurations: the other configuration's
+    /// specified fields win. A non-symbol configuration leaves the receiver unchanged.
+    public func applying(_ otherConfiguration: UIImage.Configuration?) -> UIImage.SymbolConfiguration {
+        guard let other = otherConfiguration as? UIImage.SymbolConfiguration else {
+            return UIImage.SymbolConfiguration(_seed: _seed)
+        }
+        return UIImage.SymbolConfiguration(_seed: _seed.applying(other._seed))
+    }
+
+    /// The configuration the symbol renderer sees: nil when nothing about the geometry is
+    /// specified (a palette-only configuration renders like no configuration), otherwise
+    /// unspecified point size and weight resolved to 17 pt regular.
+    var _geometryForRendering: UIImage.SymbolConfiguration? {
+        guard _seed.specifiesGeometry else { return nil }
+        var seed = _seed
+        seed.textStyle = nil
+        seed.paletteColors = nil
+        if seed.pointSize <= 0 { seed.pointSize = 17 }
+        if seed.weight == .unspecified { seed.weight = .regular }
+        return UIImage.SymbolConfiguration(_seed: seed)
+    }
+}
 
 @available(iOS 13.0, *)
 extension UIImage {
@@ -295,12 +404,42 @@ extension UIImage {
     /// declared weights use the same deterministic procedural geometry.
     public convenience init?(systemName name: String,
                              withConfiguration configuration: UIImage.Configuration?) {
-        guard let rendered = _UISystemImageRenderer.render(
-            name: name,
-            configuration: configuration
-        ) else { return nil }
+        let symbol = configuration as? UIImage.SymbolConfiguration
+        guard configuration == nil || symbol != nil,
+              let rendered = _UISystemImageRenderer.render(
+                  name: name,
+                  configuration: symbol?._geometryForRendering
+              ) else { return nil }
+        if let palette = symbol?._paletteColors, let color = palette.last {
+            // See init(paletteColors:): the mask in the palette's last colour, drawn as is.
+            let colored = rendered.withTintColor(color, renderingMode: .alwaysOriginal)
+            self.init(bitmap: colored.bitmap, scale: colored.scale)
+            _markAsSystemSymbol(name)
+            _symbolConfiguration = symbol
+            _forceRenderingMode(.alwaysOriginal)
+            return
+        }
         self.init(bitmap: rendered.bitmap, scale: rendered.scale)
         _markAsSystemSymbol(name)
+        _symbolConfiguration = symbol
+    }
+
+    /// The configuration this symbol image was made with (nil for none or a non-symbol image).
+    public var symbolConfiguration: UIImage.SymbolConfiguration? { _symbolConfiguration }
+
+    /// A copy of this symbol image re-rendered with its configuration combined with
+    /// `configuration` (`applying(_:)`). A non-symbol image is returned unchanged.
+    public func applyingSymbolConfiguration(_ configuration: UIImage.SymbolConfiguration) -> UIImage? {
+        guard let name = _systemSymbolName else { return self }
+        let merged = _symbolConfiguration?.applying(configuration) ?? configuration
+        guard let image = UIImage(systemName: name, withConfiguration: merged) else { return nil }
+        return image.renderingMode == renderingMode || renderingMode == .automatic
+            ? image : image.withRenderingMode(renderingMode)
+    }
+
+    public func withConfiguration(_ configuration: UIImage.Configuration) -> UIImage {
+        guard let symbol = configuration as? UIImage.SymbolConfiguration else { return self }
+        return applyingSymbolConfiguration(symbol) ?? self
     }
 }
 

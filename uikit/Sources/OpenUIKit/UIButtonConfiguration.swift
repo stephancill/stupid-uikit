@@ -159,6 +159,9 @@ public extension UIButton {
 
         public var image: UIImage?
 
+        /// Applied to a symbol `image` before it is shown (`applyingSymbolConfiguration(_:)`).
+        public var preferredSymbolConfigurationForImage: UIImage.SymbolConfiguration?
+
         /// Gap between the image and the title block. Measured: 0 by default
         /// in every factory, and it adds to the intrinsic size one-for-one
         /// (leading placement, "Go" + `star.fill`: 74 pt at padding 0, 80 at
@@ -296,6 +299,7 @@ public extension UIButton {
             _subtitleTextAttributesTransformer = nil
             #endif
             image = nil
+            preferredSymbolConfigurationForImage = nil
             imagePadding = 0
             titlePadding = 1
             imagePlacement = .leading
