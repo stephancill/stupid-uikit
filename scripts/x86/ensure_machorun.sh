@@ -140,7 +140,7 @@ ensure_loader() {
     echo "== cold-build loader (CC=$CC)" >&2
     ensure_machorun_run_build loader
     ensure_machorun_normalize_loader
-    if phase2_is_elf_x86_loader "$bin"; then
+    if phase2_is_host_elf_loader "$bin"; then
         stamp_write "$bin" "$key"
         return 0
     fi
@@ -206,10 +206,10 @@ ensure_loader
 ensure_darwin
 ensure_objc4
 ensure_quartz
-phase2_park_arm64_darwin_dylibs "$MACHORUN/darwin/usr/lib"
+phase2_park_foreign_darwin_dylibs "$MACHORUN/darwin/usr/lib"
 ensure_machorun_normalize_loader
 
-if ! phase2_is_elf_x86_loader "$MACHORUN/build/machorun"; then
+if ! phase2_is_host_elf_loader "$MACHORUN/build/machorun"; then
     echo "ensure_machorun: CANNOT_BUILD_LOADER no x86-64 ELF PIE at $MACHORUN/build/machorun" >&2
     exit 2
 fi

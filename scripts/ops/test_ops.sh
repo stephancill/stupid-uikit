@@ -211,7 +211,7 @@ grep -q 'scripts/x86/ensure_machorun.sh' "$ROOT/scripts/ops/x86_cycle.sh" \
 grep -q 'scripts/x86/stage_cycle_roots.sh' "$ROOT/scripts/ops/x86_cycle.sh" \
     && ok "cycle roots stage calls stage_cycle_roots.sh" \
     || die_test "roots still a no-op stamp"
-grep -q 'phase2_park_arm64_darwin_dylibs' "$ROOT/scripts/x86/ensure_machorun.sh" \
+grep -q 'phase2_park_foreign_darwin_dylibs' "$ROOT/scripts/x86/ensure_machorun.sh" \
     && ok "ensure_machorun parks leftover arm64 dylibs" \
     || die_test "ensure_machorun missing park"
 grep -q 'ensure_machorun_assert_vendor_clean' "$ROOT/scripts/x86/ensure_machorun.sh" \

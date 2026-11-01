@@ -165,19 +165,32 @@ def inventory_sha256(items: tuple[str, ...]) -> str:
     return hashlib.sha256(canonical_text(items).encode("utf-8")).hexdigest()
 
 
-def macos_overlay_autolink_loads(items: tuple[str, ...], arch: str) -> tuple[str, ...]:
-    if arch == "arm64":
-        return items
-    if arch != "x86_64":
+def _overlay_flavor(arch: str) -> str:
+    """Which Swift overlays the guest root carries, which is what these inventories follow.
+
+    apple: the durable upstream arm64 trees (unsuffixed; Apple's iOS-simulator overlays staged in
+    mrroot_full). source: overlays cross-built from source with the Swift runtime beside them, as
+    on x86_64 and on aarch64 hosts bootstrapped by scripts/x86/phase2.sh (FULL_OUT_SUFFIX=-arm64,
+    the swift.org release runtime plus swiftcore-macho/scripts/build_release_overlays.sh). The
+    "x86" names below are that flavour's, measured first on x86_64.
+    """
+    import os
+    if arch not in ARCHES:
         raise ValueError(f"unsupported arch {arch!r}")
+    if arch == "arm64" and not os.environ.get("FULL_OUT_SUFFIX", "").startswith("-arm64"):
+        return "apple"
+    return "source"
+
+
+def macos_overlay_autolink_loads(items: tuple[str, ...], arch: str) -> tuple[str, ...]:
+    if _overlay_flavor(arch) == "apple":
+        return items
     return _replace_once(items, ARM64_OVERLAY_AUTOLINK, X86_OVERLAY_AUTOLINK)
 
 
 def macos_overlay_autolink_inputs(items: tuple[str, ...], arch: str) -> tuple[str, ...]:
-    if arch == "arm64":
+    if _overlay_flavor(arch) == "apple":
         return items
-    if arch != "x86_64":
-        raise ValueError(f"unsupported arch {arch!r}")
     return _replace_once(items, ARM64_OVERLAY_AUTOLINK_TBD, X86_OVERLAY_AUTOLINK_TBD)
 
 
@@ -655,7 +668,7 @@ def _swift64() -> bool:
 
 
 def loads(gate: str, name: str, arch: str) -> tuple[str, ...]:
-    if arch == "x86_64" and _swift64() and ("widget", name) in SWIFT64_X86_LOADS:
+    if _overlay_flavor(arch) == "source" and _swift64() and ("widget", name) in SWIFT64_X86_LOADS:
         return SWIFT64_X86_LOADS[("widget", name)]
     return macos_overlay_autolink_loads(_loads_table(gate)[name], arch)
 
@@ -673,7 +686,7 @@ X86_INPUT_INSERTS: dict[tuple[str, str], tuple[str, str]] = {
 
 def inputs(gate: str, name: str, arch: str) -> tuple[str, ...]:
     items = macos_overlay_autolink_inputs(_inputs_table(gate)[name], arch)
-    if arch == "x86_64":
+    if _overlay_flavor(arch) == "source":
         insert = X86_INPUT_INSERTS.get((gate, name))
         if insert and insert[1] not in items and insert[0] in items:
             at = items.index(insert[0]) + 1
@@ -691,7 +704,7 @@ def inputs(gate: str, name: str, arch: str) -> tuple[str, ...]:
         except KeyError:
             loads_table = _loads_table("widget")
         arm_loads = loads_table.get(name, ())
-        x86_loads = macos_overlay_autolink_loads(arm_loads, "x86_64")
+        x86_loads = macos_overlay_autolink_loads(arm_loads, arch)
         gained = (
             X86_OVERLAY_AUTOLINK in x86_loads and X86_OVERLAY_AUTOLINK not in arm_loads
         )
@@ -705,9 +718,12 @@ def inputs(gate: str, name: str, arch: str) -> tuple[str, ...]:
                     "{SYS}/usr/lib/swift/libswift_StringProcessing.tbd" if item == X86_OVERLAY_AUTOLINK_TBD else item
                     for item in items
                 )
-            elif name == "foundation":
+            elif name == "foundation" and arch == "x86_64":
                 # Measured onboarding-gate libFoundation.link-map: the umbrella libSystem.B.dylib
-                # follows the .tbd inputs at 6.4.2.
+                # follows the .tbd inputs at 6.4.2 on x86_64. On aarch64 (bootstrapped tree)
+                # libFoundation imports nothing the umbrella defines beyond libSystem.real (its
+                # only overlap is the weak __swift_FORCE_LOAD_$_swift_Builtin_float marker), so
+                # the link map does not list it.
                 umbrella = "{MRROOT}/darwin/usr/lib/libSystem.B.dylib"
                 if umbrella not in items:
                     items = items + (umbrella,)
@@ -767,7 +783,7 @@ def stubs(gate: str, name: str, arch: str) -> tuple[str, ...]:
         return CLOSURE_STUB_UNIVERSE
     if name != "substrate":
         raise KeyError(f"unknown stubs inventory {name!r}")
-    if arch == "arm64":
+    if _overlay_flavor(arch) == "apple":
         return CLOSURE_STUBS_ARM64
     return CLOSURE_STUBS_X86_64
 

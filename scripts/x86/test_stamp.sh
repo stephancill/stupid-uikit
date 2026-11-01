@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 # shellcheck source=stamp.inc
 . "$ROOT/scripts/x86/stamp.inc"
+# The fixtures are x86_64 Mach-O headers: that is the guest architecture they test against, on any host.
+export OTOOL_CPU=X86_64
 
 pass=0
 fail=0

@@ -291,7 +291,9 @@ fi
 # above/below still apply on every arch. On x86_64 the durable .o cannot be
 # linked; refuse until OpenCombine is rebuilt for $TARGET beside the arm64
 # artifacts. Do not rewrite the arm64 SHA to make an x86 run pass.
-if [ "$ARCH" = arm64 ]; then
+# The object pins are the durable unsuffixed export/ (upstream arm64); a cold build beside it
+# (export-<arch>/, phase2) is checked for its CPU instead.
+if [ -z "$FULL_OUT_SUFFIX" ]; then
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.o" \
         "$EXPECTED_OPENCOMBINE_OBJECT_SHA" OpenCombine.o
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.swiftmodule" \
@@ -1059,11 +1061,13 @@ host_bridge_args=(
     --ledger-style focus-widget
     --refuse-prefix 'focus_widget_guest: '
 )
-if [ "$(uname -m)" = aarch64 ] || [ "$(uname -m)" = arm64 ]; then
-    host_bridge_args+=(--host-abi ELF64-AArch64)
-else
-    host_bridge_args+=(--skip-runtime-pin --host-abi "ELF64-$(uname -m)")
-fi
+case "$(uname -m)" in
+    aarch64 | arm64) host_bridge_args+=(--host-abi ELF64-AArch64) ;;
+    *) host_bridge_args+=(--host-abi "ELF64-$(uname -m)") ;;
+esac
+# The libdispatch / BlocksRuntime pins are the upstream aarch64 Swift 6.2.4 toolchain's, which
+# the durable unsuffixed trees were built with; a bootstrapped tree (FULL_OUT_SUFFIX) has its own.
+[ -z "$FULL_OUT_SUFFIX" ] || host_bridge_args+=(--skip-runtime-pin)
 bash "$W/full/dispatch/build_host_bridge.sh" "${host_bridge_args[@]}"
 [ -f "$DISPATCH_HOST" ] && [ ! -L "$DISPATCH_HOST" ] \
     || die "Linux Dispatch host helper is missing: $DISPATCH_HOST"

@@ -68,8 +68,22 @@ stamp_expected_kind() {
             return $?
             ;;
     esac
+    # A Mach-O product is the guest's architecture (OTOOL_CPU from
+    # full/scripts/guest_arch.inc, which follows the host unless TARGET says
+    # otherwise); an ELF product is the host's.
+    case "$(uname -m)" in
+        x86_64) _stamp_host_cpu=X86_64 _stamp_host_elf=x86-64 ;;
+        aarch64 | arm64) _stamp_host_cpu=ARM64 _stamp_host_elf='ARM aarch64' ;;
+        *) return 1 ;;
+    esac
+    _stamp_cpu=${OTOOL_CPU:-$_stamp_host_cpu}
+    case "$_stamp_cpu" in
+        X86_64) _stamp_macho=x86_64 ;;
+        ARM64) _stamp_macho=arm64 ;;
+        *) return 1 ;;
+    esac
     if command -v llvm-otool-18 >/dev/null 2>&1; then
-        if llvm-otool-18 -hv "$_stamp_f" 2>/dev/null | grep -Eq 'MH_MAGIC_64[[:space:]]+X86_64'; then
+        if llvm-otool-18 -hv "$_stamp_f" 2>/dev/null | grep -Eq "MH_MAGIC_64[[:space:]]+$_stamp_cpu"; then
             return 0
         fi
         if llvm-otool-18 -hv "$_stamp_f" 2>/dev/null | grep -q 'MH_MAGIC_64'; then
@@ -78,11 +92,11 @@ stamp_expected_kind() {
     fi
     _stamp_file=$(file -b "$_stamp_f" 2>/dev/null || true)
     case "$_stamp_file" in
-        *"Mach-O 64-bit x86_64"*) return 0 ;;
-        *"Mach-O 64-bit arm64"*|*"Mach-O 64-bit ARM64"*) return 1 ;;
-        *"ELF 64-bit LSB pie executable, x86-64"*) return 0 ;;
-        *"ELF 64-bit LSB executable, x86-64"*) return 0 ;;
-        *"ELF 64-bit LSB shared object, x86-64"*) return 0 ;;
+        *"Mach-O 64-bit $_stamp_macho"*) return 0 ;;
+        *"Mach-O 64-bit"*) return 1 ;;
+        *"ELF 64-bit LSB pie executable, $_stamp_host_elf"*) return 0 ;;
+        *"ELF 64-bit LSB executable, $_stamp_host_elf"*) return 0 ;;
+        *"ELF 64-bit LSB shared object, $_stamp_host_elf"*) return 0 ;;
     esac
     return 1
 }

@@ -204,13 +204,26 @@ else
     die_test "SYS Darwin.modulemap differs from ARM pruned map"
 fi
 
+# swift64_sysroot_extras.sh adds the Swift 6.4 extras main's stager has no step for: SwiftShims
+# under usr/include and SwiftOnoneSupport under usr/lib/swift. They are compared with main
+# excluded and asserted present here.
+for rel in usr/include/SwiftShims/module.modulemap \
+    usr/lib/swift/SwiftOnoneSupport.swiftmodule usr/lib/swift/libswiftSwiftOnoneSupport.dylib; do
+    if [ -e "$SYS_OURS/$rel" ]; then
+        ok "ours SYS has the swift64 extra $rel"
+    else
+        die_test "ours SYS lacks the swift64 extra $rel"
+    fi
+done
+SWIFT64_EXTRAS_X=(-x SwiftShims -x SwiftOnoneSupport.swiftmodule -x libswiftSwiftOnoneSupport.dylib)
+
 DIFF_OUT=$WORK/diff.txt
 set +e
-diff -rq -x .phase2-stage-inputs "$SYS_MAIN" "$SYS_OURS" >"$DIFF_OUT" 2>&1
+diff -rq -x .phase2-stage-inputs "${SWIFT64_EXTRAS_X[@]}" "$SYS_MAIN" "$SYS_OURS" >"$DIFF_OUT" 2>&1
 diff_rc=$?
 set -e
 if [ "$diff_rc" -eq 0 ]; then
-    ok "diff -r SYS trees (excluding .phase2-stage-inputs) are identical"
+    ok "diff -r SYS trees (excluding .phase2-stage-inputs and the swift64 extras) are identical"
 else
     echo "=== diff -rq SYS (first 80 lines) ==="
     head -n 80 "$DIFF_OUT"
@@ -226,7 +239,8 @@ include_tree_digest() {
     local root=$1/usr/include
     (
         cd "$root"
-        find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | awk '{print $1}'
+        find . -path ./SwiftShims -prune -o -type f -print | LC_ALL=C sort | xargs sha256sum \
+            | sha256sum | awk '{print $1}'
     )
 }
 DIGEST_MAIN=$(include_tree_digest "$SYS_MAIN")

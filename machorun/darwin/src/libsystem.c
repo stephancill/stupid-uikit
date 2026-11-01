@@ -1248,6 +1248,154 @@ EXPORT void os_system_version_get_current_version(struct mr_os_version *out)
     out->minor = 1;
     out->patch = 0;
 }
+
+/* THE SWIFT PROJECT'S RELEASE RUNTIME IMPORTS A LITTLE MORE LIBSYSTEM than the
+ * stdlib swiftcore-macho cross-builds. The swift.org toolchain package's
+ * Darwin dylibs (swiftcore-macho/scripts/fetch_release_runtime.sh) are
+ * configured as Apple configures them: runtime tracing through os_log
+ * signposts, ASL for fatal-error reporting, availability checks through
+ * libdyld, and on macOS the crash backtracer (its process and Mach thread
+ * calls are host_deny.c rows). Measured with llvm-nm -u against this userland
+ * and scripts/check_undefined.sh --strict on a root holding the 6.4.2 slices.
+ *
+ * machorun has no log store and no signpost backend, so the honest answers
+ * are "a handle that logs nowhere" and "signposts are disabled". The runtime
+ * asks os_signpost_enabled before every emit, so the emitter is unreachable
+ * and stops loudly if that ever changes. */
+
+/* dyld_build_version_t, <mach-o/dyld_priv.h>: version is 0xMMMMmmpp. */
+struct mr_build_version { uint32_t platform; uint32_t version; };
+_Static_assert(sizeof(struct mr_build_version) == 8, "dyld_build_version_t is 2x u32");
+
+/* libdyld's answer to "is the running OS at least this?" for the platform the
+ * process runs as. The guest is the OS os_system_version_get_current_version
+ * reports, on whichever of macOS (1), iOS (2), Mac Catalyst (6) or the iOS
+ * simulator (7) its image was built for; a simulator's availability is
+ * written against its base platform, so iOS entries count for it. Entries for
+ * other platforms are not about this process, and with no entry for it the
+ * answer is no, as dyld's. */
+EXPORT _Bool _availability_version_check(uint32_t count, const struct mr_build_version *versions)
+{
+    struct mr_os_version os;
+    os_system_version_get_current_version(&os);
+    const uint32_t running = (os.major << 16) | (os.minor << 8) | os.patch;
+    for (uint32_t i = 0; versions && i < count; i++) {
+        switch (versions[i].platform) {
+        case 1: case 2: case 6: case 7:
+            return running >= versions[i].version;
+        default:
+            break;
+        }
+    }
+    return 0;
+}
+
+/* os_log_t. Callers only pass it back to os_log / os_signpost entry points. */
+struct mr_os_log { const char *subsystem, *category; };
+EXPORT void *os_log_create(const char *subsystem, const char *category)
+{
+    struct mr_os_log *log = malloc(sizeof *log);
+    if (!log) mr_bail("os_log_create: out of memory");
+    log->subsystem = subsystem;
+    log->category = category;
+    return log;
+}
+
+EXPORT _Bool os_signpost_enabled(void *log)
+{
+    (void)log;
+    return 0;
+}
+
+EXPORT uint64_t os_signpost_id_generate(void *log)
+{
+    static uint64_t next = 1;
+    (void)log;
+    return __atomic_fetch_add(&next, 1, __ATOMIC_RELAXED);
+}
+
+EXPORT void _os_signpost_emit_with_name_impl(void *dso, void *log, int type, uint64_t id,
+                                             const char *name, const char *format,
+                                             uint8_t *buf, uint32_t size)
+{
+    (void)dso; (void)log; (void)type; (void)id; (void)format; (void)buf; (void)size;
+    mr_bail2("_os_signpost_emit_with_name_impl: signposts are disabled "
+             "(os_signpost_enabled is false), so nothing should emit one", name);
+}
+
+/* The Swift runtime reports fatal errors through ASL as well as stderr. There
+ * is no ASL store here; the message goes to stderr, as ASL_OPT_STDERR does. */
+EXPORT int asl_log(void *client, void *msg, int level, const char *format, ...)
+{
+    (void)client; (void)msg; (void)level;
+    va_list ap;
+    va_start(ap, format);
+    vfprintf(__stderrp, format, ap);
+    va_end(ap);
+    fprintf(__stderrp, "\n");
+    return 0;
+}
+
+/* 128-bit integer division. Darwin's libSystem re-exports these from
+ * libcompiler_rt, and the swift.org release libswiftCore binds them two-level
+ * to libSystem (machorun's own dylibs link libclang_rt.osx.a instead). They cannot be written as `a / b` on __int128 — clang lowers that
+ * back into a call to this very function — so this is an explicit restoring
+ * long division, shared by all four entry points.
+ */
+typedef unsigned __int128 u128;
+typedef signed   __int128 s128;
+
+static u128 udivmod128(u128 n, u128 d, u128 *rem) {
+    if (d == 0) { volatile int z = 0; return (u128)(1 / z); } /* trap like the real one */
+    if (d > n) { if (rem) *rem = n; return 0; }
+    /* Normalise: find the highest bit of d relative to n. */
+    int shift = 0;
+    u128 dd = d;
+    while (dd <= n && !(dd >> 127)) { dd <<= 1; shift++; }
+    if (dd > n) { dd >>= 1; shift--; }
+    u128 q = 0;
+    for (int i = shift; i >= 0; i--) {
+        if (n >= dd) { n -= dd; q |= ((u128)1 << i); }
+        dd >>= 1;
+    }
+    if (rem) *rem = n;
+    return q;
+}
+
+EXPORT u128 __udivti3(u128 a, u128 b) { return udivmod128(a, b, 0); }
+EXPORT u128 __umodti3(u128 a, u128 b) { u128 r; udivmod128(a, b, &r); return r; }
+
+EXPORT s128 __divti3(s128 a, s128 b) {
+    int neg = 0;
+    u128 ua, ub;
+    if (a < 0) { ua = (u128)(-a); neg ^= 1; } else ua = (u128)a;
+    if (b < 0) { ub = (u128)(-b); neg ^= 1; } else ub = (u128)b;
+    u128 q = udivmod128(ua, ub, 0);
+    return neg ? -(s128)q : (s128)q;
+}
+
+EXPORT s128 __modti3(s128 a, s128 b) {
+    int neg = (a < 0);
+    u128 ua = (a < 0) ? (u128)(-a) : (u128)a;
+    u128 ub = (b < 0) ? (u128)(-b) : (u128)b;
+    u128 r;
+    udivmod128(ua, ub, &r);
+    return neg ? -(s128)r : (s128)r;
+}
+
+/* Code-signing status. A machorun guest is not signed: CS_OPS_STATUS (0)
+ * reports no flags (not CS_VALID, not CS_DEBUGGED); every other operation
+ * needs a kernel signing layer this host does not have. */
+EXPORT int csops(int pid, unsigned int ops, void *useraddr, size_t usersize)
+{
+    (void)pid;
+    if (ops == 0 && useraddr && usersize >= sizeof(uint32_t)) {
+        memset(useraddr, 0, usersize);
+        return 0;
+    }
+    *mr_errno_slot() = ops == 0 ? 22 /* EINVAL */ : 45 /* ENOTSUP */;
+    return -1;
+}
 /* THE ENVIRONMENT IS TWO ARRAYS WITH ONE NAME, and it was already latent
  * before anything wrote to it.
  *

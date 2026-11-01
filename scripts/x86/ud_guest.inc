@@ -122,7 +122,7 @@ phase2_ud_guest_stage_file() {
         phase2_ud_guest_cannot "$marker" "$file" "missing at $src"
         return 1
     fi
-    if [ "$macho" = 1 ] && ! phase2_is_x86_macho "$src"; then
+    if [ "$macho" = 1 ] && ! phase2_is_guest_macho "$src"; then
         phase2_ud_guest_cannot "$marker" "$file" "not X86_64 Mach-O: $src"
         return 1
     fi
@@ -222,7 +222,7 @@ phase2_ud_guest_compile_fm_unimplemented() {
 phase2_ud_guest_ensure_fm_unimplemented() {
     local fe_out=$1 sys=$2 target=$3 src_tree=$4 ud_w=$5
     local src=$fe_out/essentials/fm_unimplemented.o
-    if [ -f "$src" ] && phase2_is_x86_macho "$src"; then
+    if [ -f "$src" ] && phase2_is_guest_macho "$src"; then
         :
     else
         local st
@@ -235,7 +235,7 @@ phase2_ud_guest_ensure_fm_unimplemented() {
                 "clang exit $st (build_full.sh argv -O1 -nostdinc -DOPEN_FOUNDATION_UUID_COMPAT=1)"
             return 1
         fi
-        if [ ! -f "$src" ] || ! phase2_is_x86_macho "$src"; then
+        if [ ! -f "$src" ] || ! phase2_is_guest_macho "$src"; then
             phase2_ud_guest_cannot FM_UNIMPLEMENTED fm_unimplemented.o \
                 "not X86_64 Mach-O after compile: $src"
             return 1
@@ -311,7 +311,7 @@ phase2_ud_guest_compile_port() {
         -o "$out" >"$log" 2>&1
     st=$?
     set -e
-    if [ "$st" -ne 0 ] || [ ! -f "$out" ] || ! phase2_is_x86_macho "$out"; then
+    if [ "$st" -ne 0 ] || [ ! -f "$out" ] || ! phase2_is_guest_macho "$out"; then
         phase2_ud_guest_cannot USERDEFAULTSGUEST UserDefaultsGuest.o \
             "swiftc exit $st log=$log"
         return 1
@@ -366,20 +366,20 @@ phase2_ud_guest_compile_runner() {
         -o "$out" >"$log" 2>&1
     st=$?
     set -e
-    if [ "$st" -ne 0 ] || [ ! -f "$out" ] || ! phase2_is_x86_macho "$out"; then
+    if [ "$st" -ne 0 ] || [ ! -f "$out" ] || ! phase2_is_guest_macho "$out"; then
         phase2_ud_guest_cannot RUNNER runner.o "swiftc exit $st log=$log"
         return 1
     fi
 }
 
-phase2_ud_guest_find_x86_dylib() {
+phase2_ud_guest_find_guest_dylib() {
     local name=$1
     shift
     local c
     for c in "$@"; do
         [ -n "$c" ] || continue
         [ -f "$c" ] || continue
-        phase2_is_x86_macho "$c" || continue
+        phase2_is_guest_macho "$c" || continue
         printf '%s\n' "$c"
         return 0
     done
@@ -396,7 +396,7 @@ phase2_ud_guest_ensure_swiftcompat() {
         "$src_dir/swiftcompat.c" \
         "$src_dir/shim.cpp" \
         "$repo/swiftcore-macho/scripts/build_compat.sh")
-    found=$(phase2_ud_guest_find_x86_dylib libswiftcompat.dylib \
+    found=$(phase2_ud_guest_find_guest_dylib libswiftcompat.dylib \
         "${UD_SWIFTCOMPAT_DYLIB:-}" \
         "$dest" \
         "$mrlib/libswiftcompat.dylib" \
@@ -433,7 +433,7 @@ phase2_ud_guest_ensure_swiftcompat() {
         bash "$repo/swiftcore-macho/scripts/build_compat.sh" >"$log" 2>&1
     st=$?
     set -e
-    if [ "$st" -ne 0 ] || [ ! -f "$dest" ] || ! phase2_is_x86_macho "$dest"; then
+    if [ "$st" -ne 0 ] || [ ! -f "$dest" ] || ! phase2_is_guest_macho "$dest"; then
         phase2_ud_guest_cannot LIBSWIFTCOMPAT libswiftcompat.dylib \
             "build_compat.sh exit $st (committed swiftcore-macho recipe; artifacts/libswiftcompat.dylib is arm64) $(phase2_flatten < "$log")"
         rm -f "$log"
@@ -712,7 +712,7 @@ phase2_ud_guest_run_cftest_harness() {
         NSCF_OBJ="$ud_w/nscfobj" \
         R="$repo/foundation-macho" \
         PROBE_SRC="$repo/foundation-macho/tests/probe_sysctl.c" \
-        TRIPLE=x86_64-apple-macos13.0 \
+        TRIPLE="${ARCH:?}-apple-macos13.0" \
         LLD_BIN=/usr/lib/llvm-18/bin \
         bash "$linker" >"$log" 2>&1
     st=$?
@@ -729,7 +729,7 @@ phase2_ud_guest_run_cftest_harness() {
         grep '^CANNOT_CFTEST_INPUTS ' "$log" | tail -1
         return 1
     fi
-    if [ "$st" -ne 0 ] || [ ! -f "$dest" ] || ! phase2_is_x86_macho "$dest"; then
+    if [ "$st" -ne 0 ] || [ ! -f "$dest" ] || ! phase2_is_guest_macho "$dest"; then
         phase2_ud_guest_cannot LIBCFTEST libCFTest.dylib \
             "build_cftest_harness.sh exit $st (committed CF linker; objects from build_cfobjc.sh) log=$log. Will not invent a stub dylib."
         return 1
@@ -808,7 +808,7 @@ phase2_ud_guest_ensure_cftest() {
     # pin — those files can be regenerated while the dylib stays the 143-stub
     # build. UD_CFTEST_DYLIB is the test dummy / operator-provided Mach-O.
     if [ -n "${UD_CFTEST_DYLIB:-}" ]; then
-        found=$(phase2_ud_guest_find_x86_dylib libCFTest.dylib \
+        found=$(phase2_ud_guest_find_guest_dylib libCFTest.dylib \
             "$UD_CFTEST_DYLIB" || true)
         if [ -n "$found" ]; then
             [ "$found" = "$dest" ] || cp -a "$found" "$dest"
@@ -887,7 +887,7 @@ phase2_ud_guest_ensure_cftest() {
         CF="$cf" \
         OUT="$ud_w/cfobjc" \
         ICU_INC="$icu" \
-        TRIPLE=x86_64-apple-macos13.0 \
+        TRIPLE="${ARCH:?}-apple-macos13.0" \
         CFOBJC_FORCE_COPY=1 \
         bash "$recipe" >"$log" 2>&1
     st=$?
@@ -934,7 +934,7 @@ phase2_ud_guest_link() {
             "link_ud_guest.sh exit $st log=$log"
         return 1
     fi
-    if ! phase2_is_x86_macho "$out"; then
+    if ! phase2_is_guest_macho "$out"; then
         phase2_ud_guest_cannot UD_GUEST ud_guest \
             "linked file is not X86_64 Mach-O: $out log=$log"
         return 1
@@ -985,7 +985,7 @@ phase2_stage_cftest_into_run_root() {
     local dest=$dest_root/darwin/usr/lib/libCFTest.dylib
     local cf_slot=$dest_root/darwin/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation
     local src_sha dest_sha a b already=0
-    if [ ! -f "$src" ] || ! phase2_is_x86_macho "$src"; then
+    if [ ! -f "$src" ] || ! phase2_is_guest_macho "$src"; then
         printf 'CANNOT_UD_GUEST_LIBCFTEST file=libCFTest.dylib reason=no x86 Mach-O to stage into run root src=%s\n' \
             "${src:-empty}"
         return 1
@@ -1022,7 +1022,7 @@ phase2_stage_cftest_into_run_root() {
 
 # Linux Dispatch host bridge + Darwin OpenDispatch facade for rung a.
 # Reuses scratch/mrroot-x86_64/host/libOpenDispatchHost.so when that file is
-# already ELF x86-64 (phase2_build_x86_host_helpers / Reminder script).
+# already ELF x86-64 (phase2_build_guest_host_helpers / Reminder script).
 # Builds the Darwin image with the same clang/ld64 argv as
 # full/swiftui/build_focus_onboarding_guest.sh / build_core_guest_package.sh:
 # install_name /usr/lib/libOpenDispatch.dylib, -undefined dynamic_lookup.
@@ -1064,7 +1064,7 @@ phase2_ud_guest_ensure_dispatch() {
         set -e
         host=$host_dir/libOpenDispatchHost.so
         if [ "$st" -ne 0 ] || [ ! -f "$host" ] || [ -L "$host" ] \
-            || ! phase2_is_elf_x86_so "$host"
+            || ! phase2_is_host_elf_so "$host"
         then
             phase2_ud_guest_cannot DISPATCH libOpenDispatchHost.so \
                 "build_host_bridge.sh exit $st log=$log"
@@ -1123,7 +1123,7 @@ phase2_ud_guest_ensure_dispatch() {
             -o "$dest" "$obj" >>"$log" 2>&1
         st=$?
         set -e
-        if [ "$st" -ne 0 ] || [ ! -f "$dest" ] || ! phase2_is_x86_macho "$dest" \
+        if [ "$st" -ne 0 ] || [ ! -f "$dest" ] || ! phase2_is_guest_macho "$dest" \
             || [ "$(llvm-otool-18 -D "$dest" 2>/dev/null | tail -n 1)" != \
                 /usr/lib/libOpenDispatch.dylib ]
         then
@@ -1267,7 +1267,7 @@ phase2_try_ud_score_guest() {
     compile_triple=$(
         # shellcheck disable=SC1091
         . "$repo/foundation-macho/scripts/guest_arch.inc"
-        printf '%s\n' "${COMPILE_TRIPLE:-x86_64-apple-macos15.0}"
+        printf '%s\n' "${COMPILE_TRIPLE:-${ARCH:?}-apple-macos15.0}"
     )
 
     extra="-runtime-compatibility-version none"
@@ -1291,7 +1291,7 @@ phase2_try_ud_score_guest() {
         GEN="$gen" \
         MODULE_CACHE="$mc" \
         SWIFTC_EXTRA="$extra" \
-        TRIPLE=x86_64-apple-macos13.0 \
+        TRIPLE="${ARCH:?}-apple-macos13.0" \
         COMPILE_TRIPLE="$compile_triple" \
         LLD_BIN=/usr/lib/llvm-18/bin \
         bash "$recipe" >"$log" 2>&1
@@ -1302,7 +1302,7 @@ phase2_try_ud_score_guest() {
             "build_ud_score_guest.sh exit $st log=$log"
         return 1
     fi
-    if ! phase2_is_x86_macho "$out"; then
+    if ! phase2_is_guest_macho "$out"; then
         phase2_ud_guest_cannot SCORE_GUEST ud_score_guest \
             "linked file is not X86_64 Mach-O: $out log=$log"
         return 1

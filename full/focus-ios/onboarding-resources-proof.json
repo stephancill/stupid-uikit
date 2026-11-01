@@ -624,6 +624,15 @@
       "version_sha256": "334b226b04b408c69f0cdddd748b566360c34853bf5edddc7f0c808a4f67d559"
     },
     {
+      "id": "ubuntu-noble-poppler-24.02.0-1ubuntu9.11-linux-aarch64",
+      "machine": "aarch64",
+      "path": "/usr/bin/pdftocairo",
+      "sha256": "723c7f5821a39a2dee123820d7d4594da88040ed71120a828af7bccc76c15cdd",
+      "size": 198904,
+      "system": "Linux",
+      "version_sha256": "334b226b04b408c69f0cdddd748b566360c34853bf5edddc7f0c808a4f67d559"
+    },
+    {
       "id": "ubuntu-noble-poppler-24.02.0-1ubuntu9.11-linux-x86_64",
       "machine": "x86_64",
       "path": "/usr/bin/pdftocairo",

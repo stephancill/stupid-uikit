@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gen_swift_tbd.sh -- TAPI v4 .tbd from one x86_64 Mach-O Swift dylib.
+# gen_swift_tbd.sh -- TAPI v4 .tbd from one guest-architecture (ARCH) Mach-O Swift dylib.
 #
 # machorun/scripts/gen_tbd.sh only covers darwin/usr/lib (libSystem/objc/c++).
 # The widget gate's inventories name $SYS/usr/lib/swift/*.tbd; a dylib stand-in
@@ -29,8 +29,15 @@ DEST=$2
 die() { echo "gen_swift_tbd: $*" >&2; exit 1; }
 
 [ -f "$DYLIB" ] || die "no dylib $DYLIB"
-llvm-otool-18 -hv "$DYLIB" 2>/dev/null | grep -Eq 'MH_MAGIC_64[[:space:]]+X86_64' \
-    || die "not X86_64 Mach-O: $DYLIB"
+# The dylib must be the guest's architecture (ARCH, default the host's); the .tbd target follows
+# it. A foreign slice is refused, never projected.
+case "${ARCH:-$(uname -m)}" in
+    x86_64) WANT_CPU=X86_64 TBD_TARGET=x86_64-macos ;;
+    arm64 | aarch64) WANT_CPU=ARM64 TBD_TARGET=arm64-macos ;;
+    *) die "no guest architecture for ARCH=${ARCH:-$(uname -m)}" ;;
+esac
+llvm-otool-18 -hv "$DYLIB" 2>/dev/null | grep -Eq "MH_MAGIC_64[[:space:]]+$WANT_CPU([[:space:]]|\$)" \
+    || die "not $WANT_CPU Mach-O: $DYLIB"
 
 NM=
 for c in llvm-nm-18 llvm-nm nm; do
@@ -43,7 +50,6 @@ for c in llvm-otool-18 llvm-otool otool; do
 done
 [ -n "$OTOOL" ] || die "no otool (llvm-otool-18, llvm-otool or otool)"
 
-TBD_TARGET=x86_64-macos
 INSTALL=$("$OTOOL" -D "$DYLIB" 2>/dev/null | awk 'NR==2 { print; exit }')
 [ -n "$INSTALL" ] || INSTALL=/usr/lib/swift/$(basename "$DYLIB")
 
@@ -124,7 +130,7 @@ emit "$TMP/out.tbd"
 roundtrip() {
     local tbd=$1 miss=0
     [ -s "$tbd" ] || die "--check: $tbd missing or empty"
-    grep -q 'x86_64-macos' "$tbd" || die "--check: $tbd does not name x86_64-macos"
+    grep -q "$TBD_TARGET" "$tbd" || die "--check: $tbd does not name $TBD_TARGET"
     grep -q '^\.\.\.$' "$tbd" || die "--check: $tbd missing document-end ..."
     grep -o "'[^']*'" "$tbd" | tr -d "'" | LC_ALL=C sort -u > "$TMP/have"
     if ! comm -13 "$TMP/have" "$TMP/syms" > "$TMP/sym.miss"; then

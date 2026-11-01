@@ -90,12 +90,12 @@ sub inventory_command {
         unless beneath($opencombine_artifacts, $w);
 
     my @records;
-    my $oc_art_logical = ($opencombine_artifacts =~ m{/export-x86_64/artifacts$})
-        ? 'opencombine/export-x86_64/artifacts'
-        : 'opencombine/export/artifacts';
-    my ($oc_result, $oc_result_logical) = ($opencombine_artifacts =~ m{/export-x86_64/artifacts$})
-        ? ("$opencombine_root/export-x86_64/RESULT.txt", 'opencombine/export-x86_64/RESULT.txt')
-        : ("$opencombine_root/export/RESULT.txt", 'opencombine/export/RESULT.txt');
+    # The durable export/ or a cold build beside it (export-<arch>/, phase2).
+    my ($oc_export) = ($opencombine_artifacts =~ m{/(export(?:-[A-Za-z0-9_]+)?)/artifacts$});
+    $oc_export //= 'export';
+    my $oc_art_logical = "opencombine/$oc_export/artifacts";
+    my ($oc_result, $oc_result_logical) =
+        ("$opencombine_root/$oc_export/RESULT.txt", "opencombine/$oc_export/RESULT.txt");
     my @opencombine_files = (
         [ $oc_result, $oc_result_logical ],
         [ "$opencombine_artifacts/OpenCombine.o", "$oc_art_logical/OpenCombine.o" ],

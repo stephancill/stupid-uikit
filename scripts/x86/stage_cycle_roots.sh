@@ -31,8 +31,8 @@ SYS=${SYS:-$W/scratch/sysroot_fe4${FULL_OUT_SUFFIX}}
 BASE_MRROOT=${BASE_MRROOT:-$W/scratch/mrroot${FULL_OUT_SUFFIX}}
 FE_MRROOT=${FE_MRROOT:-$W/scratch/mrroot_fe${FULL_OUT_SUFFIX}}
 MRROOT=${MRROOT:-$W/scratch/mrroot_full${FULL_OUT_SUFFIX}}
-artifacts=$W/swiftcore-macho/artifacts
-x86_core=$artifacts/swift-macosx/x86_64/libswiftCore.dylib
+artifacts=$(phase2_swiftcore_artifacts "$W")
+x86_core=$artifacts/swift-macosx/$ARCH/libswiftCore.dylib
 
 [ -f "$MACHORUN/scripts/build.sh" ] || {
     echo "stage_cycle_roots: $W is not an openuikit tree" >&2
@@ -40,23 +40,23 @@ x86_core=$artifacts/swift-macosx/x86_64/libswiftCore.dylib
 }
 
 echo "== base mrroot $BASE_MRROOT"
-phase2_stage_x86_base_mrroot \
+phase2_stage_guest_base_mrroot \
     "$BASE_MRROOT" \
     "$MACHORUN/build/machorun" \
     "$MACHORUN/darwin" \
     "$x86_core"
-if [ ! -x "$BASE_MRROOT/machorun" ] || ! phase2_is_elf_x86_loader "$BASE_MRROOT/machorun"; then
+if [ ! -x "$BASE_MRROOT/machorun" ] || ! phase2_is_host_elf_loader "$BASE_MRROOT/machorun"; then
     echo "stage_cycle_roots: CANNOT_STAGE_MRROOT_LOADER no x86 ELF loader at $BASE_MRROOT/machorun" >&2
     exit 2
 fi
 if [ ! -f "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib" ] \
-    || ! phase2_is_x86_macho "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
+    || ! phase2_is_guest_macho "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
     echo "stage_cycle_roots: CANNOT_BUILD_LIBSWIFTCORE_X86 missing x86 libswiftCore in $BASE_MRROOT" >&2
     exit 2
 fi
 
 echo "== host runtime $BASE_MRROOT/host"
-host_report=$(phase2_stage_x86_host_runtime "$BASE_MRROOT" "$W" || true)
+host_report=$(phase2_stage_guest_host_runtime "$BASE_MRROOT" "$W" || true)
 case "$host_report" in
     OK) echo "  host runtime OK" >&2 ;;
     *)
@@ -66,7 +66,7 @@ case "$host_report" in
 esac
 
 echo "== FE overlay root $FE_MRROOT"
-overlay_report=$(phase2_stage_x86_fe_overlays "$FE_MRROOT" || true)
+overlay_report=$(phase2_stage_guest_fe_overlays "$FE_MRROOT" || true)
 case "$overlay_report" in
     OK) echo "  FE overlays OK" >&2 ;;
     *)
@@ -76,7 +76,7 @@ case "$overlay_report" in
 esac
 
 echo "== BASE layout (loud-abort stubs + libswiftcompat + overlays)"
-layout_report=$(phase2_stage_x86_mrroot_layout \
+layout_report=$(phase2_stage_guest_mrroot_layout \
     "$BASE_MRROOT" "$FE_MRROOT" "$W" "$SYS" "$MACHORUN/build/machorun" || true)
 case "$layout_report" in
     OK) echo "  layout OK" >&2 ;;
@@ -94,7 +94,7 @@ chmod a+x "$MRROOT/machorun"
 if [ -d "$MACHORUN/darwin/usr/lib" ]; then
     while IFS= read -r -d '' d; do
         rel=${d#"$MACHORUN/darwin/usr/lib/"}
-        if phase2_is_x86_macho "$d"; then
+        if phase2_is_guest_macho "$d"; then
             mkdir -p "$MRROOT/darwin/usr/lib/$(dirname "$rel")"
             cp -a "$d" "$MRROOT/darwin/usr/lib/$rel"
         fi
@@ -106,7 +106,7 @@ if [ -d "$BASE_MRROOT/host" ]; then
     cp -a "$BASE_MRROOT/host/." "$MRROOT/host/"
 fi
 
-overlay_full=$(phase2_stage_x86_run_root_overlays "$MRROOT" || true)
+overlay_full=$(phase2_stage_guest_run_root_overlays "$MRROOT" || true)
 printf '%s\n' "$overlay_full"
 if printf '%s\n' "$overlay_full" | grep -q '^CANNOT_STAGE_CACHE_EXTRACT'; then
     echo "stage_cycle_roots: CANNOT_STAGE_CACHE_EXTRACT in run root" >&2
@@ -114,13 +114,13 @@ if printf '%s\n' "$overlay_full" | grep -q '^CANNOT_STAGE_CACHE_EXTRACT'; then
 fi
 
 echo "== build_full THROUGH=umbrellas into $MRROOT (BASE loud-abort Foundation + libSystem split)"
-if ! phase2_stage_x86_build_full_umbrellas "$MRROOT" "$W"; then
+if ! phase2_stage_guest_build_full_umbrellas "$MRROOT" "$W"; then
     echo "stage_cycle_roots: CANNOT_STAGE_BUILD_FULL_UMBRELLAS $MRROOT" >&2
     exit 2
 fi
 
-if ! phase2_is_elf_x86_loader "$MRROOT/machorun" \
-    || ! phase2_is_x86_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
+if ! phase2_is_host_elf_loader "$MRROOT/machorun" \
+    || ! phase2_is_guest_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
     echo "stage_cycle_roots: CANNOT_STAGE_MRROOT copy failed to produce x86 loader+libswiftCore" >&2
     exit 2
 fi

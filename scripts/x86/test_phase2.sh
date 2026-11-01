@@ -45,6 +45,11 @@ STAGE=$ROOT/scripts/x86/stage_fe_sysroot.sh
 UDINC=$ROOT/scripts/x86/ud_guest.inc
 OC=$ROOT/scripts/x86/build_opencombine.sh
 GUEST=$ROOT/full/scripts/guest_arch.inc
+# The suite exercises the x86_64 operator configuration (fixtures, fake tbds, the macOS triple) on
+# any host, as phase2.sh does after sourcing guest_arch.inc for that TARGET.
+TARGET=x86_64-apple-macos15.0
+# shellcheck disable=SC1090
+. "$GUEST"
 WIDGET=$ROOT/full/swiftui/build_focus_widget_guest.sh
 ONBOARD=$ROOT/full/swiftui/build_focus_onboarding_guest.sh
 REMINDER=$ROOT/full/xcodeplan/build_and_run_reminder_scene_guest.sh
@@ -190,14 +195,14 @@ expect_grep 'export${FULL_OUT_SUFFIX}/RESULT.txt' "$WIDGET" "widget OpenCombine 
 expect_grep 'export${FULL_OUT_SUFFIX}/RESULT.txt' "$ONBOARD" "onboarding OpenCombine RESULT suffix"
 expect_grep 'export FULL_OUT_SUFFIX' "$GUEST" "guest_arch exports FULL_OUT_SUFFIX for prepare.py"
 expect_grep 'export FULL_OUT_SUFFIX' "$WIDGET" "widget re-exports FULL_OUT_SUFFIX before prepare"
-expect_grep 'BASE_RUNTIME_SOURCE=${BASE_RUNTIME_SOURCE:-$W/scratch/mrroot${FULL_OUT_SUFFIX}}' \
-    "$BUILD_FULL" "build_full BASE_RUNTIME_SOURCE honours FULL_OUT_SUFFIX"
-expect_grep 'FE_RUNTIME_SOURCE=${FE_RUNTIME_SOURCE:-$W/scratch/mrroot_fe${FULL_OUT_SUFFIX}}' \
-    "$BUILD_FULL" "build_full FE_RUNTIME_SOURCE honours FULL_OUT_SUFFIX"
+expect_grep 'BASE_RUNTIME_SOURCE=${BASE_RUNTIME_SOURCE:-$W/scratch/mrroot${RUNTIME_SOURCE_SUFFIX}}' \
+    "$BUILD_FULL" "build_full BASE_RUNTIME_SOURCE honours RUNTIME_SOURCE_SUFFIX"
+expect_grep 'FE_RUNTIME_SOURCE=${FE_RUNTIME_SOURCE:-$W/scratch/mrroot_fe${RUNTIME_SOURCE_SUFFIX}}' \
+    "$BUILD_FULL" "build_full FE_RUNTIME_SOURCE honours RUNTIME_SOURCE_SUFFIX"
 expect_grep 'EXPECTED_OPENCOMBINE_OBJECT_SHA=96558e7d31c10c4bc769e9774977b74c58dc6ee83cfbd4fca8bf17229424a914' \
     "$WIDGET" "arm64 OpenCombine object SHA still stands"
-expect_grep 'if \[ "$ARCH" = arm64 \]; then' "$WIDGET" \
-    "widget hashes OpenCombine.o only on arm64"
+expect_grep 'if \[ -z "$FULL_OUT_SUFFIX" \]; then' "$WIDGET" \
+    "widget hashes OpenCombine.o only for the durable unsuffixed export"
 
 echo "== reminder: x86-on-x86 must not refuse; native path skips docker"
 expect_grep 'x86_64 guests on an x86_64 host are the phase-2 path' "$REMINDER" \
@@ -465,13 +470,13 @@ expect_grep 'Darwin.apinotes' "$COMMON" \
     "FE clang snapshot stages Darwin.apinotes so CLOCK_REALTIME is the Swift name of _CLOCK_REALTIME"
 expect_grep 'BUILD_FULL_THROUGH=umbrellas' "$COMMON" \
     "run-root umbrellas come from build_full.sh, not build_foundation_placeholder.sh"
-expect_grep 'phase2_stage_x86_build_full_umbrellas' "$PHASE2" \
+expect_grep 'phase2_stage_guest_build_full_umbrellas' "$PHASE2" \
     "phase2 invokes build_full THROUGH=umbrellas before rung a"
 expect_grep 'BUILD_FULL_THROUGH=umbrellas' "$BUILD_FULL" \
     "build_full.sh accepts the reduced-form umbrellas stop"
-expect_not_grep 'phase2_stage_x86_foundation_placeholders' "$PHASE2" \
+expect_not_grep 'phase2_stage_guest_foundation_placeholders' "$PHASE2" \
     "phase2 does not stage empty Foundation placeholders into the run root"
-expect_not_grep 'phase2_stage_x86_foundation_placeholders' "$ROOT/scripts/x86/stage_cycle_roots.sh" \
+expect_not_grep 'phase2_stage_guest_foundation_placeholders' "$ROOT/scripts/x86/stage_cycle_roots.sh" \
     "cycle roots do not stage empty Foundation placeholders into the run root"
 expect_grep 'fe_sysroot_append_vm_copy' "$STAGE" \
     "x86 stager uses the shared vm_copy append"
@@ -784,7 +789,7 @@ if [ -L "$TBDWORK/x86/usr/lib/libobjc.tbd" ] \
 else
     die_test "libobjc.tbd is not the gen_tbd alias (link=$(readlink "$TBDWORK/x86/usr/lib/libobjc.tbd" 2>/dev/null || echo missing))"
 fi
-if phase2_tbd_is_x86_target "$TBDWORK/x86/usr/lib/libobjc.tbd"; then
+if phase2_tbd_is_guest_target "$TBDWORK/x86/usr/lib/libobjc.tbd"; then
     ok "staged libobjc.tbd names x86_64-macos"
 else
     die_test "staged libobjc.tbd does not name x86_64-macos"
@@ -877,11 +882,11 @@ case "$extras" in
     *) die_test "expected extras to name ARKit and AppKit, got: $extras" ;;
 esac
 core_src=$ROOT/swiftcore-macho/artifacts/swift-macosx/x86_64/libswiftCore.dylib
-if [ -f "$core_src" ] && phase2_is_x86_macho "$core_src"; then
+if [ -f "$core_src" ] && phase2_is_guest_macho "$core_src"; then
     if phase2_emit_tbd_from_dylib "$core_src" \
         /usr/lib/swift/libswiftCore.dylib \
         "$TBDWORK/x86/usr/lib/swift/libswiftCore.tbd" \
-        && phase2_tbd_is_x86_target "$TBDWORK/x86/usr/lib/swift/libswiftCore.tbd"; then
+        && phase2_tbd_is_guest_target "$TBDWORK/x86/usr/lib/swift/libswiftCore.tbd"; then
         ok "overlay tbd emitted from x86 libswiftCore.dylib names x86_64-macos"
     else
         die_test "failed to emit x86 libswiftCore.tbd from the x86 dylib"
@@ -919,7 +924,7 @@ if [ -d "$ROOT/scratch/sysroot_fe4-x86_64/usr/lib" ] \
     if phase2_stage_darwin_tbds_into_sysroot \
         "$ROOT/scratch/sysroot_fe4-x86_64" "$ROOT/machorun"; then
         if [ -e "$ROOT/scratch/sysroot_fe4-x86_64/usr/lib/libobjc.tbd" ] \
-            && phase2_tbd_is_x86_target "$ROOT/scratch/sysroot_fe4-x86_64/usr/lib/libobjc.tbd" \
+            && phase2_tbd_is_guest_target "$ROOT/scratch/sysroot_fe4-x86_64/usr/lib/libobjc.tbd" \
             && grep -q "'_objc_sync_exit'" "$ROOT/scratch/sysroot_fe4-x86_64/usr/lib/libobjc.tbd"; then
             ok "live sysroot_fe4-x86_64 libobjc.tbd is x86 and exports _objc_sync_exit"
         else
@@ -1302,7 +1307,7 @@ if command -v clang-18 >/dev/null && [ -d "$ROOT/scratch/sysroot_fe4-x86_64/usr/
         "$COMPAT_OUT/removefile_compat.o" \
         x86_64-apple-macos15.0 \
         "$ROOT" \
-        && phase2_is_x86_macho "$COMPAT_OUT/removefile_compat.o"; then
+        && phase2_is_guest_macho "$COMPAT_OUT/removefile_compat.o"; then
         ok "removefile_compat.c compiles to X86_64 Mach-O against the x86 sysroot"
         rm -rf "$COMPAT_OUT"
     else
@@ -1493,24 +1498,24 @@ rm -rf "$FEWORK"
 
 echo "== base runtime suffix + x86 overlay CANNOT lists the nine FE dylibs"
 expect_file "$PREPARE"
-expect_grep 'scratch/mrroot${FULL_OUT_SUFFIX}' "$BUILD_FULL" "BASE default uses suffix"
-expect_grep 'scratch/mrroot_fe${FULL_OUT_SUFFIX}' "$BUILD_FULL" "FE default uses suffix"
-expect_grep 'phase2_stage_x86_base_mrroot' "$PHASE2" "phase2 stages scratch/mrroot-x86_64"
+expect_grep 'scratch/mrroot${RUNTIME_SOURCE_SUFFIX}' "$BUILD_FULL" "BASE default uses suffix"
+expect_grep 'scratch/mrroot_fe${RUNTIME_SOURCE_SUFFIX}' "$BUILD_FULL" "FE default uses suffix"
+expect_grep 'phase2_stage_guest_base_mrroot' "$PHASE2" "phase2 stages scratch/mrroot-x86_64"
 expect_grep 'scratch/mrroot${FULL_OUT_SUFFIX}' "$PHASE2" "phase2 BASE_MRROOT is suffixed"
 expect_grep 'CANNOT_X86_OVERLAYS_NOT_BUILT' "$PHASE2" "phase2 overlay hole is not the macOS marker"
 expect_grep 'CANNOT_X86_OVERLAYS_NOT_BUILT' "$PREPARE" "widget env-prepare overlay hole is not the macOS marker"
 expect_grep 'try_generate_tbd' "$PREPARE" "tbd-stubs tries gen_tbd instead of host=x86_64"
 expect_not_grep 'CURSOR_ENV_CANNOT_STAGE_SIMRUNTIME_OVERLAY_DYLIBS' "$PHASE2" \
     "phase2 overlay staging does not use the macOS CoreSimulator marker"
-expect_grep 'phase2_find_x86_overlay' "$COMMON" "overlay search helper"
+expect_grep 'phase2_find_guest_overlay' "$COMMON" "overlay search helper"
 expect_grep 'phase2_is_cache_extract' "$COMMON" "cache-extract detector"
-expect_grep 'phase2_stage_x86_run_root_overlays' "$COMMON" "run-root overlay stager"
+expect_grep 'phase2_stage_guest_run_root_overlays' "$COMMON" "run-root overlay stager"
 expect_grep 'CANNOT_STAGE_CACHE_EXTRACT' "$COMMON" "cache-extract refusal marker"
 expect_grep 'OVERLAY_PROVENANCE' "$COMMON" "overlay provenance line"
 expect_grep 'llvm-objdump' "$COMMON" "provenance reads llvm-objdump private-headers"
-expect_grep 'phase2_stage_x86_run_root_overlays' "$PHASE2" \
+expect_grep 'phase2_stage_guest_run_root_overlays' "$PHASE2" \
     "phase2 restages overlays into the run root"
-expect_not_grep 'if phase2_is_x86_macho "$swift/$name"; then' "$COMMON" \
+expect_not_grep 'if phase2_is_guest_macho "$swift/$name"; then' "$COMMON" \
     "BASE fill no longer keeps an existing x86 Mach-O (ObjectiveC Apple-extract skip)"
 for overlay in libswiftDarwin.dylib libswiftSynchronization.dylib \
     libswift_Builtin_float.dylib libswift_DarwinFoundation1.dylib \
@@ -1532,7 +1537,7 @@ W=$OVERLAY_W
 HOME=$OVERLAY_HOME
 # shellcheck source=common.inc
 . "$COMMON"
-overlay_report=$(phase2_stage_x86_fe_overlays "$OVERLAY_DEST/mrroot_fe-x86_64" || true)
+overlay_report=$(phase2_stage_guest_fe_overlays "$OVERLAY_DEST/mrroot_fe-x86_64" || true)
 expected_missing='MISSING=libswiftDarwin.dylib,libswiftSynchronization.dylib,libswift_Builtin_float.dylib,libswift_DarwinFoundation1.dylib,libswift_DarwinFoundation2.dylib,libswift_DarwinFoundation3.dylib,libswift_RegexParser.dylib,libswift_StringProcessing.dylib,libswift_errno.dylib,libswift_Concurrency.dylib,libswiftObjectiveC.dylib,libswiftObservation.dylib'
 if [ "$overlay_report" = "$expected_missing" ]; then
     ok "overlay stage lists every missing overlay of the twelve ($overlay_report)"
@@ -1544,15 +1549,15 @@ rm -rf "$OVERLAY_W"
 
 BASE_DEST=$(mktemp -d /tmp/phase2-base-mrroot.XXXXXX)
 x86_core=$ROOT/swiftcore-macho/artifacts/swift-macosx/x86_64/libswiftCore.dylib
-phase2_stage_x86_base_mrroot \
+phase2_stage_guest_base_mrroot \
     "$BASE_DEST/mrroot-x86_64" \
     "$ROOT/machorun/build/machorun" \
     "$ROOT/machorun/darwin" \
     "$x86_core"
 if [ -x "$BASE_DEST/mrroot-x86_64/machorun" ] \
     && [ -f "$BASE_DEST/mrroot-x86_64/darwin/usr/lib/swift/libswiftCore.dylib" ] \
-    && phase2_is_x86_macho "$BASE_DEST/mrroot-x86_64/darwin/usr/lib/swift/libswiftCore.dylib" \
-    && phase2_is_elf_x86_loader "$BASE_DEST/mrroot-x86_64/machorun"; then
+    && phase2_is_guest_macho "$BASE_DEST/mrroot-x86_64/darwin/usr/lib/swift/libswiftCore.dylib" \
+    && phase2_is_host_elf_loader "$BASE_DEST/mrroot-x86_64/machorun"; then
     ok "base mrroot-x86_64 stages loader + x86 libswiftCore beside, not into, scratch/mrroot"
 else
     die_test "base mrroot-x86_64 stage did not produce loader+x86 libswiftCore"
@@ -1568,7 +1573,7 @@ expect_grep 'openuikit_resolve_swift_linux_lib' "$COMMON" \
     "phase2 host stager uses the shared Swift linux-lib resolver"
 expect_grep '/opt/swift/usr' "$ROOT/full/dispatch/swift_linux_lib.inc" \
     "resolver searches /opt/swift/usr"
-expect_grep 'phase2_stage_x86_host_runtime' "$PHASE2" \
+expect_grep 'phase2_stage_guest_host_runtime' "$PHASE2" \
     "phase2 fills scratch/mrroot-x86_64/host"
 expect_grep 'X86_HOST_RUNTIME' "$PHASE2" "empty host/ is CANNOT_X86_HOST_RUNTIME"
 expect_not_grep 'src=/usr/lib/swift/linux/$name' "$COMMON" \
@@ -1662,11 +1667,11 @@ else
     die_test "resolver got $resolved want $HOST_FIX/opt/swift/usr/lib/swift/linux"
 fi
 
-host_copy=$(phase2_stage_x86_host_runtime "$HOST_DEST" || true)
+host_copy=$(phase2_stage_guest_host_runtime "$HOST_DEST" || true)
 expected_open_missing="MISSING=$OPEN_HOST_NAMES"
 if [ "$host_copy" = "$expected_open_missing" ] \
-    && phase2_is_elf_x86_so "$HOST_DEST/host/libdispatch.so" \
-    && phase2_is_elf_x86_so "$HOST_DEST/host/libBlocksRuntime.so"; then
+    && phase2_is_host_elf_so "$HOST_DEST/host/libdispatch.so" \
+    && phase2_is_host_elf_so "$HOST_DEST/host/libBlocksRuntime.so"; then
     open_copied=0
     for host_name in libOpenDispatchHost.so \
         libOpenFoundationInternationalizationHost.so libOpenURLTransportHost.so \
@@ -1694,14 +1699,14 @@ fi
 
 # Leftover non-x86 Open* in dest must be rebuilt, not kept.
 printf 'arm64-leftover\n' > "$HOST_DEST/host/libOpenURLTransportHost.so"
-host_built=$(phase2_stage_x86_host_runtime "$HOST_DEST" "$ROOT" || true)
+host_built=$(phase2_stage_guest_host_runtime "$HOST_DEST" "$ROOT" || true)
 if [ "$host_built" = OK ]; then
     host_all=1
     for host_name in libdispatch.so libBlocksRuntime.so libOpenDispatchHost.so \
         libOpenFoundationInternationalizationHost.so libOpenURLTransportHost.so \
         libOpenRelativeTimeHost.so
     do
-        if ! phase2_is_elf_x86_so "$HOST_DEST/host/$host_name"; then
+        if ! phase2_is_host_elf_so "$HOST_DEST/host/$host_name"; then
             host_all=0
         fi
         if ! grep -q "$host_name" "$HOST_DEST/host/SHA256SUMS"; then
@@ -1735,7 +1740,7 @@ EMPTY_FIX=$(mktemp -d /tmp/phase2-host-empty.XXXXXX)
 EMPTY_DEST=$(mktemp -d /tmp/phase2-host-empty-dest.XXXXXX)
 mkdir -p "$EMPTY_FIX/opt/swift/usr/lib/swift/linux" "$EMPTY_DEST/host"
 export SWIFT_TOOLCHAIN=$EMPTY_FIX/opt/swift/usr
-host_miss=$(phase2_stage_x86_host_runtime "$EMPTY_DEST" || true)
+host_miss=$(phase2_stage_guest_host_runtime "$EMPTY_DEST" || true)
 expected_host_missing="MISSING=$HOST_NAMES"
 if [ "$host_miss" = "$expected_host_missing" ]; then
     ok "empty toolchain without repo is MISSING listing every HOST_RUNTIME_FILES name"
@@ -1745,13 +1750,13 @@ fi
 
 EMPTY_BUILD=$(mktemp -d /tmp/phase2-host-empty-build.XXXXXX)
 mkdir -p "$EMPTY_BUILD/host"
-host_empty_build=$(phase2_stage_x86_host_runtime "$EMPTY_BUILD" "$ROOT" || true)
+host_empty_build=$(phase2_stage_guest_host_runtime "$EMPTY_BUILD" "$ROOT" || true)
 expected_dispatch_missing='MISSING=libdispatch.so,libBlocksRuntime.so,libOpenDispatchHost.so'
 if [ "$host_empty_build" = "$expected_dispatch_missing" ] \
-    && phase2_is_elf_x86_so \
+    && phase2_is_host_elf_so \
         "$EMPTY_BUILD/host/libOpenFoundationInternationalizationHost.so" \
-    && phase2_is_elf_x86_so "$EMPTY_BUILD/host/libOpenURLTransportHost.so" \
-    && phase2_is_elf_x86_so "$EMPTY_BUILD/host/libOpenRelativeTimeHost.so"; then
+    && phase2_is_host_elf_so "$EMPTY_BUILD/host/libOpenURLTransportHost.so" \
+    && phase2_is_host_elf_so "$EMPTY_BUILD/host/libOpenRelativeTimeHost.so"; then
     ok "empty toolchain with repo names each unbuilt helper (dispatch) and builds the other three"
 else
     die_test "empty+repo expected $expected_dispatch_missing plus three ELF Open* got: $host_empty_build $(ls -l "$EMPTY_BUILD/host"); $(file "$EMPTY_BUILD/host"/* 2>/dev/null)"
@@ -1773,7 +1778,7 @@ expect_not_grep 'X86_MRROOT_LAYOUT' "$ROOT/scripts/env/markers.py" \
     "CANNOT_X86_MRROOT_LAYOUT is not a PR3 CURSOR_ENV_CANNOT_* marker"
 expect_grep 'STUBS_ONLY' "$ROOT/scripts/build_runtime_shims.sh" \
     "loud-abort stubs have a STUBS_ONLY recipe"
-expect_grep 'phase2_fill_x86_loud_abort_stubs' "$COMMON" \
+expect_grep 'phase2_fill_guest_loud_abort_stubs' "$COMMON" \
     "layout fill uses build_runtime_shims.sh STUBS_ONLY"
 expect_grep 'build_runtime_shims.sh' "$COMMON" \
     "layout names the committed stub recipe"
@@ -1818,7 +1823,7 @@ LAYOUT_DEST=$(mktemp -d /tmp/phase2-layout-dest.XXXXXX)
 LAYOUT_FE=$(mktemp -d /tmp/phase2-layout-fe.XXXXXX)
 W=$LAYOUT_W
 HOME=$LAYOUT_HOME
-layout_miss=$(phase2_stage_x86_mrroot_layout \
+layout_miss=$(phase2_stage_guest_mrroot_layout \
     "$LAYOUT_DEST" "$LAYOUT_FE" "$LAYOUT_W" "$LAYOUT_W/sys" "$LAYOUT_W/loader" || true)
 W=$ROOT
 case "$layout_miss" in
@@ -1844,31 +1849,31 @@ rm -rf "$LAYOUT_HOME" "$LAYOUT_W" "$LAYOUT_DEST" "$LAYOUT_FE"
 SYS=${SYS:-$ROOT/scratch/sysroot_fe4-x86_64}
 if [ -d "$SYS/usr/lib" ]; then
     STUB_DEST=$(mktemp -d /tmp/phase2-layout-stubs.XXXXXX)
-    phase2_fill_x86_loud_abort_stubs "$STUB_DEST" "$ROOT" "$SYS" || true
-    if phase2_is_x86_macho \
+    phase2_fill_guest_loud_abort_stubs "$STUB_DEST" "$ROOT" "$SYS" || true
+    if phase2_is_guest_macho \
         "$STUB_DEST/darwin/System/Library/Frameworks/Foundation.framework/Foundation" \
-        && phase2_is_x86_macho \
+        && phase2_is_guest_macho \
         "$STUB_DEST/darwin/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"; then
         ok "STUBS_ONLY loud-abort stubs are X86_64 Mach-O"
     else
         die_test "loud-abort stubs were not x86 Mach-O under $STUB_DEST"
     fi
-    phase2_fill_x86_libswiftcompat \
+    phase2_fill_guest_libswiftcompat \
         "$STUB_DEST" "$ROOT" "$SYS" "$ROOT/machorun/build/machorun" || true
-    if phase2_is_x86_macho "$STUB_DEST/darwin/usr/lib/libswiftcompat.dylib"; then
+    if phase2_is_guest_macho "$STUB_DEST/darwin/usr/lib/libswiftcompat.dylib"; then
         ok "build_compat.sh emits x86_64 libswiftcompat.dylib (not artifacts/ arm64)"
     else
         die_test "libswiftcompat fill did not produce x86 Mach-O ($(tail -5 "$STUB_DEST/shim-work/build_compat.log" 2>/dev/null))"
     fi
-    phase2_fill_x86_base_swift_dylibs "$STUB_DEST" || true
-    if phase2_is_x86_macho \
+    phase2_fill_guest_base_swift_dylibs "$STUB_DEST" || true
+    if phase2_is_guest_macho \
         "$STUB_DEST/darwin/usr/lib/swift/libswift_Concurrency.dylib"; then
         ok "layout stages x86 libswift_Concurrency.dylib from overlay search"
     else
         die_test "libswift_Concurrency.dylib was not staged as x86 Mach-O"
     fi
     if [ -f "$STUB_DEST/darwin/usr/lib/swift/libswiftObjectiveC.dylib" ]; then
-        if phase2_is_loadable_x86_overlay \
+        if phase2_is_loadable_guest_overlay \
             "$STUB_DEST/darwin/usr/lib/swift/libswiftObjectiveC.dylib"; then
             art=$ROOT/swiftcore-macho/artifacts/swift-macosx/x86_64/libswiftObjectiveC.dylib
             if cmp -s "$STUB_DEST/darwin/usr/lib/swift/libswiftObjectiveC.dylib" "$art"; then
@@ -2273,7 +2278,7 @@ if [ -d "$SYS/usr/include" ]; then
                 && [ -f "$wt/fe/_RopeModule.o" ] \
                 && [ -f "$wt/fe/os/os.o" ] \
                 && [ -f "$wt/fe/cshims/uuid.o" ] \
-                && phase2_is_x86_macho "$wt/fe/module/FoundationEssentials.o"; then
+                && phase2_is_guest_macho "$wt/fe/module/FoundationEssentials.o"; then
                 ok "staging maps build/full-x86_64/foundation into scratch/ud-guest-x86_64/fe"
             else
                 die_test "staged layout incomplete under $wt/fe"
@@ -2337,11 +2342,11 @@ clang-18 -target x86_64-apple-macos15.0 -isysroot "$SYS" \
         -fuse-ld=lld -B /usr/lib/llvm-18/bin -dynamiclib \
         -install_name /usr/lib/libCFTest.dylib \
         "$UDWORK/cftest.o" -o "$UDWORK/libCFTest.dylib"
-if phase2_is_x86_macho "$UDWORK/libCFTest.dylib"; then
+if phase2_is_guest_macho "$UDWORK/libCFTest.dylib"; then
     UD_CFTEST_DYLIB=$UDWORK/libCFTest.dylib
     cfok=$(phase2_ud_guest_ensure_cftest "$wt" "$ROOT" || true)
     if [ -z "$cfok" ] && [ -f "$wt/lib/libCFTest.dylib" ] \
-        && phase2_is_x86_macho "$wt/lib/libCFTest.dylib"; then
+        && phase2_is_guest_macho "$wt/lib/libCFTest.dylib"; then
         ok "UD_CFTEST_DYLIB stages an x86 libCFTest.dylib into the suffixed tree"
     else
         die_test "UD_CFTEST_DYLIB resolution got: '$cfok'"
@@ -2359,7 +2364,7 @@ if phase2_is_x86_macho "$UDWORK/libCFTest.dylib"; then
             if [ "$dest" = "$CFROOT/darwin/usr/lib/libCFTest.dylib" ] \
                 && [ "$sha" = "$want" ] \
                 && [ -f "$CFROOT/darwin/usr/lib/libCFTest.dylib" ] \
-                && phase2_is_x86_macho "$CFROOT/darwin/usr/lib/libCFTest.dylib" \
+                && phase2_is_guest_macho "$CFROOT/darwin/usr/lib/libCFTest.dylib" \
                 && [ ! -e "$CFROOT/darwin/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation" ] \
                 && echo "$env_line" | grep -q "ENV_PREPARE libCFTest-run-root cold-built path=$dest sha256=$sha"
             then
@@ -2665,7 +2670,7 @@ else
     saved_home=$HOME
     W=$ROOT
     PROV_DEST=$(mktemp -d /tmp/phase2-overlay-prov.XXXXXX)
-    prov=$(phase2_stage_x86_run_root_overlays "$PROV_DEST" || true)
+    prov=$(phase2_stage_guest_run_root_overlays "$PROV_DEST" || true)
     oc_line=$(printf '%s\n' "$prov" | grep 'name=libswiftObjectiveC.dylib' | head -1 || true)
     art_dir=$ROOT/swiftcore-macho/artifacts/swift-macosx/x86_64
     art_sha=$(sha256sum "$ART_OC" | awk '{print substr($1,1,12)}')
@@ -2695,7 +2700,7 @@ else
     cp -f "$EXTRACT_W/scratch/apple-x86-overlays/libswiftObjectiveC.dylib" \
         "$STALE_DEST/darwin/usr/lib/swift/libswiftObjectiveC.dylib"
     W=$ROOT
-    stale_prov=$(phase2_stage_x86_run_root_overlays "$STALE_DEST" || true)
+    stale_prov=$(phase2_stage_guest_run_root_overlays "$STALE_DEST" || true)
     if cmp -s "$STALE_DEST/darwin/usr/lib/swift/libswiftObjectiveC.dylib" "$ART_OC" \
         && echo "$stale_prov" | grep -q "OVERLAY_PROVENANCE name=libswiftObjectiveC.dylib" \
         && echo "$stale_prov" | grep -q "srcdir=$art_dir" \
@@ -2709,7 +2714,7 @@ else
     W=$EXTRACT_W
     HOME=$EXTRACT_W
     REFUSE_DEST=$(mktemp -d /tmp/phase2-overlay-refuse.XXXXXX)
-    refuse=$(phase2_stage_x86_run_root_overlays "$REFUSE_DEST" || true)
+    refuse=$(phase2_stage_guest_run_root_overlays "$REFUSE_DEST" || true)
     extract_src=$EXTRACT_W/scratch/apple-x86-overlays/libswiftObjectiveC.dylib
     if echo "$refuse" | grep -q "CANNOT_STAGE_CACHE_EXTRACT name=libswiftObjectiveC.dylib src=$extract_src" \
         && [ ! -f "$REFUSE_DEST/darwin/usr/lib/swift/libswiftObjectiveC.dylib" ]

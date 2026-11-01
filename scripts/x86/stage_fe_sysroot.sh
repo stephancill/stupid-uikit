@@ -21,12 +21,8 @@ ARM_SYS=${ARM_SYS:-$W/scratch/sysroot_fe4}
 SYS=${SYS:-$W/scratch/sysroot_fe4${FULL_OUT_SUFFIX}}
 OBJC4=${OBJC4:-$MACHORUN/vendor/objc4/runtime}
 
-if [ "$ARCH" != x86_64 ]; then
-    echo "stage_fe_sysroot_x86: this sibling is the x86_64 Linux path; arm64 keeps full/foundation/stage_fe_sysroot.sh" >&2
-    exit 2
-fi
 case "$SYS" in
-    *-x86_64) ;;
+    *"$FULL_OUT_SUFFIX") [ -n "$FULL_OUT_SUFFIX" ] || { echo "stage_fe_sysroot: no guest-arch suffix for $SYS" >&2; exit 2; } ;;
     *)
         echo "stage_fe_sysroot_x86: refusing to write unsuffixed sysroot $SYS (arm64 tree must stay)" >&2
         exit 2
@@ -52,11 +48,11 @@ stage_absent() {
 copy_if_x86_macho() {
     local src=$1 dest=$2
     [ -f "$src" ] || return 0
-    if phase2_is_arm64_macho "$src"; then
+    if phase2_is_foreign_macho "$src"; then
         echo "  skip arm64 Mach-O $(basename "$src") (would poison the x86 sysroot)" >&2
         return 0
     fi
-    if ! phase2_is_x86_macho "$src"; then
+    if ! phase2_is_guest_macho "$src"; then
         echo "  skip non-x86 $(basename "$src"): $(file -b "$src")" >&2
         return 0
     fi
@@ -86,10 +82,10 @@ phase2_stage_darwin_tbds_into_sysroot "$SYS" "$MACHORUN" || {
     exit 2
 }
 
-artifacts=$W/swiftcore-macho/artifacts
-x86_core=$artifacts/swift-macosx/x86_64/libswiftCore.dylib
-x86_mod=$artifacts/swift-macosx/Swift.swiftmodule/x86_64-apple-macos.swiftmodule
-x86_bf_mod=$artifacts/swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftmodule
+artifacts=$(phase2_swiftcore_artifacts "$W")
+x86_core=$artifacts/swift-macosx/$ARCH/libswiftCore.dylib
+x86_mod=$artifacts/swift-macosx/Swift.swiftmodule/$ARCH-apple-macos.swiftmodule
+x86_bf_mod=$artifacts/swift-macosx/_Builtin_float.swiftmodule/$ARCH-apple-macos.swiftmodule
 
 echo "== ObjectiveC Clang module"
 mkdir -p "$SYS/usr/include/objc"
@@ -140,15 +136,19 @@ phase2_install_darwin_modulemaps \
     "$SYS" "$ARM_SYS" "$MACHORUN/scripts/gen_darwin_modulemap.py" \
     || echo "  (Darwin family incomplete; FE will fail with 'underlying Objective-C module Darwin not found' or a missing header named by Darwin_C.modulemap)"
 
-echo "== textual Darwin overlays from the arm64 sysroot, if any (no dylibs, no arm64 .swiftmodule slices)"
+echo "== textual Darwin overlays from the arm64 sysroot, if any (no dylibs, only the $ARCH slices)"
 OVERLAYS_COPIED=0
 if [ -d "$ARM_SYS/usr/lib/swift" ]; then
     while IFS= read -r -d '' item; do
         rel=${item#"$ARM_SYS/usr/lib/swift/"}
         case "$rel" in
             *.dylib|*.tbd|*.a) continue ;;
-            */arm64-apple-macos.*|arm64-apple-macos.*) continue ;;
-            */arm64e-apple-macos.*|arm64e-apple-macos.*) continue ;;
+            # Xcode's SDK ships every Mac slice; keep the ones the guest's compiler loads.
+            */*-apple-macos.*|*-apple-macos.*)
+                slice=$(basename "$rel")
+                slice=${slice%%-apple-macos.*}-apple-macos
+                phase2_guest_module_triples | grep -qxF "$slice" || continue
+                ;;
             os.swiftmodule|os.swiftmodule/*)
                 # Apple's os overlay @_exported-imports Clang os.*, which this
                 # sysroot does not declare. FE uses full/foundation/os-module.
@@ -167,7 +167,7 @@ fi
 
 echo "== x86 Swift runtime into $SYS/usr/lib/swift (toolchain layout; not left only in artifacts/)"
 mkdir -p "$SYS/usr/lib/swift"
-if [ -f "$x86_core" ] && phase2_is_x86_macho "$x86_core"; then
+if [ -f "$x86_core" ] && phase2_is_guest_macho "$x86_core"; then
     cp -f "$x86_core" "$SYS/usr/lib/swift/libswiftCore.dylib"
     echo "  + usr/lib/swift/libswiftCore.dylib (x86_64)"
 else
@@ -175,7 +175,7 @@ else
 fi
 if [ -f "$x86_mod" ]; then
     mkdir -p "$SYS/usr/lib/swift/Swift.swiftmodule"
-    for f in "$artifacts/swift-macosx/Swift.swiftmodule"/x86_64-apple-macos.*; do
+    for f in "$artifacts/swift-macosx/Swift.swiftmodule"/"$ARCH"-apple-macos.*; do
         [ -f "$f" ] || continue
         cp -f "$f" "$SYS/usr/lib/swift/Swift.swiftmodule/$(basename "$f")"
     done
@@ -185,7 +185,7 @@ else
 fi
 if [ -f "$x86_bf_mod" ]; then
     mkdir -p "$SYS/usr/lib/swift/_Builtin_float.swiftmodule"
-    for f in "$artifacts/swift-macosx/_Builtin_float.swiftmodule"/x86_64-apple-macos.*; do
+    for f in "$artifacts/swift-macosx/_Builtin_float.swiftmodule"/"$ARCH"-apple-macos.*; do
         [ -f "$f" ] || continue
         cp -f "$f" "$SYS/usr/lib/swift/_Builtin_float.swiftmodule/$(basename "$f")"
     done
@@ -217,7 +217,7 @@ echo "  wrote $SYS/$PHASE2_SYSROOT_STAMP (input-keyed; restage when these shas c
 
 # Swift 6.4 extras: SwiftShims where Clang finds it (the 6.4 driver on a Linux host does not search
 # <resource-dir>/shims for Darwin targets) and SwiftOnoneSupport, absent from the x86_64 artifacts.
-bash "$(dirname "$0")/swift64_sysroot_extras.sh"
+W="$W" SYS="$SYS" bash "$(dirname "$0")/swift64_sysroot_extras.sh"
 echo "== $SYS"
 echo "  usr/include : $(find "$SYS/usr/include" -type f | wc -l | tr -d ' ') headers"
 echo "  modulemaps  : $(find "$SYS/usr/include" -maxdepth 1 -name '*.modulemap' | wc -l | tr -d ' ')"
@@ -249,7 +249,7 @@ if [ ! -d "$SYS/usr/lib/swift/Darwin.swiftmodule" ] \
         exit 3
     fi
 fi
-if [ -e "$SYS/usr/lib/libobjc.tbd" ] && phase2_tbd_is_x86_target "$SYS/usr/lib/libobjc.tbd"; then
+if [ -e "$SYS/usr/lib/libobjc.tbd" ] && phase2_tbd_is_guest_target "$SYS/usr/lib/libobjc.tbd"; then
     echo "  libobjc.tbd: x86_64-macos (alias for gen_tbd libobjc.A.tbd)"
 else
     echo "  libobjc.tbd: ABSENT or not x86_64-macos (-lobjc will not resolve render_full.o)"

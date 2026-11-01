@@ -56,9 +56,9 @@ else
 fi
 SYS=${SYS:-$W/scratch/sysroot_fe4${FULL_OUT_SUFFIX}}     # Darwin + FE compile sysroot; x86_64 writes beside
 APPLE_SWIFT_USER_OVERLAYS=${APPLE_SWIFT_USER_OVERLAYS:-}
-# x86_64 iOS simulator: scripts/x86/stage_ios_sim_sysroot.sh stages the Darwin
-# overlays beside the sysroot.
-if [ -z "$APPLE_SWIFT_USER_OVERLAYS" ] && [ "$LINK_PLATFORM" = ios-simulator ] && [ "$ARCH" = x86_64 ]; then
+# iOS simulator: scripts/x86/stage_ios_sim_sysroot.sh stages the Darwin overlays beside the
+# sysroot.
+if [ -z "$APPLE_SWIFT_USER_OVERLAYS" ] && [ "$LINK_PLATFORM" = ios-simulator ]; then
     APPLE_SWIFT_USER_OVERLAYS=$W/scratch/apple-overlays${FULL_OUT_SUFFIX}
 fi
 # Sub-builds (FoundationInternationalization, ...) read these from the environment.
@@ -1717,11 +1717,13 @@ host_bridge_args=(
     --ledger-style core
     --refuse-prefix 'build_full: '
 )
-if [ "$(uname -m)" = aarch64 ] || [ "$(uname -m)" = arm64 ]; then
-    host_bridge_args+=(--host-abi ELF64-AArch64)
-else
-    host_bridge_args+=(--skip-runtime-pin --host-abi "ELF64-$(uname -m)")
-fi
+case "$(uname -m)" in
+    aarch64 | arm64) host_bridge_args+=(--host-abi ELF64-AArch64) ;;
+    *) host_bridge_args+=(--host-abi "ELF64-$(uname -m)") ;;
+esac
+# The libdispatch / BlocksRuntime pins are the upstream aarch64 Swift 6.2.4 toolchain's, which
+# the durable unsuffixed trees were built with; a bootstrapped tree (FULL_OUT_SUFFIX) has its own.
+[ -z "$FULL_OUT_SUFFIX" ] || host_bridge_args+=(--skip-runtime-pin)
 bash "$W/full/dispatch/build_host_bridge.sh" "${host_bridge_args[@]}"
 [ -f "$HOST_BRIDGE_DIR/libOpenDispatchHost.so" ] \
     || die "Linux Dispatch host helper missing: $HOST_BRIDGE_DIR/libOpenDispatchHost.so"

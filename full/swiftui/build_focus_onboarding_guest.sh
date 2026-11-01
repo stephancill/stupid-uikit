@@ -336,7 +336,9 @@ if [ -z "$FULL_OUT_SUFFIX" ]; then
 else
     [ -s "$OPENCOMBINE_RESULT" ] || die "NEEDS_X86_OPENCOMBINE: missing $OPENCOMBINE_RESULT (phase2 writes export-x86_64/RESULT.txt from the real x86 build; arm64 export/RESULT.txt SHA $EXPECTED_OPENCOMBINE_RESULT still stands)"
 fi
-if [ "$ARCH" = arm64 ]; then
+# The object pins are the durable unsuffixed export/ (upstream arm64); a cold build beside it
+# (export-<arch>/, phase2) is checked for its CPU instead.
+if [ -z "$FULL_OUT_SUFFIX" ]; then
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.o" "$EXPECTED_OPENCOMBINE_OBJECT" OpenCombine-object
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.swiftmodule" "$EXPECTED_OPENCOMBINE_MODULE" OpenCombine-module
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.swiftdoc" "$EXPECTED_OPENCOMBINE_DOC" OpenCombine-doc
@@ -1168,11 +1170,13 @@ host_bridge_args=(
     --ledger-style focus-onboarding
     --refuse-prefix 'focus_onboarding_guest: '
 )
-if [ "$(uname -m)" = aarch64 ] || [ "$(uname -m)" = arm64 ]; then
-    host_bridge_args+=(--host-abi ELF64-AArch64)
-else
-    host_bridge_args+=(--skip-runtime-pin --host-abi "ELF64-$(uname -m)")
-fi
+case "$(uname -m)" in
+    aarch64 | arm64) host_bridge_args+=(--host-abi ELF64-AArch64) ;;
+    *) host_bridge_args+=(--host-abi "ELF64-$(uname -m)") ;;
+esac
+# The libdispatch / BlocksRuntime pins are the upstream aarch64 Swift 6.2.4 toolchain's, which
+# the durable unsuffixed trees were built with; a bootstrapped tree (FULL_OUT_SUFFIX) has its own.
+[ -z "$FULL_OUT_SUFFIX" ] || host_bridge_args+=(--skip-runtime-pin)
 bash "$W/full/dispatch/build_host_bridge.sh" "${host_bridge_args[@]}"
 [ -f "$DISPATCH_HOST" ] && [ ! -L "$DISPATCH_HOST" ] \
     || die "Linux Dispatch host helper is missing: $DISPATCH_HOST"

@@ -34,52 +34,10 @@
 #include <string.h>
 #include <pthread.h>
 
-/* ---------------------------------------------------------------- REAL ----
- * 128-bit integer division. Darwin gets these from libcompiler_rt inside
- * libSystem. They cannot be written as `a / b` on __int128 — clang lowers that
- * back into a call to this very function — so this is an explicit restoring
- * long division, shared by all four entry points.
- */
-typedef unsigned __int128 u128;
-typedef signed   __int128 s128;
-
-static u128 udivmod128(u128 n, u128 d, u128 *rem) {
-    if (d == 0) { volatile int z = 0; return (u128)(1 / z); } /* trap like the real one */
-    if (d > n) { if (rem) *rem = n; return 0; }
-    /* Normalise: find the highest bit of d relative to n. */
-    int shift = 0;
-    u128 dd = d;
-    while (dd <= n && !(dd >> 127)) { dd <<= 1; shift++; }
-    if (dd > n) { dd >>= 1; shift--; }
-    u128 q = 0;
-    for (int i = shift; i >= 0; i--) {
-        if (n >= dd) { n -= dd; q |= ((u128)1 << i); }
-        dd >>= 1;
-    }
-    if (rem) *rem = n;
-    return q;
-}
-
-u128 __udivti3(u128 a, u128 b) { return udivmod128(a, b, 0); }
-u128 __umodti3(u128 a, u128 b) { u128 r; udivmod128(a, b, &r); return r; }
-
-s128 __divti3(s128 a, s128 b) {
-    int neg = 0;
-    u128 ua, ub;
-    if (a < 0) { ua = (u128)(-a); neg ^= 1; } else ua = (u128)a;
-    if (b < 0) { ub = (u128)(-b); neg ^= 1; } else ub = (u128)b;
-    u128 q = udivmod128(ua, ub, 0);
-    return neg ? -(s128)q : (s128)q;
-}
-
-s128 __modti3(s128 a, s128 b) {
-    int neg = (a < 0);
-    u128 ua = (a < 0) ? (u128)(-a) : (u128)a;
-    u128 ub = (b < 0) ? (u128)(-b) : (u128)b;
-    u128 r;
-    udivmod128(ua, ub, &r);
-    return neg ? -(s128)r : (s128)r;
-}
+/* 128-bit integer division (__udivti3, __umodti3, __divti3, __modti3) moved
+ * into machorun's libSystem, where Darwin's libSystem re-exports them from
+ * libcompiler_rt and where the swift.org release libswiftCore binds them
+ * two-level. */
 
 /* _NSGetMachExecuteHeader, dispatch_once_f, _dyld_is_objc_constant,
  * flockfile/funlockfile, and the three libc++ overlay symbols moved into
@@ -178,17 +136,9 @@ int32_t __isPlatformOrVariantPlatformVersionAtLeast(uint32_t p, uint32_t ma, uin
  * while every git-level check said the tree was current. One copy, in the
  * library that owns the allocator. */
 
-/* os_log / os_signpost: telemetry only. No-ops that keep the shape. */
-void *os_log_create(const char *s, const char *c);
-void *os_log_create(const char *s, const char *c) { (void)s; (void)c; return (void *)1; }
-int  os_signpost_enabled(void *l);
-int  os_signpost_enabled(void *l) { (void)l; return 0; }
-unsigned long long os_signpost_id_generate(void *l);
-unsigned long long os_signpost_id_generate(void *l) { (void)l; return 0; }
+/* os_log / os_signpost: telemetry only. os_log_create, os_signpost_enabled,
+ * os_signpost_id_generate and csops moved into machorun's libSystem
+ * (darwin/src/libsystem.c), which the swift.org release runtime binds them to
+ * two-level. */
 unsigned long long os_signpost_id_make_with_pointer(void *l, const void *p);
 unsigned long long os_signpost_id_make_with_pointer(void *l, const void *p) { (void)l; (void)p; return 0; }
-
-int csops(int pid, unsigned int ops, void *useraddr, size_t usersize);
-int csops(int pid, unsigned int ops, void *useraddr, size_t usersize) {
-    (void)pid; (void)ops; (void)useraddr; (void)usersize; return -1;
-}

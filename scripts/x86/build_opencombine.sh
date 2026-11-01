@@ -15,14 +15,14 @@ W=${W:?set W to the openuikit tree}
 W=$(cd "$W" && pwd -P)
 # shellcheck disable=SC1091
 . "$W/full/scripts/guest_arch.inc"
-[ "$ARCH" = x86_64 ] || {
-    echo "build_opencombine_x86: host/guest arch is $ARCH, not x86_64" >&2
+[ -n "$OPENCOMBINE_EXPORT_SUFFIX" ] || {
+    echo "build_opencombine: no guest-arch export suffix (would overwrite the durable export/)" >&2
     exit 2
 }
 
 OPENCOMBINE_ROOT=${OPENCOMBINE_ROOT:-$W/scratch/opencombine-core-durable-20260828-r2}
 SRC=$OPENCOMBINE_ROOT/source
-OUT=$OPENCOMBINE_ROOT/export-x86_64
+OUT=$OPENCOMBINE_ROOT/export$OPENCOMBINE_EXPORT_SUFFIX
 SYS=${SYS:-$W/scratch/sysroot_fe4${FULL_OUT_SUFFIX}}
 POLICY=$W/full/oracle-opencombine/policy.json
 PATCH=$W/full/oracle-opencombine/patches/COpenCombineHelpers-pthread-recursive.patch
@@ -37,12 +37,12 @@ HELPER_INCLUDE=$SRC/Sources/COpenCombineHelpers/include
     echo "CANNOT_X86_OPENCOMBINE reason=no x86 sysroot at $SYS" >&2
     exit 2
 }
-[ -f "$SYS/usr/lib/swift/libswiftCore.dylib" ] && phase2_is_x86_macho "$SYS/usr/lib/swift/libswiftCore.dylib" || {
+[ -f "$SYS/usr/lib/swift/libswiftCore.dylib" ] && phase2_is_guest_macho "$SYS/usr/lib/swift/libswiftCore.dylib" || {
     echo "CANNOT_X86_OPENCOMBINE reason=no x86_64 libswiftCore in $SYS (arm64 dylib is not a substitute)" >&2
     exit 2
 }
-[ -f "$SYS/usr/lib/swift/Swift.swiftmodule/x86_64-apple-macos.swiftmodule" ] \
-    || [ -f "$SYS/usr/lib/swift/Swift.swiftmodule/x86_64-apple-macos.swiftinterface" ] || {
+[ -f "$SYS/usr/lib/swift/Swift.swiftmodule/$ARCH-apple-macos.swiftmodule" ] \
+    || [ -f "$SYS/usr/lib/swift/Swift.swiftmodule/$ARCH-apple-macos.swiftinterface" ] || {
     echo "CANNOT_X86_OPENCOMBINE reason=no x86_64-apple-macos Swift.swiftmodule slice in $SYS" >&2
     exit 2
 }
@@ -104,7 +104,7 @@ swiftc -emit-module -emit-module-path "$OUT/artifacts/OpenCombine.swiftmodule" \
     -emit-object -o "$OUT/artifacts/OpenCombine.o" \
     "${COMMON_SWIFT[@]}" "${CORE_SOURCES[@]}"
 
-phase2_is_x86_macho "$OUT/artifacts/OpenCombine.o" || {
+phase2_is_guest_macho "$OUT/artifacts/OpenCombine.o" || {
     echo "CANNOT_X86_OPENCOMBINE reason=OpenCombine.o is not X86_64 Mach-O" >&2
     file "$OUT/artifacts/OpenCombine.o" >&2
     exit 2

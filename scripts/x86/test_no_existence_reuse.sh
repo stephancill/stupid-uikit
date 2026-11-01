@@ -12,7 +12,7 @@ trap cleanup EXIT
 cat > "$PLANT/bad.inc" <<'EOF'
 try_product() {
     local dest=$1
-    if [ -f "$dest" ] && phase2_is_x86_macho "$dest"; then
+    if [ -f "$dest" ] && phase2_is_guest_macho "$dest"; then
         return 0
     fi
     clang-18 -c src.c -o "$dest"
@@ -32,6 +32,6 @@ PY
 then
     echo "PASS: scanner names a planted existence-reuse skip"
 else
-    echo "FAIL: scanner missed planted if [ -f ] && phase2_is_x86_macho; return 0" >&2
+    echo "FAIL: scanner missed planted if [ -f ] && phase2_is_guest_macho; return 0" >&2
     exit 1
 fi

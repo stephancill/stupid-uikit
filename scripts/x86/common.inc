@@ -40,18 +40,79 @@ phase2_macho_cpu() {
         | head -n 1
 }
 
-phase2_is_x86_macho() {
-    llvm-otool-18 -hv "$1" 2>/dev/null | grep -Eq 'MH_MAGIC_64[[:space:]]+X86_64'
+# The guest architecture is full/scripts/guest_arch.inc's (OTOOL_CPU, from
+# TARGET or the host); the host's is uname -m. PHASE 2 began as the x86_64
+# operator path and runs on aarch64 Linux the same way: the predicates below
+# are the only places that name a CPU.
+phase2_guest_cpu() {
+    printf '%s\n' "${OTOOL_CPU:?phase2: source full/scripts/guest_arch.inc before calling arch predicates}"
 }
 
-phase2_is_arm64_macho() {
-    llvm-otool-18 -hv "$1" 2>/dev/null | grep -Eq 'MH_MAGIC_64[[:space:]]+ARM64'
+phase2_foreign_cpu() {
+    case "$(phase2_guest_cpu)" in
+        X86_64) printf 'ARM64\n' ;;
+        ARM64) printf 'X86_64\n' ;;
+    esac
 }
 
-phase2_is_elf_x86_loader() {
+# file(1)'s description of machorun's loader on this host. x86_64 links it PIE
+# (small-model CRT); aarch64 links it non-PIE at 1 TiB, below the 47-bit isa
+# mask (machorun/scripts/build.sh).
+phase2_host_elf_loader_kind() {
+    case "$(uname -m)" in
+        x86_64) printf 'ELF 64-bit LSB pie executable, x86-64\n' ;;
+        aarch64 | arm64) printf 'ELF 64-bit LSB executable, ARM aarch64\n' ;;
+    esac
+}
+
+phase2_host_elf_machine() {
+    case "$(uname -m)" in
+        x86_64) printf 'x86-64\n' ;;
+        aarch64 | arm64) printf 'ARM aarch64\n' ;;
+    esac
+}
+
+# The Darwin Swift runtime in the artifacts layout (swift-macosx/<arch>/*.dylib,
+# swift-macosx/<Module>.swiftmodule). x86_64 uses the committed cross-build
+# (build_stdlib.sh); aarch64 the swift.org release staged by
+# swiftcore-macho/scripts/fetch_release_runtime.sh plus the SDK overlays
+# build_release_overlays.sh adds beside it. SWIFTCORE_ARTIFACTS overrides both.
+phase2_swiftcore_artifacts() {
+    local w=${1:?phase2_swiftcore_artifacts: tree}
+    if [ -n "${SWIFTCORE_ARTIFACTS:-}" ]; then
+        printf '%s\n' "$SWIFTCORE_ARTIFACTS"
+        return 0
+    fi
+    case "$(uname -m)" in
+        aarch64 | arm64) printf '%s\n' "$w/swiftcore-macho/build/release-runtime" ;;
+        *) printf '%s\n' "$w/swiftcore-macho/artifacts" ;;
+    esac
+}
+
+# The module-file triples the compiler loads for the guest's macOS target, in
+# its lookup order. Xcode's macOS SDK ships arm64e (and arm64e.x1) slices and
+# no arm64 one; swiftc targeting arm64-apple-macos falls back to them
+# (measured: the Linux 6.4.2 compiler typechecks `import Darwin` against
+# Xcode 27's interfaces).
+phase2_guest_module_triples() {
+    case "${ARCH:?phase2: source full/scripts/guest_arch.inc}" in
+        x86_64) printf '%s\n' x86_64-apple-macos ;;
+        arm64) printf '%s\n' arm64-apple-macos arm64e-apple-macos arm64e.x1-apple-macos ;;
+    esac
+}
+
+phase2_is_guest_macho() {
+    llvm-otool-18 -hv "$1" 2>/dev/null | grep -Eq "MH_MAGIC_64[[:space:]]+$(phase2_guest_cpu)"
+}
+
+phase2_is_foreign_macho() {
+    llvm-otool-18 -hv "$1" 2>/dev/null | grep -Eq "MH_MAGIC_64[[:space:]]+$(phase2_foreign_cpu)"
+}
+
+phase2_is_host_elf_loader() {
     local f=$1
     [ -x "$f" ] || return 1
-    file -b "$f" | grep -q 'ELF 64-bit LSB pie executable, x86-64'
+    file -b "$f" | grep -q "$(phase2_host_elf_loader_kind)"
 }
 
 phase2_flatten() {
@@ -267,10 +328,10 @@ phase2_darwin_tbd_source_id() {
     } | sha256sum | awk '{print $1}'
 }
 
-phase2_tbd_is_x86_target() {
+phase2_tbd_is_guest_target() {
     local tbd=$1
     [ -e "$tbd" ] || [ -L "$tbd" ] || return 1
-    grep -q 'x86_64-macos' "$tbd"
+    grep -q "${ARCH:?phase2: source full/scripts/guest_arch.inc}-macos" "$tbd"
 }
 
 # TAPI v4 from an x86 Swift dylib via the committed writer. Never copy
@@ -279,7 +340,7 @@ phase2_tbd_is_x86_target() {
 phase2_emit_tbd_from_dylib() {
     local dylib=$1 dest=$3
     [ -f "$dylib" ] || return 1
-    phase2_is_x86_macho "$dylib" || return 1
+    phase2_is_guest_macho "$dylib" || return 1
     bash "$PHASE2_REPO/scripts/x86/gen_swift_tbd.sh" "$dylib" "$dest" >/dev/null
 }
 
@@ -297,7 +358,7 @@ phase2_stage_darwin_tbds_into_sysroot() {
                 echo "phase2: empty .tbd is a linker lie: $t" >&2
                 return 1
             }
-            if ! phase2_tbd_is_x86_target "$t"; then
+            if ! phase2_tbd_is_guest_target "$t"; then
                 echo "phase2: refusing non-x86 .tbd $t (never copy arm64 tbds)" >&2
                 return 1
             fi
@@ -325,7 +386,7 @@ phase2_stage_overlay_tbds_into_sysroot() {
         local dylib=$1
         local base dest install
         [ -f "$dylib" ] || return 0
-        phase2_is_x86_macho "$dylib" || return 0
+        phase2_is_guest_macho "$dylib" || return 0
         base=$(basename "$dylib" .dylib)
         case " $emitted " in *" $base "*) return 0 ;; esac
         dest="$sys/usr/lib/swift/$base.tbd"
@@ -342,11 +403,11 @@ phase2_stage_overlay_tbds_into_sysroot() {
     fi
     while IFS= read -r name; do
         [ -n "$name" ] || continue
-        src=$(phase2_find_x86_overlay "$name" || true)
+        src=$(phase2_find_guest_overlay "$name" || true)
         [ -n "$src" ] || continue
         _phase2_emit_overlay_tbd "$src"
     done < <(phase2_twelve_overlay_names)
-    src=$(phase2_find_x86_overlay libswiftCore.dylib || true)
+    src=$(phase2_find_guest_overlay libswiftCore.dylib || true)
     [ -n "$src" ] && _phase2_emit_overlay_tbd "$src"
     return 0
 }
@@ -390,7 +451,7 @@ phase2_sysroot_tbd_resolve() {
             missing+=("$rel")
             continue
         fi
-        if ! phase2_tbd_is_x86_target "$path"; then
+        if ! phase2_tbd_is_guest_target "$path"; then
             wrong+=("$rel")
         fi
         seen="$seen $rel "
@@ -401,7 +462,7 @@ EOF
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
         case " $seen " in *" $rel "*) continue ;; esac
-        if ! phase2_tbd_is_x86_target "$sys/$rel"; then
+        if ! phase2_tbd_is_guest_target "$sys/$rel"; then
             wrong+=("$rel")
         fi
     done < <(phase2_sysroot_tbd_relpaths "$sys")
@@ -487,7 +548,7 @@ phase2_posix_xcc_for_sysroot() {
 phase2_arm_overlay_interface() {
     local arm=$1 f
     for f in \
-        "$arm/usr/lib/swift/Darwin.swiftmodule/x86_64-apple-macos.swiftinterface" \
+        "$arm/usr/lib/swift/Darwin.swiftmodule/${ARCH:?}-apple-macos.swiftinterface" \
         "$arm/usr/lib/swift/Darwin.swiftmodule/arm64-apple-macos.swiftinterface" \
         "$arm/usr/lib/swift/Darwin.swiftinterface"
     do
@@ -508,7 +569,7 @@ phase2_sysroot_overlay_if() {
         printf '%s\n' "$f"
         return 0
     fi
-    f=$artifacts/swift-macosx/Darwin.swiftmodule/x86_64-apple-macos.swiftinterface
+    f=$artifacts/swift-macosx/Darwin.swiftmodule/${ARCH:?}-apple-macos.swiftinterface
     if [ -f "$f" ]; then
         printf '%s\n' "$f"
         return 0
@@ -578,21 +639,21 @@ phase2_sysroot_complete() {
     local sys=$1 need_core=$2 need_bf=$3
     [ -d "$sys/usr/include" ] || return 1
     [ -f "$sys/usr/lib/libSystem.B.dylib" ] || return 1
-    phase2_is_x86_macho "$sys/usr/lib/libSystem.B.dylib" || return 1
+    phase2_is_guest_macho "$sys/usr/lib/libSystem.B.dylib" || return 1
     # -lobjc looks for libobjc.tbd (Apple unsuffixed alias). libobjc.A.tbd
     # alone is not enough; x86.4 find -type f dropped the symlink.
     [ -e "$sys/usr/lib/libobjc.tbd" ] || return 1
-    phase2_tbd_is_x86_target "$sys/usr/lib/libobjc.tbd" || return 1
+    phase2_tbd_is_guest_target "$sys/usr/lib/libobjc.tbd" || return 1
     { [ -d "$sys/usr/lib/swift/Darwin.swiftmodule" ] \
         || [ -f "$sys/usr/lib/swift/Darwin.swiftinterface" ]; } || return 1
     [ -f "$sys/usr/include/Darwin.modulemap" ] || return 1
     if [ "$need_core" = 1 ]; then
         [ -f "$sys/usr/lib/swift/libswiftCore.dylib" ] || return 1
-        phase2_is_x86_macho "$sys/usr/lib/swift/libswiftCore.dylib" || return 1
+        phase2_is_guest_macho "$sys/usr/lib/swift/libswiftCore.dylib" || return 1
     fi
     if [ "$need_bf" = 1 ]; then
-        { [ -f "$sys/usr/lib/swift/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftmodule" ] \
-            || [ -f "$sys/usr/lib/swift/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftinterface" ]; } \
+        { [ -f "$sys/usr/lib/swift/_Builtin_float.swiftmodule/${ARCH:?}-apple-macos.swiftmodule" ] \
+            || [ -f "$sys/usr/lib/swift/_Builtin_float.swiftmodule/${ARCH:?}-apple-macos.swiftinterface" ]; } \
             || return 1
     fi
     # Maps that name a header which is not on disk are not a working Clang Darwin.
@@ -832,9 +893,9 @@ phase2_report_darwin_overlay_path() {
     local sys=$1 arm=$2
     local arm_s x86_s
     arm_s=$(phase2_darwin_overlay_slice "$arm" arm64-apple-macos)
-    x86_s=$(phase2_darwin_overlay_slice "$sys" x86_64-apple-macos)
+    x86_s=$(phase2_darwin_overlay_slice "$sys" "${ARCH:?}-apple-macos")
     echo "  Darwin overlay arm64-apple-macos ($arm): $arm_s"
-    echo "  Darwin overlay x86_64-apple-macos ($sys): $x86_s"
+    echo "  Darwin overlay ${ARCH:?}-apple-macos ($sys): $x86_s"
     case "$arm_s" in
         swiftmodule=PRESENT*)
             echo "  arm64 has a prebuilt Darwin.swiftmodule beside the interface (interface is not compiled). x86 uses the x86_64 sibling if PRESENT; no version-check disable."
@@ -861,9 +922,14 @@ phase2_canonical_dir() {
 phase2_swift_module_present() {
     local name=$1
     local root=$2
-    local triple=${3:-${SWIFT_MODULE_TRIPLE:-x86_64-apple-macos}}
-    local dir
+    local dir triple
+    local -a triples
     [ -n "$root" ] || return 1
+    if [ -n "${3:-}" ]; then
+        triples=("$3")
+    else
+        mapfile -t triples < <(phase2_guest_module_triples)
+    fi
     if [ -d "$root/usr/lib/swift" ]; then
         dir=$root/usr/lib/swift
     else
@@ -871,8 +937,10 @@ phase2_swift_module_present() {
     fi
     [ -f "$dir/$name.swiftmodule" ] && return 0
     [ -f "$dir/$name.swiftinterface" ] && return 0
-    [ -f "$dir/$name.swiftmodule/$triple.swiftmodule" ] && return 0
-    [ -f "$dir/$name.swiftmodule/$triple.swiftinterface" ] && return 0
+    for triple in "${triples[@]}"; do
+        [ -f "$dir/$name.swiftmodule/$triple.swiftmodule" ] && return 0
+        [ -f "$dir/$name.swiftmodule/$triple.swiftinterface" ] && return 0
+    done
     return 1
 }
 
@@ -888,7 +956,6 @@ phase2_swift_module_present() {
 # phase2_probe_fe_imports <sysroot> [osmod]
 phase2_probe_fe_imports() {
     local sys=$1 osmod=${2:-}
-    local triple=${SWIFT_MODULE_TRIPLE:-x86_64-apple-macos}
     local present="" absent="" opt_absent=""
     local name ok
 
@@ -905,18 +972,18 @@ phase2_probe_fe_imports() {
         ok=0
         case "$name" in
             Darwin)
-                if phase2_swift_module_present Darwin "$sys" "$triple" \
+                if phase2_swift_module_present Darwin "$sys" \
                     && [ -f "$sys/usr/include/Darwin.modulemap" ]; then
                     ok=1
                 fi
                 ;;
             os)
-                if phase2_swift_module_present os "$osmod" "$triple"; then
+                if phase2_swift_module_present os "$osmod"; then
                     ok=1
                 fi
                 ;;
             *)
-                if phase2_swift_module_present "$name" "$sys" "$triple"; then
+                if phase2_swift_module_present "$name" "$sys"; then
                     ok=1
                 fi
                 ;;
@@ -928,7 +995,7 @@ phase2_probe_fe_imports() {
         fi
     done
     name=Synchronization
-    if phase2_swift_module_present Synchronization "$sys" "$triple"; then
+    if phase2_swift_module_present Synchronization "$sys"; then
         _fe_add present Synchronization
     else
         _fe_add opt_absent Synchronization
@@ -981,11 +1048,11 @@ phase2_twelve_overlay_names() {
 # swiftcore-macho/artifacts/swift-macosx/x86_64. Keep the Apple directory in
 # the search only so a cache-extract can be NAMED in
 # CANNOT_STAGE_CACHE_EXTRACT src=… — never copy it into a run root.
-phase2_x86_overlay_search_dirs() {
+phase2_guest_overlay_search_dirs() {
     printf '%s\n' \
-        "${W:?}/swiftcore-macho/artifacts/swift-macosx/x86_64" \
+        "$(phase2_swiftcore_artifacts "${W:?}")/swift-macosx/${ARCH:?}" \
         "${W:?}/scratch/apple-x86-overlays" \
-        "${HOME}/work/build/lib/swift/macosx/x86_64" \
+        "${HOME}/work/build/lib/swift/macosx/${ARCH:?}" \
         "${HOME}/work/build/lib/swift/macosx"
 }
 
@@ -1018,41 +1085,41 @@ phase2_macho_fixups() {
 phase2_is_cache_extract() {
     local f=$1
     [ -f "$f" ] || return 1
-    phase2_is_x86_macho "$f" || return 1
+    phase2_is_guest_macho "$f" || return 1
     [ -z "$(phase2_macho_fixups "$f")" ]
 }
 
-phase2_is_loadable_x86_overlay() {
+phase2_is_loadable_guest_overlay() {
     local f=$1
-    phase2_is_x86_macho "$f" || return 1
+    phase2_is_guest_macho "$f" || return 1
     phase2_is_cache_extract "$f" && return 1
     return 0
 }
 
 # First x86 Mach-O for $1 in search order, including cache extracts.
-phase2_find_any_x86_overlay() {
+phase2_find_any_guest_overlay() {
     local name=$1 dir
     while IFS= read -r dir; do
         [ -n "$dir" ] || continue
-        if [ -f "$dir/$name" ] && phase2_is_x86_macho "$dir/$name"; then
+        if [ -f "$dir/$name" ] && phase2_is_guest_macho "$dir/$name"; then
             printf '%s\n' "$dir/$name"
             return 0
         fi
-    done < <(phase2_x86_overlay_search_dirs)
+    done < <(phase2_guest_overlay_search_dirs)
     return 1
 }
 
 # First LOADABLE x86 overlay (has LC_DYLD_INFO or LC_DYLD_CHAINED_FIXUPS).
 # Artifacts first. Cache extracts are skipped, not staged.
-phase2_find_x86_overlay() {
+phase2_find_guest_overlay() {
     local name=$1 dir
     while IFS= read -r dir; do
         [ -n "$dir" ] || continue
-        if [ -f "$dir/$name" ] && phase2_is_loadable_x86_overlay "$dir/$name"; then
+        if [ -f "$dir/$name" ] && phase2_is_loadable_guest_overlay "$dir/$name"; then
             printf '%s\n' "$dir/$name"
             return 0
         fi
-    done < <(phase2_x86_overlay_search_dirs)
+    done < <(phase2_guest_overlay_search_dirs)
     return 1
 }
 
@@ -1061,7 +1128,7 @@ phase2_find_x86_overlay() {
 #   1 missing
 #   2 only a dyld-cache extract exists (PHASE2_OVERLAY_SRC is that path)
 # Always overwrites. A dest that already holds an Apple extract is the
-# ObjectiveC provenance bug: phase2_fill_x86_base_swift_dylibs used to
+# ObjectiveC provenance bug: phase2_fill_guest_base_swift_dylibs used to
 # `continue` when dest was any x86 Mach-O, so libswiftObjectiveC stayed the
 # cache extract while Darwin/errno (FE, always cp -f) and Concurrency
 # (absent from dest, so copied from artifacts) came from
@@ -1073,7 +1140,7 @@ phase2_copy_loadable_overlay() {
     PHASE2_OVERLAY_SRC=
     mkdir -p "$dest_swift"
     dest=$dest_swift/$name
-    src=$(phase2_find_x86_overlay "$name" || true)
+    src=$(phase2_find_guest_overlay "$name" || true)
     if [ -n "$src" ]; then
         if phase2_is_cache_extract "$src"; then
             PHASE2_OVERLAY_SRC=$src
@@ -1083,7 +1150,7 @@ phase2_copy_loadable_overlay() {
         PHASE2_OVERLAY_SRC=$src
         return 0
     fi
-    extract=$(phase2_find_any_x86_overlay "$name" || true)
+    extract=$(phase2_find_any_guest_overlay "$name" || true)
     if [ -n "$extract" ] && phase2_is_cache_extract "$extract"; then
         PHASE2_OVERLAY_SRC=$extract
         if [ -f "$dest" ] && phase2_is_cache_extract "$dest"; then
@@ -1111,7 +1178,7 @@ phase2_print_overlay_provenance() {
 # Always prefers artifacts. Refuses a cache extract with
 #   CANNOT_STAGE_CACHE_EXTRACT name=… src=…
 # At the end: one OVERLAY_PROVENANCE line per staged overlay.
-phase2_stage_x86_run_root_overlays() {
+phase2_stage_guest_run_root_overlays() {
     local dest=$1
     local swift=$dest/darwin/usr/lib/swift
     local name rc fail=0
@@ -1154,7 +1221,7 @@ phase2_stage_x86_run_root_overlays() {
 # Missing overlays are a named CANNOT_X86_OVERLAYS_NOT_BUILT, not the macOS
 # CoreSimulator marker. Cache extracts are not staged; stderr names
 # CANNOT_STAGE_CACHE_EXTRACT and the name is listed in MISSING=.
-phase2_stage_x86_fe_overlays() {
+phase2_stage_guest_fe_overlays() {
     local dest=$1
     local swift=$dest/darwin/usr/lib/swift
     mkdir -p "$swift"
@@ -1187,8 +1254,8 @@ phase2_stage_x86_fe_overlays() {
 # userland + x86 libswiftCore. Analog of macOS-only scripts/stage_swift_runtime.sh,
 # whose Swift OVERLAYS are arm64-only; those belong in mrroot_fe-x86_64 from
 # the stdlib cross-build instead.
-#   phase2_stage_x86_base_mrroot <dest> <loader> <darwin-root> <x86-libswiftCore>
-phase2_stage_x86_base_mrroot() {
+#   phase2_stage_guest_base_mrroot <dest> <loader> <darwin-root> <x86-libswiftCore>
+phase2_stage_guest_base_mrroot() {
     local dest=$1 loader=$2 darwin_root=$3 x86_core=$4
     local rel d
     mkdir -p "$dest/darwin/usr/lib/swift" "$dest/host"
@@ -1202,7 +1269,7 @@ phase2_stage_x86_base_mrroot() {
             case "$rel" in
                 swift/libswiftCore.dylib) continue ;;
             esac
-            if phase2_is_x86_macho "$d"; then
+            if phase2_is_guest_macho "$d"; then
                 mkdir -p "$dest/darwin/usr/lib/$(dirname "$rel")"
                 cp -a "$d" "$dest/darwin/usr/lib/$rel"
             fi
@@ -1212,26 +1279,26 @@ phase2_stage_x86_base_mrroot() {
         mkdir -p "$dest/darwin/System"
         cp -a "$darwin_root/System/." "$dest/darwin/System/"
     fi
-    if [ -f "$x86_core" ] && phase2_is_x86_macho "$x86_core"; then
+    if [ -f "$x86_core" ] && phase2_is_guest_macho "$x86_core"; then
         cp -f "$x86_core" "$dest/darwin/usr/lib/swift/libswiftCore.dylib"
     fi
     # Host Linux boundary: copy libdispatch.so / libBlocksRuntime.so from the
     # resolved Swift runtime dir, then build the four Open* helpers as ELF
     # x86_64. Incomplete host/ is CANNOT_X86_HOST_RUNTIME in phase2.sh.
-    phase2_stage_x86_host_runtime "$dest" "$PHASE2_REPO" >/dev/null || true
+    phase2_stage_guest_host_runtime "$dest" "$PHASE2_REPO" >/dev/null || true
 }
 
-# ELF 64-bit x86-64 shared object, regular file. Rejects arm64 ELF, Mach-O,
+# ELF 64-bit shared object for this host, regular file. Rejects other-arch ELF, Mach-O,
 # text fixtures, and symlinks (build_full.sh requires regular files).
-phase2_is_elf_x86_so() {
+phase2_is_host_elf_so() {
     local f=$1
     [ -f "$f" ] && [ ! -L "$f" ] || return 1
-    file -b "$f" | grep -q 'ELF 64-bit LSB shared object, x86-64'
+    file -b "$f" | grep -q "ELF 64-bit LSB shared object, $(phase2_host_elf_machine)"
 }
 
-phase2_drop_unless_elf_x86_so() {
+phase2_drop_unless_host_elf_so() {
     local f=$1
-    if phase2_is_elf_x86_so "$f"; then
+    if phase2_is_host_elf_so "$f"; then
         return 0
     fi
     rm -f "$f"
@@ -1248,7 +1315,7 @@ phase2_record_host_runtime_sha256() {
         echo "# sha256 of staged host runtime files"
         while IFS= read -r name; do
             [ -n "$name" ] || continue
-            if phase2_is_elf_x86_so "$host/$name"; then
+            if phase2_is_host_elf_so "$host/$name"; then
                 sha256sum "$host/$name"
             fi
         done < <(openuikit_host_runtime_files)
@@ -1260,7 +1327,7 @@ phase2_record_host_runtime_sha256() {
 # x86_64 through the committed recipes. Never copies Open* (including arm64
 # ELF leftover in the linux dir). Optional $2 is the repo root. Prints OK or
 # MISSING=a,b,c naming each file that is not ELF x86-64.
-phase2_stage_x86_host_runtime() {
+phase2_stage_guest_host_runtime() {
     local dest=$1 repo=${2:-}
     local host=$dest/host
     local linux_lib src name missing
@@ -1272,10 +1339,10 @@ phase2_stage_x86_host_runtime() {
         if [ -e "$src" ]; then
             cp -fL "$src" "$host/$name"
         fi
-        phase2_drop_unless_elf_x86_so "$host/$name" || true
+        phase2_drop_unless_host_elf_so "$host/$name" || true
     done < <(openuikit_host_runtime_toolchain_files)
     if [ -n "$repo" ]; then
-        phase2_build_x86_host_helpers "$dest" "$repo" || true
+        phase2_build_guest_host_helpers "$dest" "$repo" || true
     fi
     phase2_record_host_runtime_sha256 "$dest"
     missing=$(phase2_host_runtime_missing "$dest")
@@ -1294,7 +1361,7 @@ phase2_host_runtime_missing() {
     local name missing=()
     while IFS= read -r name; do
         [ -n "$name" ] || continue
-        if ! phase2_is_elf_x86_so "$host/$name"; then
+        if ! phase2_is_host_elf_so "$host/$name"; then
             missing+=("$name")
         fi
     done < <(openuikit_host_runtime_files)
@@ -1309,16 +1376,16 @@ phase2_host_runtime_missing() {
 # is already ELF x86-64. Rebuild (do not keep) arm64 ELF / text / Mach-O.
 # libOpenDispatchHost.so uses full/dispatch/build_host_bridge.sh; the other
 # three use sibling build_host_helper.sh recipes. Does not stub missing libs.
-phase2_build_x86_host_helpers() {
+phase2_build_guest_host_helpers() {
     local dest=$1 repo=$2
     local host=$dest/host
     local work=$dest/host-work
     mkdir -p "$host" "$work"
 
-    if ! phase2_is_elf_x86_so "$host/libOpenDispatchHost.so"; then
+    if ! phase2_is_host_elf_so "$host/libOpenDispatchHost.so"; then
         rm -f "$host/libOpenDispatchHost.so"
-        if phase2_is_elf_x86_so "$host/libdispatch.so" \
-            && phase2_is_elf_x86_so "$host/libBlocksRuntime.so" \
+        if phase2_is_host_elf_so "$host/libdispatch.so" \
+            && phase2_is_host_elf_so "$host/libBlocksRuntime.so" \
             && [ -f "$repo/full/dispatch/build_host_bridge.sh" ]; then
             set +e
             bash "$repo/full/dispatch/build_host_bridge.sh" \
@@ -1331,10 +1398,10 @@ phase2_build_x86_host_helpers() {
                 >"$work/build_host_bridge.log" 2>&1
             set -e
         fi
-        phase2_drop_unless_elf_x86_so "$host/libOpenDispatchHost.so" || true
+        phase2_drop_unless_host_elf_so "$host/libOpenDispatchHost.so" || true
     fi
 
-    if ! phase2_is_elf_x86_so "$host/libOpenFoundationInternationalizationHost.so"; then
+    if ! phase2_is_host_elf_so "$host/libOpenFoundationInternationalizationHost.so"; then
         rm -f "$host/libOpenFoundationInternationalizationHost.so"
         if [ -f "$repo/full/foundationinternationalization/build_host_helper.sh" ]; then
             set +e
@@ -1344,11 +1411,11 @@ phase2_build_x86_host_helpers() {
                 >"$work/OpenFoundationInternationalizationHost.log" 2>&1
             set -e
         fi
-        phase2_drop_unless_elf_x86_so \
+        phase2_drop_unless_host_elf_so \
             "$host/libOpenFoundationInternationalizationHost.so" || true
     fi
 
-    if ! phase2_is_elf_x86_so "$host/libOpenURLTransportHost.so"; then
+    if ! phase2_is_host_elf_so "$host/libOpenURLTransportHost.so"; then
         rm -f "$host/libOpenURLTransportHost.so"
         if [ -f "$repo/full/urltransport/build_host_helper.sh" ]; then
             set +e
@@ -1358,10 +1425,10 @@ phase2_build_x86_host_helpers() {
                 >"$work/OpenURLTransportHost.log" 2>&1
             set -e
         fi
-        phase2_drop_unless_elf_x86_so "$host/libOpenURLTransportHost.so" || true
+        phase2_drop_unless_host_elf_so "$host/libOpenURLTransportHost.so" || true
     fi
 
-    if ! phase2_is_elf_x86_so "$host/libOpenRelativeTimeHost.so"; then
+    if ! phase2_is_host_elf_so "$host/libOpenRelativeTimeHost.so"; then
         rm -f "$host/libOpenRelativeTimeHost.so"
         if [ -f "$repo/full/relativetime/build_host_helper.sh" ]; then
             set +e
@@ -1371,7 +1438,7 @@ phase2_build_x86_host_helpers() {
                 >"$work/OpenRelativeTimeHost.log" 2>&1
             set -e
         fi
-        phase2_drop_unless_elf_x86_so "$host/libOpenRelativeTimeHost.so" || true
+        phase2_drop_unless_host_elf_so "$host/libOpenRelativeTimeHost.so" || true
     fi
 }
 
@@ -1397,7 +1464,7 @@ phase2_layout_leaf() {
 # Build the extensionless Foundation/CoreFoundation loud-abort stubs with
 # scripts/build_runtime_shims.sh (STUBS_ONLY, x86_64-apple-macos). Do not copy
 # arm64 stubs from scratch/mrroot.
-phase2_fill_x86_loud_abort_stubs() {
+phase2_fill_guest_loud_abort_stubs() {
     local dest=$1 repo=$2 sys=$3
     local fw=$dest/darwin/System/Library/Frameworks
     local work=$dest/shim-work
@@ -1406,7 +1473,7 @@ phase2_fill_x86_loud_abort_stubs() {
     local stub_key
     stub_key=$(stamp_key "$fw/Foundation.framework/Foundation" \
         "$repo/scripts/build_runtime_shims.sh" \
-        "$sys" "${TARGET:-x86_64-apple-macos15.0}")
+        "$sys" "${TARGET:?}")
     if stamp_reuse "$fw/Foundation.framework/Foundation" "$stub_key" \
         && stamp_reuse "$fw/CoreFoundation.framework/CoreFoundation" "$stub_key"; then
         return 0
@@ -1416,7 +1483,7 @@ phase2_fill_x86_loud_abort_stubs() {
         "$fw/CoreFoundation.framework/CoreFoundation"
     set +e
     ROOT="$repo" W="$repo" SYS="$sys" OUT="$work" \
-        TARGET="${TARGET:-x86_64-apple-macos15.0}" MINOS=15.0 \
+        TARGET="${TARGET:?}" MINOS=15.0 \
         STUBS_ONLY=1 \
         bash "$repo/scripts/build_runtime_shims.sh" >"$log" 2>&1
     set -e
@@ -1427,14 +1494,14 @@ phase2_fill_x86_loud_abort_stubs() {
         cp -f "$work/CoreFoundation.stub.dylib" \
             "$fw/CoreFoundation.framework/CoreFoundation"
     fi
-    if ! phase2_is_x86_macho "$fw/Foundation.framework/Foundation"; then
+    if ! phase2_is_guest_macho "$fw/Foundation.framework/Foundation"; then
         rm -f "$fw/Foundation.framework/Foundation"
     fi
-    if ! phase2_is_x86_macho "$fw/CoreFoundation.framework/CoreFoundation"; then
+    if ! phase2_is_guest_macho "$fw/CoreFoundation.framework/CoreFoundation"; then
         rm -f "$fw/CoreFoundation.framework/CoreFoundation"
     fi
-    if phase2_is_x86_macho "$fw/Foundation.framework/Foundation" \
-        && phase2_is_x86_macho "$fw/CoreFoundation.framework/CoreFoundation"; then
+    if phase2_is_guest_macho "$fw/Foundation.framework/Foundation" \
+        && phase2_is_guest_macho "$fw/CoreFoundation.framework/CoreFoundation"; then
         stamp_write "$fw/Foundation.framework/Foundation" "$stub_key"
         stamp_write "$fw/CoreFoundation.framework/CoreFoundation" "$stub_key"
     fi
@@ -1466,7 +1533,7 @@ phase2_prepare_compat_alias_sdk() {
     fi
 }
 
-phase2_fill_x86_libswiftcompat() {
+phase2_fill_guest_libswiftcompat() {
     local dest=$1 repo=$2 sys=$3 loader=${4:-}
     local out=$dest/darwin/usr/lib/libswiftcompat.dylib
     local mrlib=$repo/machorun/darwin/usr/lib
@@ -1514,7 +1581,7 @@ phase2_fill_x86_libswiftcompat() {
         OUT="$out" NM=llvm-nm-18 \
         bash "$repo/swiftcore-macho/scripts/build_compat.sh" >"$log" 2>&1
     set -e
-    if ! phase2_is_x86_macho "$out"; then
+    if ! phase2_is_guest_macho "$out"; then
         rm -f "$out"
         return 1
     fi
@@ -1527,7 +1594,7 @@ phase2_fill_x86_libswiftcompat() {
 # x86 Mach-O — that is how libswiftObjectiveC stayed the Apple cache extract
 # while the other four overlays came from artifacts. Never copy arm64.
 # Cache extracts are refused, not copied.
-phase2_fill_x86_base_swift_dylibs() {
+phase2_fill_guest_base_swift_dylibs() {
     local dest=$1
     local swift=$dest/darwin/usr/lib/swift
     local name rc
@@ -1547,25 +1614,25 @@ phase2_fill_x86_base_swift_dylibs() {
 # Fill what the committed recipes can produce, then print OK or MISSING=…
 # naming every BASE/FE/host path build_full.sh still lacks as x86 Mach-O
 # (host files: ELF x86-64).
-phase2_stage_x86_mrroot_layout() {
+phase2_stage_guest_mrroot_layout() {
     local dest=$1 fe=$2 repo=$3 sys=$4 loader=$5
     local missing=() rel leaf host name
     mkdir -p "$dest"
-    phase2_fill_x86_loud_abort_stubs "$dest" "$repo" "$sys" || true
-    phase2_fill_x86_libswiftcompat "$dest" "$repo" "$sys" "$loader" || true
-    phase2_fill_x86_base_swift_dylibs "$dest" || true
+    phase2_fill_guest_loud_abort_stubs "$dest" "$repo" "$sys" || true
+    phase2_fill_guest_libswiftcompat "$dest" "$repo" "$sys" "$loader" || true
+    phase2_fill_guest_base_swift_dylibs "$dest" || true
 
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
         leaf=$(phase2_layout_leaf "$rel")
         case "$rel" in
             darwin/usr/lib/swift/*)
-                if ! phase2_is_loadable_x86_overlay "$dest/$rel"; then
+                if ! phase2_is_loadable_guest_overlay "$dest/$rel"; then
                     missing+=("$leaf")
                 fi
                 ;;
             *)
-                if ! phase2_is_x86_macho "$dest/$rel"; then
+                if ! phase2_is_guest_macho "$dest/$rel"; then
                     missing+=("$leaf")
                 fi
                 ;;
@@ -1574,17 +1641,17 @@ phase2_stage_x86_mrroot_layout() {
 
     while IFS= read -r name; do
         [ -n "$name" ] || continue
-        if ! phase2_is_elf_x86_so "$dest/host/$name"; then
+        if ! phase2_is_host_elf_so "$dest/host/$name"; then
             missing+=("$name")
         fi
     done < <(openuikit_host_runtime_files)
 
     while IFS= read -r name; do
         [ -n "$name" ] || continue
-        if ! phase2_is_loadable_x86_overlay "$dest/darwin/usr/lib/swift/$name"; then
+        if ! phase2_is_loadable_guest_overlay "$dest/darwin/usr/lib/swift/$name"; then
             missing+=("$name")
         fi
-        if ! phase2_is_loadable_x86_overlay "$fe/darwin/usr/lib/swift/$name"; then
+        if ! phase2_is_loadable_guest_overlay "$fe/darwin/usr/lib/swift/$name"; then
             missing+=("$name")
         fi
     done < <(phase2_twelve_overlay_names)
@@ -1602,21 +1669,21 @@ phase2_stage_x86_mrroot_layout() {
 # Park leftover arm64 Mach-O dylibs beside darwin/usr/lib so gen_tbd CHECK 4
 # does not mix slices. Sibling directory (not a library path). check_undefined.sh
 # prunes `*-park`. Always scans content; never skips because the park exists.
-phase2_park_arm64_darwin_dylibs() {
+phase2_park_foreign_darwin_dylibs() {
     local libdir=$1
     local park parked=0 d rel
     [ -d "$libdir" ] || return 0
-    park=$(dirname "$libdir")/lib-arm64-park
+    park=$(dirname "$libdir")/lib-foreign-park
     mkdir -p "$park"
     while IFS= read -r -d '' d; do
-        phase2_is_arm64_macho "$d" || continue
+        phase2_is_foreign_macho "$d" || continue
         rel=${d#"$libdir"/}
         mkdir -p "$park/$(dirname "$rel")"
         mv "$d" "$park/$rel"
-        echo "  parked arm64 $rel -> $(basename "$park")" >&2
+        echo "  parked foreign-arch $rel -> $(basename "$park")" >&2
         parked=$((parked + 1))
     done < <(find "$libdir" -type f -name '*.dylib' -print0 2>/dev/null)
-    echo "phase2: parked $parked arm64 dylib(s) from $libdir" >&2
+    echo "phase2: parked $parked foreign-arch dylib(s) from $libdir" >&2
 }
 
 # C headers FoundationEssentials / os-module / Darwin.swiftinterface actually
@@ -1838,7 +1905,7 @@ phase2_apply_vm_only_fe_sysroot() {
     [ -n "$repo" ] || repo="${W:-${PHASE2_REPO:-}}"
     [ -n "$repo" ] || return 0
     machorun=${MACHORUN:-$repo/machorun}
-    artifacts=$repo/swiftcore-macho/artifacts
+    artifacts=$(phase2_swiftcore_artifacts "$repo")
 
     if [ ! -f "$dest/usr/include/Darwin.modulemap" ]; then
         echo "== VM-only Darwin.modulemap via stage_overlay_darwin.sh ($dest)"
@@ -1892,22 +1959,24 @@ phase2_apply_vm_only_fe_sysroot() {
 
     echo "== VM-only x86 overlay modules from committed artifacts ($dest)"
     phase2_copy_artifact_swift_overlays "$dest" "$artifacts/swift-macosx"
-    if [ -d "$artifacts/swift-macosx/x86_64" ]; then
+    if [ -d "$artifacts/swift-macosx/${ARCH:?}" ]; then
         mkdir -p "$dest/usr/lib/swift"
-        for dylib in "$artifacts/swift-macosx/x86_64"/*.dylib; do
+        for dylib in "$artifacts/swift-macosx/$ARCH"/*.dylib; do
             [ -f "$dylib" ] || continue
-            if phase2_is_arm64_macho "$dylib"; then
-                echo "  skip arm64 Mach-O $(basename "$dylib")" >&2
+            if phase2_is_foreign_macho "$dylib"; then
+                echo "  skip foreign-arch Mach-O $(basename "$dylib")" >&2
                 continue
             fi
-            phase2_is_x86_macho "$dylib" || continue
+            phase2_is_guest_macho "$dylib" || continue
             cp -a "$dylib" "$dest/usr/lib/swift/$(basename "$dylib")"
         done
     fi
 
-    if [ -f "$dest/usr/lib/swift/libswiftCore.dylib" ]; then
+    # The swift.org release runtime carries the real module; the stub is for artifacts without one.
+    if [ -f "$dest/usr/lib/swift/libswiftCore.dylib" ] \
+        && [ ! -f "$artifacts/swift-macosx/SwiftOnoneSupport.swiftmodule/$ARCH-apple-macos.swiftmodule" ]; then
         echo "== VM-only SwiftOnoneSupport stub ($dest)"
-        phase2_ensure_swift_onone_support "$dest" "${TARGET:-x86_64-apple-macos15.0}" \
+        phase2_ensure_swift_onone_support "$dest" "${TARGET:?}" \
             || echo "  SwiftOnoneSupport stub failed; collections without -O will not compile"
     fi
 }
@@ -1980,7 +2049,7 @@ phase2_ensure_macho_modulemap() {
 # Do not use foundation-macho build_foundation_placeholder.sh here: that
 # 4208-byte empty dylib is a different recipe than the box (17456-byte
 # fckstub + umbrella libSystem).
-phase2_stage_x86_build_full_umbrellas() {
+phase2_stage_guest_build_full_umbrellas() {
     local dest=$1 repo=$2
     local log=$repo/scratch/build_full_umbrellas${FULL_OUT_SUFFIX:-}.log
     local lib=$dest/darwin/usr/lib
@@ -2000,8 +2069,8 @@ phase2_stage_x86_build_full_umbrellas() {
         return 1
     fi
     if [ ! -f "$lib/libSystem.real.dylib" ] \
-        || ! phase2_is_x86_macho "$lib/libSystem.real.dylib" \
-        || ! phase2_is_x86_macho "$lib/libSystem.B.dylib" \
+        || ! phase2_is_guest_macho "$lib/libSystem.real.dylib" \
+        || ! phase2_is_guest_macho "$lib/libSystem.B.dylib" \
         || ! llvm-nm-18 --extern-only --defined-only "$lib/libSystem.B.dylib" 2>/dev/null \
             | awk '$NF=="_nan"{f=1} END{exit !f}'; then
         echo "phase2: run-root libSystem is not build_full's umbrella (need .real + _nan) log=$log" >&2
@@ -2028,20 +2097,20 @@ phase2_copy_artifact_swift_overlays() {
         [ -d "$d" ] || continue
         name=$(basename "$d")
         mkdir -p "$sys/usr/lib/swift/$name"
-        for f in "$d"/x86_64-apple-macos.*; do
+        for f in "$d"/"${ARCH:?}"-apple-macos.*; do
             [ -f "$f" ] || continue
             cp -f "$f" "$sys/usr/lib/swift/$name/$(basename "$f")"
             copied=$((copied + 1))
         done
     done
-    echo "  + $copied x86_64 overlay module files from $artifacts" >&2
+    echo "  + $copied $ARCH overlay module files from $artifacts" >&2
 }
 
 # SwiftOnoneSupport is required when collections / os-module compile without
 # -O. Committed Darwin artifacts do not ship it; the Linux toolchain module
 # is x86_64-unknown-linux-gnu. Compile an empty -O parse-as-library stub.
 phase2_ensure_swift_onone_support() {
-    local sys=$1 target=${2:-${TARGET:-x86_64-apple-macos15.0}}
+    local sys=$1 target=${2:-${TARGET:?}}
     local dest=$sys/usr/lib/swift/SwiftOnoneSupport.swiftmodule
     local src=$sys/.swift-onone-stub.swift
     local log=$sys/.swift-onone-stub.log
@@ -2057,11 +2126,11 @@ phase2_ensure_swift_onone_support() {
     set +e
     swiftc -parse-as-library -O -emit-module -module-name SwiftOnoneSupport \
         -target "$target" -sdk "$sys" \
-        -emit-module-path "$dest/x86_64-apple-macos.swiftmodule" \
+        -emit-module-path "$dest/${ARCH:?}-apple-macos.swiftmodule" \
         "$src" >"$log" 2>&1
     local st=$?
     set -e
-    if [ "$st" -ne 0 ] || [ ! -f "$dest/x86_64-apple-macos.swiftmodule" ]; then
+    if [ "$st" -ne 0 ] || [ ! -f "$dest/${ARCH:?}-apple-macos.swiftmodule" ]; then
         echo "phase2: SwiftOnoneSupport stub failed rc=$st log=$log" >&2
         return 1
     fi

@@ -84,6 +84,33 @@
       "(darwin/src/libsystem.c); this row stays so an aarch64 host-bind "      \
       "cannot silently return a binary128 half. openat/sem_open/vdprintf "     \
       "moved into darwin/src (translating wrappers) and are no longer here.")  \
+    /* The swift.org release libswiftCore's macOS crash backtracer (runtime  \
+     * Backtrace.cpp): it spawns swift-backtrace and suspends and walks the  \
+     * crashed process's threads. None of it runs unless SWIFT_BACKTRACE     \
+     * enables it, and each call's Darwin ABI differs from glibc's. */       \
+    X(posix_spawn, "posix_spawn", "opaque-abi-class",                          \
+      "Darwin posix_spawnattr_t / posix_spawn_file_actions_t are 8-byte "      \
+      "pointers; glibc's are 336- and 80-byte structs "                         \
+      "(docs/UNIMPLEMENTED.md#posix-spawn).")                                    \
+    X(sigaltstack, "sigaltstack", "struct layout",                             \
+      "Darwin stack_t is {ss_sp, ss_size, ss_flags}; glibc's is "              \
+      "{ss_sp, ss_flags, ss_size}.")                                            \
+    X(signal, "signal", "signal numbering",                                    \
+      "Darwin and Linux number signals differently (SIGBUS, SIGUSR1, "         \
+      "SIGCHLD, ...); a raw forward installs the handler on another signal.")  \
+    X(waitpid, "waitpid", "status encoding",                                   \
+      "untranslated: the backtracer waits for the swift-backtrace child "      \
+      "posix_spawn would have started, and Darwin's wait status and options "  \
+      "bits are not glibc's.")                                                  \
+    X(task_threads, "task_threads", "mach-ports-are-fiction",                  \
+      "Mach thread enumeration; glibc has no such call and machorun has no "   \
+      "Mach thread ports (docs/UNIMPLEMENTED.md#mach-ports-are-fiction).")     \
+    X(thread_info, "thread_info", "mach-ports-are-fiction",                    \
+      "Mach thread introspection; no Mach thread ports here.")                 \
+    X(thread_suspend, "thread_suspend", "mach-ports-are-fiction",              \
+      "Mach thread suspension; no Mach thread ports here.")                    \
+    X(thread_resume, "thread_resume", "mach-ports-are-fiction",                \
+      "Mach thread resumption; no Mach thread ports here.")                    \
     /* compiler-rt builtins. Mach-O spelling is "_" + cname, so cname "__divti3"
      * is the import ___divti3. glibc does not implement these. A root that
      * still lists them as undefined was linked without libclang_rt.osx.a. */  \

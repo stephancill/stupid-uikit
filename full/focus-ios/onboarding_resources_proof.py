@@ -181,6 +181,15 @@ RASTERIZER_PROFILES = [
         "version_sha256": "334b226b04b408c69f0cdddd748b566360c34853bf5edddc7f0c808a4f67d559",
     },
     {
+        "id": "ubuntu-noble-poppler-24.02.0-1ubuntu9.11-linux-aarch64",
+        "system": "Linux",
+        "machine": "aarch64",
+        "path": "/usr/bin/pdftocairo",
+        "size": 198904,
+        "sha256": "723c7f5821a39a2dee123820d7d4594da88040ed71120a828af7bccc76c15cdd",
+        "version_sha256": "334b226b04b408c69f0cdddd748b566360c34853bf5edddc7f0c808a4f67d559",
+    },
+    {
         "id": "ubuntu-noble-poppler-24.02.0-1ubuntu9.11-linux-x86_64",
         "system": "Linux",
         "machine": "x86_64",
@@ -815,14 +824,20 @@ def _loader_report(executable: Path) -> bytes:
 def discover_rasterizer(policy: dict[str, Any]) -> Rasterizer:
     system = platform.system()
     machine = platform.machine()
-    matches = [item for item in policy["rasterizer_profiles"] if item["system"] == system and item["machine"] == machine]
+    candidates = [item for item in policy["rasterizer_profiles"] if item["system"] == system and item["machine"] == machine]
+    if not candidates:
+        raise ProofError(f"no reviewed rasterizer profile for {system}/{machine}")
+    # A platform can have more than one reviewed build (Ubuntu's 9.9 and 9.11 updates on
+    # aarch64); the installed executable's bytes select exactly one of them.
+    matches = []
+    for item in candidates:
+        data = _read_regular_nofollow(Path(item["path"]))
+        if len(data) == item["size"] and sha256(data) == item["sha256"]:
+            matches.append(item)
     if len(matches) != 1:
-        raise ProofError(f"no unique reviewed rasterizer profile for {system}/{machine}")
+        raise ProofError(f"rasterizer executable identity changed: {candidates[0]['path']}")
     profile = matches[0]
     path = Path(profile["path"])
-    data = _read_regular_nofollow(path)
-    if len(data) != profile["size"] or sha256(data) != profile["sha256"]:
-        raise ProofError(f"rasterizer executable identity changed: {path}")
     result = _run([str(path), "-v"])
     if result.returncode != 0 or result.stdout:
         raise ProofError("unexpected pdftocairo version command behavior")

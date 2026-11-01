@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import stat
@@ -106,15 +107,34 @@ def resolve_row_path(root: Path, row: dict) -> Path:
     return path
 
 
-def _is_x86_macho(path: Path) -> bool:
+def _guest_arch() -> str:
+    """ARCH from the gate (full/scripts/guest_arch.inc): x86_64 or arm64."""
+    arch = os.environ.get("ARCH", "")
+    if arch not in ("x86_64", "arm64"):
+        raise SystemExit(f"prepare: ARCH={arch!r}; run under full/scripts/guest_arch.inc")
+    return arch
+
+
+def _is_guest_macho(path: Path) -> bool:
     if not path.is_file():
         return False
     probe = _run(["llvm-otool-18", "-hv", str(path)])
+    cpu = "X86_64" if _guest_arch() == "x86_64" else "ARM64"
     return bool(
         probe.returncode == 0
         and "MH_MAGIC_64" in probe.stdout
-        and "X86_64" in probe.stdout
+        and cpu in probe.stdout
     )
+
+
+def swiftcore_artifacts(root: Path) -> Path:
+    """scripts/x86/common.inc phase2_swiftcore_artifacts: the guest's Darwin Swift runtime."""
+    override = os.environ.get("SWIFTCORE_ARTIFACTS")
+    if override:
+        return Path(override)
+    if platform.machine() in ("aarch64", "arm64"):
+        return root / "swiftcore-macho/build/release-runtime"
+    return root / "swiftcore-macho/artifacts"
 
 
 def try_generate_tbd(root: Path) -> subprocess.CompletedProcess[str]:
@@ -564,16 +584,16 @@ def staged_outcome(root: Path, row: dict, verify_only: bool, arch: str, system: 
     if ident == "libswiftCore":
         dest = root / row["path"]
         if suffix:
-            x86_src = root / "swiftcore-macho/artifacts/swift-macosx/x86_64/libswiftCore.dylib"
-            if dest.is_file() and _is_x86_macho(dest):
-                return Outcome("satisfied", ident, f"path={dest} x86 reused=1")
-            if not x86_src.is_file():
-                return Outcome("unsatisfied", ident, f"missing x86 artifact {x86_src}")
+            guest_src = swiftcore_artifacts(root) / "swift-macosx" / _guest_arch() / "libswiftCore.dylib"
+            if dest.is_file() and _is_guest_macho(dest):
+                return Outcome("satisfied", ident, f"path={dest} {_guest_arch()} reused=1")
+            if not guest_src.is_file():
+                return Outcome("unsatisfied", ident, f"missing {_guest_arch()} artifact {guest_src}")
             if verify_only:
-                return Outcome("unsatisfied", ident, "x86 libswiftCore not staged")
+                return Outcome("unsatisfied", ident, f"{_guest_arch()} libswiftCore not staged")
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(x86_src, dest)
-            return Outcome("staged", ident, f"path={dest} from x86 artifact")
+            shutil.copyfile(guest_src, dest)
+            return Outcome("staged", ident, f"path={dest} from {_guest_arch()} artifact")
         source = root / row["source"]
         return stage_file(source, dest, row["sha256"], ident, verify_only)
     if ident in ("dejavu-sans", "dejavu-sans-bold", "noto-color-emoji"):

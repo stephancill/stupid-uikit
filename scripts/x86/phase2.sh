@@ -128,8 +128,9 @@ have() { [ -e "$1" ]; }
 echo "==== PHASE 2  host=$(uname -m)  W=$W  TARGET=$TARGET  MC=$MC ===="
 
 # 0. Host + toolchain
-if [ "$(uname -m)" != x86_64 ]; then
-    cannot host-arch HOST_NOT_X86_64 "uname -m is $(uname -m); this runner is the x86_64 operator path"
+case "$(uname -m)" in x86_64 | aarch64 | arm64) host_arch_ok=1 ;; *) host_arch_ok=0 ;; esac
+if [ "$host_arch_ok" != 1 ]; then
+    cannot host-arch HOST_ARCH "uname -m is $(uname -m); this runner supports x86_64 and aarch64 Linux hosts"
     echo "RUNG_SCOREBOARD a=CANNOT/host b=CANNOT/host c=CANNOT/host"
     echo "denominators: a 0/$UD_SMOKE_CHECKS smoke (ud_guest_runner.swift)  scoreboard=committed run_ud_guest.sh  persist=committed run_ud_persist.sh; b widget+onboarding source-preservation from full/swiftui; c windows=1 turns=3 from build_and_run_reminder_scene_guest.sh"
     exit 2
@@ -165,9 +166,9 @@ fi
 # 1. MEASURE libswiftCore-for-x86 FIRST. Do not spend the rest of the ladder
 #    pretending a later Swift guest can run without it.
 echo "==== measure libswiftCore-for-x86 (before any other Swift guest work) ===="
-artifacts=$W/swiftcore-macho/artifacts
-x86_core=$artifacts/swift-macosx/x86_64/libswiftCore.dylib
-x86_mod=$artifacts/swift-macosx/Swift.swiftmodule/x86_64-apple-macos.swiftmodule
+artifacts=$(phase2_swiftcore_artifacts "$W")
+x86_core=$artifacts/swift-macosx/$ARCH/libswiftCore.dylib
+x86_mod=$artifacts/swift-macosx/Swift.swiftmodule/$ARCH-apple-macos.swiftmodule
 arm_core=$artifacts/swift-macosx/arm64/libswiftCore.dylib
 measure_log=$W/scratch/phase2-libswiftcore-x86.txt
 mkdir -p "$W/scratch"
@@ -200,7 +201,7 @@ set -e
 rm -rf "$probe_dir"
 
 LIBSWIFTCORE_X86=0
-if [ -f "$x86_core" ] && phase2_is_x86_macho "$x86_core" && [ -f "$x86_mod" ]; then
+if [ -f "$x86_core" ] && phase2_is_guest_macho "$x86_core" && [ -f "$x86_mod" ]; then
     LIBSWIFTCORE_X86=1
     note libswiftCore-x86 satisfied
     echo "  (x86_64 libswiftCore + swiftmodule present under artifacts/)"
@@ -233,7 +234,7 @@ ensure_loader() {
     stamp_rebuild_reason "$bin" "$key"
     echo "== cold-build loader (CC=$CC)"
     sh "$MACHORUN/scripts/build.sh" loader
-    if phase2_is_elf_x86_loader "$bin"; then
+    if phase2_is_host_elf_loader "$bin"; then
         stamp_write "$bin" "$key"
         note machorun-loader cold-built
         return 0
@@ -306,12 +307,12 @@ ensure_tbd() {
     local tbd=$MACHORUN/sdk/usr/lib/libSystem.tbd
     local key
     key=$(phase2_machorun_key "$tbd" tbd "$MACHORUN/build/machorun")
-    if stamp_reuse "$tbd" "$key" && grep -q x86_64 "$tbd"; then
+    if stamp_reuse "$tbd" "$key" && grep -q "$ARCH-macos" "$tbd"; then
         note machorun-tbd satisfied "reused=1 stamp=$(stamp_short "$key")"
         return 0
     fi
     stamp_rebuild_reason "$tbd" "$key"
-    if ! phase2_is_elf_x86_loader "$MACHORUN/build/machorun"; then
+    if ! phase2_is_host_elf_loader "$MACHORUN/build/machorun"; then
         cannot machorun-tbd GENERATE_TBD "gen_tbd.sh CHECK 1 needs the host ELF loader; loader is missing"
         return 1
     fi
@@ -320,7 +321,7 @@ ensure_tbd() {
     # libswiftcompat beside a freshly built x86 libSystem is a mixed-slice
     # coin toss, not a generated stub. Park arm64 dylibs beside (do not
     # delete) so the x86 .tbd projection is honest.
-    phase2_park_arm64_darwin_dylibs "$MACHORUN/darwin/usr/lib"
+    phase2_park_foreign_darwin_dylibs "$MACHORUN/darwin/usr/lib"
     set +e
     sh "$MACHORUN/scripts/build.sh" tbd
     st=$?
@@ -351,14 +352,14 @@ echo "==== x86 sysroot (beside $ARM_SYS, never overwrite) ===="
 [ -d "$ARM_SYS" ] || echo "  note: arm64 sysroot_fe4 is absent; textual Darwin overlays cannot be copied"
 SYSROOT_OK=0
 SYSROOT_HEADERS=0
-x86_bf=$artifacts/swift-macosx/_Builtin_float.swiftmodule/x86_64-apple-macos.swiftmodule
+x86_bf=$artifacts/swift-macosx/_Builtin_float.swiftmodule/$ARCH-apple-macos.swiftmodule
 gen_py=$MACHORUN/scripts/gen_darwin_modulemap.py
 overlay_if=$(phase2_sysroot_overlay_if "$ARM_SYS" "$artifacts" || true)
 arm_dmap=$(phase2_sysroot_dmap_input "$ARM_SYS")
 stamp=$SYS/$PHASE2_SYSROOT_STAMP
 need_core=0
 need_bf=0
-[ -f "$x86_core" ] && phase2_is_x86_macho "$x86_core" && need_core=1
+[ -f "$x86_core" ] && phase2_is_guest_macho "$x86_core" && need_core=1
 [ -f "$x86_bf" ] && need_bf=1
 
 sysroot_input_changed() {
@@ -392,10 +393,10 @@ sysroot_cannot_main_copy_incomplete() {
     elif ! phase2_measurement_headers_ok "$SYS"; then
         cannot sysroot-fe4-x86 FE_MEASUREMENT_HEADERS \
             "FileManager/sdk-gap measurement headers absent after restage: missing=$(phase2_measurement_headers_missing "$SYS" || true). x86 stages this set from arm64 sysroot_fe4 with stage_absent (shared list full/foundation/fe_sysroot_measurement_headers.txt)."
-    elif [ "$need_core" -eq 1 ] && { [ ! -f "$SYS/usr/lib/swift/libswiftCore.dylib" ] || ! phase2_is_x86_macho "$SYS/usr/lib/swift/libswiftCore.dylib"; }; then
+    elif [ "$need_core" -eq 1 ] && { [ ! -f "$SYS/usr/lib/swift/libswiftCore.dylib" ] || ! phase2_is_guest_macho "$SYS/usr/lib/swift/libswiftCore.dylib"; }; then
         cannot sysroot-fe4-x86 STAGE_LIBSWIFTCORE \
             "x86 libswiftCore is in artifacts but was not staged into $SYS/usr/lib/swift"
-    elif [ ! -e "$SYS/usr/lib/libobjc.tbd" ] || ! phase2_tbd_is_x86_target "$SYS/usr/lib/libobjc.tbd"; then
+    elif [ ! -e "$SYS/usr/lib/libobjc.tbd" ] || ! phase2_tbd_is_guest_target "$SYS/usr/lib/libobjc.tbd"; then
         cannot sysroot-fe4-x86 X86_SYSROOT_TBDS \
             "libobjc.tbd absent or not x86_64-macos after restage; -lobjc cannot resolve render_full.o's _objc_sync_exit/_objc_sync_enter/_objc_setAssociatedObject/_objc_getAssociatedObject/_objc_opt_self/_objc_getClassList/_objc_getClass/__objc_empty_cache"
     else
@@ -459,13 +460,13 @@ else
         && ! phase2_measurement_headers_ok "$SYS"; then
         echo "  re-stage sysroot-fe4-x86 (measurement headers missing: $(phase2_measurement_headers_missing "$SYS" || true))"
         run_sysroot_stager
-    elif [ "$need_core" -eq 1 ] && { [ ! -f "$SYS/usr/lib/swift/libswiftCore.dylib" ] || ! phase2_is_x86_macho "$SYS/usr/lib/swift/libswiftCore.dylib"; }; then
+    elif [ "$need_core" -eq 1 ] && { [ ! -f "$SYS/usr/lib/swift/libswiftCore.dylib" ] || ! phase2_is_guest_macho "$SYS/usr/lib/swift/libswiftCore.dylib"; }; then
         echo "  re-stage sysroot-fe4-x86 (libswiftCore artifact present, not in sysroot; stamp should have caught this)"
         run_sysroot_stager
     fi
 fi
 # Never copy arm64 dylibs into the x86 sysroot.
-if [ -f "$SYS/usr/lib/libSystem.B.dylib" ] && phase2_is_arm64_macho "$SYS/usr/lib/libSystem.B.dylib"; then
+if [ -f "$SYS/usr/lib/libSystem.B.dylib" ] && phase2_is_foreign_macho "$SYS/usr/lib/libSystem.B.dylib"; then
     cannot sysroot-fe4-x86 ARM64_DYLIB_IN_X86_SYSROOT "libSystem.B.dylib in $SYS is still arm64; refuse rather than link against it"
     SYSROOT_OK=0
 fi
@@ -532,7 +533,7 @@ try_collections() {
         bash "$W/full/foundation/build_collections.sh"
     st=$?
     set -e
-    if [ "$st" -eq 0 ] && phase2_is_x86_macho "$out/OrderedCollections.o"; then
+    if [ "$st" -eq 0 ] && phase2_is_guest_macho "$out/OrderedCollections.o"; then
         stamp_write "$out/OrderedCollections.o" "$key"
         note collections-x86 cold-built "mc=$MC"
         COL_OK=1
@@ -566,7 +567,7 @@ try_cshims() {
         bash "$W/full/foundation/build_cshims.sh"
     st=$?
     set -e
-    if [ "$st" -eq 0 ] && [ -f "$out/uuid.o" ] && phase2_is_x86_macho "$out/uuid.o"; then
+    if [ "$st" -eq 0 ] && [ -f "$out/uuid.o" ] && phase2_is_guest_macho "$out/uuid.o"; then
         stamp_write "$out/uuid.o" "$key"
         note cshims-x86 cold-built
         CSHIMS_OK=1
@@ -614,7 +615,7 @@ try_os_module() {
         bash "$W/full/foundation/build_os_module.sh" "${posix_xcc[@]}"
     st=$?
     set -e
-    if [ "$st" -eq 0 ] && [ -f "$out/os.o" ] && phase2_is_x86_macho "$out/os.o" \
+    if [ "$st" -eq 0 ] && [ -f "$out/os.o" ] && phase2_is_guest_macho "$out/os.o" \
         && [ -f "$out/os.swiftmodule" ]; then
         stamp_write "$out/os.o" "$key"
         note os-module-x86 cold-built "mc=$MC"
@@ -689,7 +690,7 @@ try_fe() {
         cst=$?
         set -e
         if [ "$cst" -eq 0 ] && [ -f "$out/removefile_compat.o" ] \
-            && phase2_is_x86_macho "$out/removefile_compat.o"; then
+            && phase2_is_guest_macho "$out/removefile_compat.o"; then
             stamp_write "$out/removefile_compat.o" "$compat_key"
             return 0
         fi
@@ -735,7 +736,7 @@ try_fe() {
             "${posix_xcc[@]}"
     st=$?
     set -e
-    if [ "$st" -eq 0 ] && phase2_is_x86_macho "$out/FoundationEssentials.o"; then
+    if [ "$st" -eq 0 ] && phase2_is_guest_macho "$out/FoundationEssentials.o"; then
         stamp_write "$out/FoundationEssentials.o" "$fe_key"
         compile_fe_removefile_compat || return 1
         note foundationessentials-x86 cold-built "mc=$MC removefile_compat=ok"
@@ -756,7 +757,7 @@ try_fe || true
 # 5. OpenCombine for x86 beside the durable arm64 export/
 echo "==== OpenCombine x86 (beside $OPENCOMBINE_ROOT/export) ===="
 OC_OK=0
-oc_obj=$OPENCOMBINE_ROOT/export-x86_64/artifacts/OpenCombine.o
+oc_obj=$OPENCOMBINE_ROOT/export$OPENCOMBINE_EXPORT_SUFFIX/artifacts/OpenCombine.o
 oc_key=$(stamp_key "$oc_obj" \
     "$HERE/build_opencombine.sh" \
     "$W/full/oracle-opencombine/policy.json" \
@@ -771,7 +772,7 @@ else
         bash "$HERE/build_opencombine.sh"
     st=$?
     set -e
-    if [ "$st" -eq 0 ] && [ -f "$oc_obj" ] && phase2_is_x86_macho "$oc_obj"; then
+    if [ "$st" -eq 0 ] && [ -f "$oc_obj" ] && phase2_is_guest_macho "$oc_obj"; then
         stamp_write "$oc_obj" "$oc_key"
         note opencombine-x86 cold-built "mc=$MC"
         OC_OK=1
@@ -782,7 +783,7 @@ else
 fi
 # Arm64 pin must still be beside, never rewritten.
 if [ -f "$OPENCOMBINE_ROOT/export/artifacts/OpenCombine.o" ]; then
-    if phase2_is_x86_macho "$OPENCOMBINE_ROOT/export/artifacts/OpenCombine.o"; then
+    if phase2_is_guest_macho "$OPENCOMBINE_ROOT/export/artifacts/OpenCombine.o"; then
         cannot opencombine-arm64-pin REWROTE_ARM64_OPENCOMBINE \
             "export/artifacts/OpenCombine.o is no longer arm64; the durable pin was overwritten"
     else
@@ -805,20 +806,20 @@ BASE_KEY=$(stamp_key "$BASE_MRROOT/machorun" \
     "${x86_core:-missing-core}")
 if stamp_reuse "$BASE_MRROOT/machorun" "$BASE_KEY" \
     && [ -f "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib" ] \
-    && phase2_is_x86_macho "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
+    && phase2_is_guest_macho "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
     note mrroot-base-x86 satisfied "stamp=$(stamp_short "$BASE_KEY")"
     BASE_MRROOT_OK=1
 else
     stamp_rebuild_reason "$BASE_MRROOT/machorun" "$BASE_KEY"
     echo "== staging $BASE_MRROOT from machorun darwin + x86 libswiftCore"
-    phase2_stage_x86_base_mrroot \
+    phase2_stage_guest_base_mrroot \
         "$BASE_MRROOT" \
         "$MACHORUN/build/machorun" \
         "$MACHORUN/darwin" \
         "$x86_core"
-    if [ -x "$BASE_MRROOT/machorun" ] && phase2_is_elf_x86_loader "$BASE_MRROOT/machorun" \
+    if [ -x "$BASE_MRROOT/machorun" ] && phase2_is_host_elf_loader "$BASE_MRROOT/machorun" \
         && [ -f "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib" ] \
-        && phase2_is_x86_macho "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
+        && phase2_is_guest_macho "$BASE_MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
         note mrroot-base-x86 cold-built
         stamp_write "$BASE_MRROOT/machorun" "$BASE_KEY"
         BASE_MRROOT_OK=1
@@ -845,7 +846,7 @@ elif [ ! -d "$BASE_MRROOT" ]; then
     cannot mrroot-host-x86 X86_HOST_RUNTIME \
         "no $BASE_MRROOT to fill host/; mrroot-base-x86 did not produce a dest"
 else
-    host_report=$(phase2_stage_x86_host_runtime "$BASE_MRROOT" "$W" || true)
+    host_report=$(phase2_stage_guest_host_runtime "$BASE_MRROOT" "$W" || true)
     case "$host_report" in
         OK)
             note mrroot-host-x86 satisfied
@@ -870,7 +871,7 @@ echo "==== mrroot_fe-x86_64 (FE overlays, beside $ARM_FE_MRROOT) ===="
 [ "$FE_MRROOT" != "$ARM_FE_MRROOT" ] || {
     cannot mrroot-fe-overlays-x86 MRROOT_COLLIDES_ARM64 "x86 FE overlay path equals arm64 scratch/mrroot_fe"
 }
-overlay_report=$(phase2_stage_x86_fe_overlays "$FE_MRROOT" || true)
+overlay_report=$(phase2_stage_guest_fe_overlays "$FE_MRROOT" || true)
 case "$overlay_report" in
     OK)
         note mrroot-fe-overlays-x86 satisfied
@@ -897,7 +898,7 @@ elif [ ! -d "$BASE_MRROOT" ]; then
     cannot mrroot-layout-x86 X86_MRROOT_LAYOUT \
         "no $BASE_MRROOT to fill; mrroot-base-x86 did not produce a dest"
 else
-    layout_report=$(phase2_stage_x86_mrroot_layout \
+    layout_report=$(phase2_stage_guest_mrroot_layout \
         "$BASE_MRROOT" "$FE_MRROOT" "$W" "$SYS" "$MACHORUN/build/machorun" || true)
     case "$layout_report" in
         OK)
@@ -941,14 +942,14 @@ MRROOT_OK=0
 [ "$MRROOT" != "$ARM_MRROOT" ] || {
     cannot mrroot-x86 MRROOT_COLLIDES_ARM64 "x86 mrroot path equals arm64 path"
 }
-if [ -x "$MRROOT/machorun" ] && phase2_is_elf_x86_loader "$MRROOT/machorun" \
+if [ -x "$MRROOT/machorun" ] && phase2_is_host_elf_loader "$MRROOT/machorun" \
     && [ -f "$MRROOT/darwin/usr/lib/libSystem.B.dylib" ] \
-    && phase2_is_x86_macho "$MRROOT/darwin/usr/lib/libSystem.B.dylib" \
+    && phase2_is_guest_macho "$MRROOT/darwin/usr/lib/libSystem.B.dylib" \
     && [ -f "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib" ]; then
-    if phase2_is_arm64_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
-        cannot mrroot-x86 ARM64_SWIFTCORE_IN_X86_MRROOT \
-            "refusing to call this an x86 root: libswiftCore.dylib is still arm64"
-    elif phase2_is_x86_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
+    if phase2_is_foreign_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
+        cannot mrroot-x86 FOREIGN_SWIFTCORE_IN_MRROOT \
+            "refusing to call this an $ARCH root: libswiftCore.dylib is $(phase2_foreign_cpu)"
+    elif phase2_is_guest_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"; then
         note mrroot-x86 satisfied
         MRROOT_OK=1
     else
@@ -956,7 +957,7 @@ if [ -x "$MRROOT/machorun" ] && phase2_is_elf_x86_loader "$MRROOT/machorun" \
             "libswiftCore.dylib in $MRROOT is neither X86_64 nor ARM64"
     fi
 else
-    if ! phase2_is_elf_x86_loader "$MACHORUN/build/machorun"; then
+    if ! phase2_is_host_elf_loader "$MACHORUN/build/machorun"; then
         cannot mrroot-x86 STAGE_MRROOT_LOADER "no x86 ELF loader to copy into $MRROOT"
     elif [ "$LIBSWIFTCORE_X86" -ne 1 ]; then
         # Stage what we can (loader + x86 darwin dylibs) but refuse to copy arm64 libswiftCore.
@@ -970,7 +971,7 @@ else
                 case "$rel" in
                     swift/libswiftCore.dylib|swift/libswift_Concurrency.dylib) continue ;;
                 esac
-                if phase2_is_x86_macho "$d"; then
+                if phase2_is_guest_macho "$d"; then
                     mkdir -p "$MRROOT/darwin/usr/lib/$(dirname "$rel")"
                     cp -a "$d" "$MRROOT/darwin/usr/lib/$rel"
                 fi
@@ -986,8 +987,8 @@ else
         chmod a+x "$MRROOT/machorun"
         cp -a "$MACHORUN/darwin/usr/lib/." "$MRROOT/darwin/usr/lib/"
         cp -f "$x86_core" "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib"
-        if phase2_is_x86_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib" \
-            && phase2_is_elf_x86_loader "$MRROOT/machorun"; then
+        if phase2_is_guest_macho "$MRROOT/darwin/usr/lib/swift/libswiftCore.dylib" \
+            && phase2_is_host_elf_loader "$MRROOT/machorun"; then
             note mrroot-x86 cold-built
             MRROOT_OK=1
         else
@@ -1005,7 +1006,7 @@ fi
 # fixups=dyld_info|chained from llvm-objdump --macho --private-headers).
 echo "==== mrroot_full-x86_64 overlays (artifacts first; refuse cache extracts) ===="
 if [ -d "$MRROOT" ]; then
-    overlay_full_report=$(phase2_stage_x86_run_root_overlays "$MRROOT" || true)
+    overlay_full_report=$(phase2_stage_guest_run_root_overlays "$MRROOT" || true)
     printf '%s\n' "$overlay_full_report"
     if printf '%s\n' "$overlay_full_report" | grep -q '^CANNOT_STAGE_CACHE_EXTRACT'; then
         cannot mrroot-overlays-x86 STAGE_CACHE_EXTRACT \
@@ -1020,7 +1021,7 @@ fi
 
 echo "==== mrroot_full-x86_64 umbrellas (build_full THROUGH=umbrellas; BASE loud-abort Foundation) ===="
 if [ -d "$MRROOT" ]; then
-    if phase2_stage_x86_build_full_umbrellas "$MRROOT" "$W"; then
+    if phase2_stage_guest_build_full_umbrellas "$MRROOT" "$W"; then
         note mrroot-umbrellas-x86 satisfied
     else
         cannot mrroot-umbrellas-x86 STAGE_BUILD_FULL_UMBRELLAS \
@@ -1051,7 +1052,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 6d. x86_64 ud_guest via foundation-macho's committed linker. Work tree is
-#     scratch/ud-guest-x86_64 (never the unsuffixed arm64 path). FE objects
+#     scratch/ud-guest$RUNTIME_SOURCE_SUFFIX (never the unsuffixed arm64 path). FE objects
 #     are reused from build/full-x86_64/foundation; this does not compile FE
 #     again. Link-time does not need the nine overlay dylibs (tbd-first);
 #     rung a still needs them at load.
@@ -1073,7 +1074,7 @@ ud_report=$(phase2_try_ud_guest \
     OK\ bin=*)
         UD_GUEST_BIN=${ud_report#*bin=}
         UD_GUEST_BIN=${UD_GUEST_BIN%% *}
-        UD_GUEST_W=$W/scratch/ud-guest-x86_64
+        UD_GUEST_W=$W/scratch/ud-guest$RUNTIME_SOURCE_SUFFIX
         export UD_GUEST_BIN UD_GUEST_W
         echo "  $ud_report"
         if phase2_cftest_stub_list_stale "$UD_GUEST_W"; then
@@ -1140,7 +1141,7 @@ echo "==== ud-score-guest (committed foundation-macho/scripts/build_ud_score_gue
 if [ "$UD_GUEST_ITEM_OK" -eq 1 ]; then
     score_report=$(phase2_try_ud_score_guest \
         "$W" \
-        "${UD_GUEST_W:-$W/scratch/ud-guest-x86_64}" \
+        "${UD_GUEST_W:-$W/scratch/ud-guest$RUNTIME_SOURCE_SUFFIX}" \
         "$FE_CLANG_SYS" \
         "$MC" \
         "$FE_OUT" \
@@ -1189,7 +1190,7 @@ fi
 # build_full.sh step (that script never stages libCFTest).
 echo "==== libCFTest into run root (after link, before run_ud_guest.sh) ===="
 if [ "$UD_GUEST_ITEM_OK" -eq 1 ] && [ -d "$MRROOT" ]; then
-    cftest_src=${UD_GUEST_W:-$W/scratch/ud-guest-x86_64}/lib/libCFTest.dylib
+    cftest_src=${UD_GUEST_W:-$W/scratch/ud-guest$RUNTIME_SOURCE_SUFFIX}/lib/libCFTest.dylib
     cftest_report=$(phase2_stage_cftest_into_run_root "$cftest_src" "$MRROOT" || true)
     case "$cftest_report" in
         status=satisfied\ path=*)
@@ -1200,7 +1201,7 @@ if [ "$UD_GUEST_ITEM_OK" -eq 1 ] && [ -d "$MRROOT" ]; then
             ;;
         *)
             cannot libCFTest-run-root CFTEST_STAGE \
-                "${cftest_report:-empty}. arm64 stages via build_cftest_harness.sh into \$W/root; x86 stages scratch/ud-guest-x86_64/lib/libCFTest.dylib into $MRROOT/darwin/usr/lib/libCFTest.dylib (not the CoreFoundation.framework slot)."
+                "${cftest_report:-empty}. arm64 stages via build_cftest_harness.sh into \$W/root; x86 stages scratch/ud-guest$RUNTIME_SOURCE_SUFFIX/lib/libCFTest.dylib into $MRROOT/darwin/usr/lib/libCFTest.dylib (not the CoreFoundation.framework slot)."
             ;;
     esac
 elif [ "$UD_GUEST_ITEM_OK" -eq 1 ]; then
@@ -1209,7 +1210,7 @@ elif [ "$UD_GUEST_ITEM_OK" -eq 1 ]; then
 fi
 
 # Linux Dispatch host bridge + Darwin runtime image. Reuse the Reminder/Focus
-# helper (BASE_MRROOT/host from phase2_build_x86_host_helpers) when it already
+# helper (BASE_MRROOT/host from phase2_build_guest_host_helpers) when it already
 # ran. Do not mutate mrroot_full; the runner clones a run-local overlay.
 echo "==== ud-guest-dispatch (Linux host bridge + Darwin OpenDispatch) ===="
 UD_DISPATCH_HOST=
@@ -1217,7 +1218,7 @@ UD_DISPATCH_DARWIN=
 if [ "$UD_GUEST_ITEM_OK" -eq 1 ]; then
     dispatch_report=$(phase2_ud_guest_ensure_dispatch \
         "$W" \
-        "${UD_GUEST_W:-$W/scratch/ud-guest-x86_64}" \
+        "${UD_GUEST_W:-$W/scratch/ud-guest$RUNTIME_SOURCE_SUFFIX}" \
         "$SYS" \
         "$TARGET" \
         "$BASE_MRROOT/host/libOpenDispatchHost.so" \
@@ -1311,7 +1312,7 @@ if phase2_rung_selected a && [ "$FE_OK" -eq 1 ] && [ "$MRROOT_OK" -eq 1 ] && [ "
     echo "== rung a: foundation-macho run_ud_guest.sh + run_ud_persist.sh"
     # The committed runners take a NAMED root and a binary. If this tree has
     # not yet linked ud_guest for x86, refuse rather than invent a new linker.
-    ud_w=$W/scratch/ud-guest-x86_64
+    ud_w=$W/scratch/ud-guest$RUNTIME_SOURCE_SUFFIX
     ud_r=$W/foundation-macho
     ud_bin=$(find_existing_file \
         "${UD_GUEST_BIN:-}" \
@@ -1323,7 +1324,7 @@ if phase2_rung_selected a && [ "$FE_OK" -eq 1 ] && [ "$MRROOT_OK" -eq 1 ] && [ "
         "$ud_w/bin/ud_score_guest" \
         "$W/scratch/ud-guest/bin/ud_score_guest" \
         "$ud_r/bin/ud_score_guest" || true)
-    if [ -n "$ud_bin" ] && phase2_is_x86_macho "$ud_bin"; then
+    if [ -n "$ud_bin" ] && phase2_is_guest_macho "$ud_bin"; then
         # ud_dispatch_run.inc reuses $W/runroot if Foundation is present
         # (existence, not content). A stale clone keeps the pre-mapping
         # libCFTest and the smoke still exits 71.
@@ -1342,7 +1343,7 @@ if phase2_rung_selected a && [ "$FE_OK" -eq 1 ] && [ "$MRROOT_OK" -eq 1 ] && [ "
         smoke_pass=$(grep -E 'guest runner: pass ' "$W/scratch/phase2-rung-a-smoke.log" | tail -1 || true)
         if [ "$smoke_rc" -eq 0 ]; then
             RUNG_A_DETAIL="smoke $UD_SMOKE_CHECKS/$UD_SMOKE_CHECKS ($smoke_pass)"
-            if [ -n "$ud_score" ] && phase2_is_x86_macho "$ud_score"; then
+            if [ -n "$ud_score" ] && phase2_is_guest_macho "$ud_score"; then
                 # run_ud_persist.sh defaults PREFS=/root/Library/Preferences
                 # (operator EC2 is root). The guest writes under $HOME; a
                 # Cursor cloud agent is not root, so the witness must look
@@ -1389,7 +1390,7 @@ if phase2_rung_selected a && [ "$FE_OK" -eq 1 ] && [ "$MRROOT_OK" -eq 1 ] && [ "
         fi
     else
         cannot rung-a-ud_guest UD_GUEST_BINARY \
-            "no x86_64 ud_guest Mach-O after ud-guest-x86. Committed linker is foundation-macho/scripts/link_ud_guest.sh against scratch/ud-guest-x86_64 (never a second linker). See ENV_PREPARE ud-guest-x86 CANNOT_UD_GUEST_* file=."
+            "no x86_64 ud_guest Mach-O after ud-guest-x86. Committed linker is foundation-macho/scripts/link_ud_guest.sh against scratch/ud-guest$RUNTIME_SOURCE_SUFFIX (never a second linker). See ENV_PREPARE ud-guest-x86 CANNOT_UD_GUEST_* file=."
         RUNG_A_DETAIL="no ud_guest binary"
     fi
 else

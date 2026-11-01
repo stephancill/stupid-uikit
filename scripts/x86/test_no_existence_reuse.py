@@ -2,7 +2,7 @@
 """Fail if a producer reuses an artefact because the path exists.
 
 Scans scripts/x86/*.inc, scripts/x86/*.sh, full/scripts/build_full.sh for
-if-blocks gated by `[ -f` / `[ -e` / `phase2_is_x86_macho` that `return 0`
+if-blocks gated by `[ -f` / `[ -e` / `phase2_is_guest_macho` that `return 0`
 (or set a skip-ok flag) without calling `stamp_reuse` in the same then-block.
 
 Also refuses live `-nt` freshness gates in those files (mtime is not a key).
@@ -36,12 +36,12 @@ REUSE_COND = re.compile(
     r"""(?:
         \[\s*-f\s+ |
         \[\s*-e\s+ |
-        phase2_is_x86_macho\s+
+        phase2_is_guest_macho\s+
     )""",
     re.VERBOSE,
 )
 NEG_EXIST = re.compile(r"\[\s*!\s*-[ef]\b")
-NEG_MACHO = re.compile(r"!\s*phase2_is_x86_macho")
+NEG_MACHO = re.compile(r"!\s*phase2_is_guest_macho")
 POST_BUILD = re.compile(r"\$(?:st|cst|rc)\b|exit\s+\$")
 NT_CODE = re.compile(r"""[^\n#]*-nt\s+""")
 SKIP_OK = re.compile(r"\b(?:darwin_ok|host_ok|already)\s*=\s*1\b")
@@ -146,7 +146,7 @@ def scan_file(path: pathlib.Path) -> list[str]:
                 and not POST_BUILD.search(cond)
                 and (
                     PRODUCT_HINT.search(cond)
-                    or "phase2_is_x86_macho" in cond
+                    or "phase2_is_guest_macho" in cond
                 )
             ):
                 body, start_ln, _end = then_block(lines, i)

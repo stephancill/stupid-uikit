@@ -44,7 +44,7 @@ n_want=0
 while IFS= read -r name; do
     [ -n "$name" ] || continue
     n_want=$((n_want + 1))
-    dylib=$(phase2_find_x86_overlay "$name" || true)
+    dylib=$(phase2_find_guest_overlay "$name" || true)
     if [ -z "$dylib" ]; then
         ok "skip $name (no x86 dylib in overlay search; Apple-only live under scratch/apple-x86-overlays)"
         continue

@@ -1485,7 +1485,9 @@ python3 "$MANIFEST_TOOL" dangling-symlinks \
     --output "$WORK/sdk-dangling.pre.tsv"
 
 require_hash "$OPENCOMBINE_ROOT/export/RESULT.txt" "$EXPECTED_OPENCOMBINE_RESULT" OpenCombine-result
-if [ "$ARCH" = arm64 ]; then
+# The object pins are the durable unsuffixed export/ (upstream arm64); a cold build beside it
+# (export-<arch>/, phase2) is checked for its CPU instead.
+if [ -z "$FULL_OUT_SUFFIX" ]; then
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.o" "$EXPECTED_OPENCOMBINE_OBJECT" OpenCombine-object
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.swiftmodule" "$EXPECTED_OPENCOMBINE_MODULE" OpenCombine-module
     require_hash "$OPENCOMBINE_ARTIFACTS/OpenCombine.swiftdoc" "$EXPECTED_OPENCOMBINE_DOC" OpenCombine-doc
