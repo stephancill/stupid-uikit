@@ -12,14 +12,33 @@ public typealias CFData = Data
 public typealias CFArray = [Any]
 public typealias CFDate = Date
 public typealias CFURL = URL
+#if canImport(COpenFoundationCore)
+// The guest: the Foundation facade re-exports the portable CoreFoundation, whose CFError (the same
+// object as an NSError, toll-free) and CFAllocator are the types app code names. Declaring
+// lookalikes here as well made every `CFError` in an app that imports Security ambiguous (stupid
+// wallet's keychain stores).
+#else
 public typealias CFError = NSError
+#endif
 public typealias CFTypeID = UInt
 public typealias CFIndex = Int
 public typealias CFOptionFlags = UInt
 public typealias CFAbsoluteTime = Double
 
+#if !canImport(COpenFoundationCore)
 /// Only the default allocator is representable on the isolated host.
 public enum CFAllocator: Sendable {}
+#endif
+
+/// A Security error as the CFError Security's API hands out: on the guest, the NSError's own object
+/// (CoreFoundation's toll-free bridge).
+func _securityCFError(_ error: NSError) -> CFError {
+#if canImport(COpenFoundationCore)
+    unsafeBitCast(error, to: CFError.self)
+#else
+    error
+#endif
+}
 
 /// DarwinBoolean stand-in for imported C APIs. Not a public Darwin substitute
 /// for use outside Security; it exists so `SecTrustGetNetworkFetchAllowed`
@@ -36,20 +55,20 @@ public struct DarwinBoolean: ExpressibleByBooleanLiteral, Equatable, Sendable {
     }
 }
 
-func _securityFailClosedError() -> NSError {
-    NSError(
+func _securityFailClosedError() -> CFError {
+    _securityCFError(NSError(
         domain: "Security",
         code: Int(errSecUnimplemented),
         userInfo: [NSLocalizedDescriptionKey: "Security API is unimplemented on this Linux host"]
-    )
+    ))
 }
 
-func _securityError(_ status: OSStatus, _ message: String) -> NSError {
-    NSError(
+func _securityError(_ status: OSStatus, _ message: String) -> CFError {
+    _securityCFError(NSError(
         domain: "Security",
         code: Int(status),
         userInfo: [NSLocalizedDescriptionKey: message]
-    )
+    ))
 }
 
 // Isolated host has no Dispatch module. These spellings match the imported

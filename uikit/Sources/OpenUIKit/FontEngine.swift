@@ -140,7 +140,7 @@ public enum FontEngine {
     static func familyKey(for font: UIFont) -> String {
         // A registered face never matches a system-font table entry.
         if let name = font.customFontName { return "custom:" + name }
-        switch font.design {
+        switch font._drawnDesign {
         case .monospaced:
             // The table only carries mono-regular and mono-bold.
             switch font.weight {
@@ -149,7 +149,7 @@ public enum FontEngine {
             }
         case .italic:
             return "italic-regular"
-        case .default:
+        case .default, .rounded, .serif:  // _drawnDesign maps both to .default
             return "system-" + font.weight.name
         }
     }
@@ -489,7 +489,7 @@ public enum FontEngine {
     }
 
     static func macEllipsisAdvance(for font: UIFont) -> CGFloat {
-        if font.design == .default {
+        if font._drawnDesign == .default {
             return unitsToPoints(tightEntry(at: font.pointSize).ell, size: font.pointSize)
         }
         if let gf = GlyphRasterizer.font(for: font) {
@@ -500,7 +500,7 @@ public enum FontEngine {
 
     /// Per-glyph advance adjustment for tight (truncated) lines.
     public static func tightDelta(for font: UIFont) -> CGFloat {
-        guard font.design == .default else { return 0 }
+        guard font._drawnDesign == .default else { return 0 }
         // iOS cut: no tight tracking on truncated lines. MEASURED 2026-09-04
         // (scripts/ios_suite.sh label_truncate, iOS 26.1): real iOS fits
         // "This text is definit…" where the Catalyst rule fits two more
@@ -512,7 +512,7 @@ public enum FontEngine {
     /// Ellipsis width used by the truncation DECISION (empirically smaller
     /// than the drawn advance; fitted against Catalyst threshold sweeps).
     public static func ellipsisDecisionWidth(for font: UIFont, head: Bool) -> CGFloat {
-        guard font.design == .default else { return ellipsisAdvance(for: font) }
+        guard font._drawnDesign == .default else { return ellipsisAdvance(for: font) }
         // iOS cut: the decision uses the ellipsis' real advance (see tightDelta).
         if OpenUIKitRuntime.systemFontCut == .iOS { return ellipsisAdvance(for: font) }
         let e = tightEntry(at: font.pointSize)

@@ -3,6 +3,9 @@
 import Foundation
 import OpenUIKit
 
+/// OpenUIKit's JSON value (public as `_OpenUIKitJSONValue`, see MiniJSON.swift).
+typealias JSONValue = _OpenUIKitJSONValue
+
 func jsonText(_ v: JSONValue) -> String {
     switch v {
     case .null: return "null"

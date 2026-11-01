@@ -437,6 +437,9 @@ enum _OpenViewModification {
     /// `interactiveDismissDisabled(_:)`: read into the screen's navigation configuration; the
     /// hosting controller sets `isModalInPresentation` on the controller presenting it.
     case interactiveDismissDisabled(Bool)
+    /// `sharedBackgroundVisibility(_:)` on a toolbar item (iOS 26): read by the navigation
+    /// chrome into `UIBarButtonItem.hidesSharedBackground`.
+    case sharedBackgroundVisibility(Visibility)
     case navigationSubtitle(String)
     case navigationBarHidden(Bool)
     case navigationBackButtonHidden(Bool)
@@ -571,6 +574,9 @@ fileprivate enum _OpenViewModifier {
     /// `interactiveDismissDisabled(_:)`: read into the screen's navigation configuration; the
     /// hosting controller sets `isModalInPresentation` on the controller presenting it.
     case interactiveDismissDisabled(Bool)
+    /// `sharedBackgroundVisibility(_:)` on a toolbar item (iOS 26): read by the navigation
+    /// chrome into `UIBarButtonItem.hidesSharedBackground`.
+    case sharedBackgroundVisibility(Visibility)
     case navigationSubtitle(String)
     case navigationBarHidden(Bool)
     case navigationBackButtonHidden(Bool)
@@ -737,6 +743,7 @@ fileprivate enum _OpenViewModifier {
         case .hidden: return .hidden
         case .navigationTitle(let title): return .navigationTitle(title)
         case .interactiveDismissDisabled(let disabled): return .interactiveDismissDisabled(disabled)
+        case .sharedBackgroundVisibility(let visibility): return .sharedBackgroundVisibility(visibility)
         case .navigationSubtitle(let subtitle): return .navigationSubtitle(subtitle)
         case .navigationBarHidden(let hidden): return .navigationBarHidden(hidden)
         case .navigationBackButtonHidden(let hidden):
@@ -1997,7 +2004,7 @@ private final class _SwiftUITrimmedCircleStrokeView: UIView {
 public struct _OpenMaterial: _OpenView, Sendable {
     public typealias Body = Never
 
-    enum Style: Sendable { case bar, regular, thin, thick }
+    enum Style: Sendable { case bar, regular, thin, thick, ultraThin, ultraThick }
     let style: Style
 
     public func _makeOpenUIKitNode() -> _OpenViewNode {
@@ -2006,6 +2013,8 @@ public struct _OpenMaterial: _OpenView, Sendable {
         case .bar, .regular: blurStyle = .systemMaterial
         case .thin: blurStyle = .systemThinMaterial
         case .thick: blurStyle = .systemThickMaterial
+        case .ultraThin: blurStyle = .systemUltraThinMaterial
+        case .ultraThick: blurStyle = .systemChromeMaterial
         }
         let view = UIVisualEffectView(effect: UIBlurEffect(style: blurStyle))
         view.accessibilityIdentifier = "SwiftUI.Material.\(style)"
@@ -2018,9 +2027,35 @@ public extension _OpenView where Self == _OpenMaterial {
     static var regularMaterial: _OpenMaterial { _OpenMaterial(style: .regular) }
     static var thinMaterial: _OpenMaterial { _OpenMaterial(style: .thin) }
     static var thickMaterial: _OpenMaterial { _OpenMaterial(style: .thick) }
+    static var ultraThinMaterial: _OpenMaterial { _OpenMaterial(style: .ultraThin) }
+    static var ultraThickMaterial: _OpenMaterial { _OpenMaterial(style: .ultraThick) }
+}
+
+/// A material is a shape style too (`.background(.ultraThinMaterial, in: Capsule())`):
+/// `background(_:in:)` draws its blur clipped to the shape. As a foreground (text or a stroke
+/// drawn with a material) it is not modelled and fails by name rather than picking a colour.
+extension _OpenMaterial: _OpenShapeStyle {
+    public func _openResolvedForegroundColor() -> _OpenColor {
+        fatalError("stupid-uikit: Material.\(style) as a foreground style is not supported")
+    }
+}
+
+public extension _OpenShapeStyle where Self == _OpenMaterial {
+    static var bar: _OpenMaterial { _OpenMaterial(style: .bar) }
+    static var regularMaterial: _OpenMaterial { _OpenMaterial(style: .regular) }
+    static var thinMaterial: _OpenMaterial { _OpenMaterial(style: .thin) }
+    static var thickMaterial: _OpenMaterial { _OpenMaterial(style: .thick) }
+    static var ultraThinMaterial: _OpenMaterial { _OpenMaterial(style: .ultraThin) }
+    static var ultraThickMaterial: _OpenMaterial { _OpenMaterial(style: .ultraThick) }
 }
 
 public typealias Material = _OpenMaterial
+
+/// Toolbar content is views here (`.toolbar` takes a view builder), so `ToolbarContent` and its
+/// builder are the view protocol and builder: an app's `extension ToolbarContent` and
+/// `@ToolbarContentBuilder` functions apply to toolbar items.
+public typealias ToolbarContent = _OpenView
+public typealias ToolbarContentBuilder = _OpenViewBuilder
 
 public struct _OpenFilledCapsule: _OpenView {
     public typealias Body = Never
@@ -2274,6 +2309,7 @@ where Data: RandomAccessCollection, ID: Hashable, Content: _OpenView {
     public let data: Data
     private let idKeyPath: KeyPath<Data.Element, ID>
     private let contentBuilder: @MainActor (Data.Element) -> Content
+    private var deleteAction: (@MainActor (IndexSet) -> Void)?
 
     public init(
         _ data: Data,
@@ -2285,16 +2321,25 @@ where Data: RandomAccessCollection, ID: Hashable, Content: _OpenView {
         contentBuilder = content
     }
 
+    /// `onDelete(perform:)`: in a List each row gets the trailing swipe-to-delete action, which
+    /// calls `action` with that row's offset. A row with its own trailing `swipeActions` keeps
+    /// them instead, as on iOS.
+    public func onDelete(perform action: (@MainActor (IndexSet) -> Void)?) -> Self {
+        var copy = self
+        copy.deleteAction = action
+        return copy
+    }
+
     public func _makeOpenUIKitNode() -> _OpenViewNode {
         _OpenGraphContext.withStructuralScope(.forEachContent) {
             var seen: Set<AnyHashable> = []
-            let nodes = data.map { element -> _OpenViewNode in
+            let nodes = data.enumerated().map { offset, element -> _OpenViewNode in
                 let identifier = AnyHashable(element[keyPath: idKeyPath])
                 precondition(
                     seen.insert(identifier).inserted,
                     "ForEach requires unique element IDs"
                 )
-                return elementNode(element, identifier: identifier)
+                return elementNode(element, identifier: identifier, offset: offset)
             }
             return _OpenViewNode(.group(nodes))
         }
@@ -2304,9 +2349,16 @@ where Data: RandomAccessCollection, ID: Hashable, Content: _OpenView {
     /// expansion and lazy-stack materialisation share it, so an element's
     /// graph identity (and therefore its retained state) is the same whether
     /// or not its container builds every sibling.
-    private func elementNode(_ element: Data.Element, identifier: AnyHashable) -> _OpenViewNode {
+    private func elementNode(_ element: Data.Element, identifier: AnyHashable, offset: Int) -> _OpenViewNode {
         _OpenGraphContext.withStructuralScope(.forEachElement(identifier)) {
-            let node = contentBuilder(element)._makeOpenUIKitNode()
+            var node = contentBuilder(element)._makeOpenUIKitNode()
+            if let deleteAction, !Self._hasTrailingSwipeActions(node) {
+                let delete = _OpenButton("Delete", role: .destructive) {
+                    deleteAction(IndexSet(integer: offset))
+                }
+                node = _OpenViewNode(.modified(node, .swipeActions(
+                    edge: .trailing, allowsFullSwipe: true, actions: delete._makeOpenUIKitNode())))
+            }
             if _openExtractTag(node).tag != nil {
                 return node
             }
@@ -2317,6 +2369,12 @@ where Data: RandomAccessCollection, ID: Hashable, Content: _OpenView {
                 )
             )
         }
+    }
+
+    private static func _hasTrailingSwipeActions(_ node: _OpenViewNode) -> Bool {
+        guard case .modified(let content, let modification) = node.kind else { return false }
+        if case .swipeActions(let edge, _, _) = modification, edge == .trailing { return true }
+        return _hasTrailingSwipeActions(content)
     }
 }
 
@@ -2337,7 +2395,8 @@ extension _OpenForEach: _OpenLazyStackSource {
     func _openLazyElementNode(at offset: Int, identifier: AnyHashable) -> _OpenViewNode {
         elementNode(
             data[data.index(data.startIndex, offsetBy: offset)],
-            identifier: identifier
+            identifier: identifier,
+            offset: offset
         )
     }
 }
@@ -2702,15 +2761,26 @@ public struct _OpenBorderedButtonStyle: _OpenButtonStyleProtocol, Sendable {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some _OpenView {
-        configuration.label
+        // iOS 27 chrome: a capsule with the label in the tint colour. MEASURED stupid wallet's
+        // setup screen, iPhone 16e @3x / iOS 27.0: "Create New Wallet" is a grey capsule (fully
+        // rounded 72 pt ends) with a blue label. The iOS 26.1 chrome keeps the measured 8 pt
+        // rounded rectangle and default label colour the gates were fitted to.
+        let iOS27 = OpenUIKitRuntime.chromeRelease == .iOS27
+        let label: AnyView = iOS27
+            ? AnyView(configuration.label.foregroundStyle(
+                Color(uiColor: configuration.role == .destructive ? .systemRed : .systemBlue)))
+            : AnyView(configuration.label)
+        // iOS 27: the same 72 pt height as .borderedProminent for the same label (both measured on
+        // the setup screen above), i.e. its 8 pt vertical padding.
+        return label
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, iOS27 ? 8 : 6)
             .background(
                 Color(uiColor: configuration.isPressed
                     ? .tertiarySystemFill
                     : .secondarySystemFill)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: iOS27 ? 10_000 : 8, style: .continuous))
             .opacity(configuration.isPressed ? 0.78 : 1)
     }
 }
@@ -2734,12 +2804,15 @@ public struct _OpenBorderedProminentButtonStyle: _OpenButtonStyleProtocol, Senda
         default:
             fill = .systemBlue
         }
+        // iOS 27 chrome: a capsule (MEASURED stupid wallet's "Import Wallet", iPhone 16e @3x /
+        // iOS 27.0); the iOS 26.1 chrome keeps the 8 pt rounded rectangle.
         return configuration.label
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(Color(uiColor: fill))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(
+                cornerRadius: OpenUIKitRuntime.chromeRelease == .iOS27 ? 10_000 : 8, style: .continuous))
             .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }
@@ -2833,6 +2906,19 @@ private func _openApplyingButtonStyle<Style: _OpenButtonStyleProtocol>(
         return _OpenViewNode(
             .menu(label: normal, pressedLabel: pressed, content: content)
         )
+    case .navigationLink(let label, let target):
+        // A NavigationLink with a button style is drawn as that button (no row insets, no
+        // disclosure chevron), as on iOS outside a List (stupid wallet's setup screen); the
+        // renderer follows the link when it is tapped.
+        let normal = style.makeBody(
+            configuration: .init(label: _OpenButtonStyleLabel(node: label), isPressed: false, role: nil)
+        )._makeOpenUIKitNode()
+        let pressed = style.makeBody(
+            configuration: .init(label: _OpenButtonStyleLabel(node: label), isPressed: true, role: nil)
+        )._makeOpenUIKitNode()
+        return _OpenViewNode(.navigationLink(
+            label: _OpenViewNode(.button(label: normal, pressedLabel: pressed, role: nil, action: {})),
+            target: target))
     case .group(let children):
         return _OpenViewNode(.group(children.map { _openApplyingButtonStyle($0, style: style) }))
     case .hStack(let children, let alignment, let spacing):
@@ -3346,6 +3432,23 @@ public extension _OpenView {
         _ style: Style,
         in shape: S
     ) -> some _OpenView {
+        if let material = style as? _OpenMaterial {
+            // The material's blur, clipped to the shape as clipShape(_:) clips.
+            let radius: CGFloat
+            if let rounded = shape as? RoundedRectangle {
+                radius = max(0, rounded.cornerRadius)
+            } else if shape is Capsule || shape is Circle {
+                radius = 10_000
+            } else {
+                radius = 0
+            }
+            let node = _OpenViewNode(.modified(
+                material._makeOpenUIKitNode(), .clipRoundedRectangle(radius, ._allKnown)))
+            return _OpenModifiedContent(
+                content: self,
+                modification: .background({ node }, alignment: .center)
+            )
+        }
         let color = style._openResolvedForegroundColor()
         let backgroundNode: _OpenViewNode
         if let rounded = shape as? RoundedRectangle {
@@ -4678,6 +4781,12 @@ public extension _OpenView {
             leading: edges.contains(.leading) ? length : .nan,
             bottom: edges.contains(.bottom) ? length : .nan,
             trailing: edges.contains(.trailing) ? length : .nan)))
+    }
+
+    /// iOS 26: whether a toolbar item draws on the bar's glass background
+    /// (`UIBarButtonItem.hidesSharedBackground`).
+    func sharedBackgroundVisibility(_ visibility: Visibility) -> some _OpenView {
+        _OpenModifiedContent(content: self, modification: .sharedBackgroundVisibility(visibility))
     }
 
     /// Whether the sheet presenting this view can be dismissed by dragging it down

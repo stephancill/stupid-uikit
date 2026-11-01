@@ -203,8 +203,8 @@ private struct _AssetCatalogPayload {
 
 fileprivate struct _AssetCatalogRecord {
     let type: String
-    let properties: [String: JSONValue]
-    let variants: [JSONValue]
+    let properties: [String: _OpenUIKitJSONValue]
+    let variants: [_OpenUIKitJSONValue]
 
     var templateRenderingIntent: String? {
         properties["template-rendering-intent"]?.stringValue
@@ -278,7 +278,7 @@ private enum _AssetCatalogStore {
         idiom: String,
         appearance: String,
         scale requestedScale: Int?
-    ) -> JSONValue? {
+    ) -> _OpenUIKitJSONValue? {
         var candidates = record.variants
 
         let exactIdiom = candidates.filter {
@@ -320,7 +320,7 @@ private enum _AssetCatalogStore {
             scale(in: $0) == requestedScale
         }) { return exact }
 
-        let explicit = candidates.compactMap { variant -> (Int, JSONValue)? in
+        let explicit = candidates.compactMap { variant -> (Int, _OpenUIKitJSONValue)? in
             guard let scale = scale(in: variant) else { return nil }
             return (scale, variant)
         }
@@ -337,7 +337,7 @@ private enum _AssetCatalogStore {
         return candidates.first(where: { scale(in: $0) == nil })
     }
 
-    static func scale(in variant: JSONValue) -> Int? {
+    static func scale(in variant: _OpenUIKitJSONValue) -> Int? {
         guard let value = variant["scale"] else { return nil }
         if case .null = value { return nil }
         guard let number = value.doubleValue,
@@ -347,7 +347,7 @@ private enum _AssetCatalogStore {
         return Int(number)
     }
 
-    static func hasSupportedImageQualifiers(_ variant: JSONValue) -> Bool {
+    static func hasSupportedImageQualifiers(_ variant: _OpenUIKitJSONValue) -> Bool {
         for key in [
             "screen_width", "language_direction", "height_class", "resizing",
         ] {
@@ -358,12 +358,12 @@ private enum _AssetCatalogStore {
         return true
     }
 
-    static func payload(from variant: JSONValue) -> _AssetCatalogPayload? {
+    static func payload(from variant: _OpenUIKitJSONValue) -> _AssetCatalogPayload? {
         guard let payload = variant["payload"] else { return nil }
         return parsePayload(payload)
     }
 
-    static func color(from variant: JSONValue) -> CanvasColor? {
+    static func color(from variant: _OpenUIKitJSONValue) -> CanvasColor? {
         if variant["reference"]?.stringValue != nil { return nil }
         guard let space = variant["color_space"]?.stringValue else { return nil }
         switch space {
@@ -401,7 +401,7 @@ private enum _AssetCatalogStore {
             return .missing
         }
         guard bytes.count <= maximumIndexBytes,
-              let parsed = JSONValue.parse(bytes),
+              let parsed = _OpenUIKitJSONValue.parse(bytes),
               let index = parseIndex(parsed, indexRoot:
                 prefix + "OpenUIKit/AssetCatalogs") else {
             cache[root] = .malformed
@@ -420,7 +420,7 @@ private enum _AssetCatalogStore {
     }
 
     private static func parseIndex(
-        _ value: JSONValue,
+        _ value: _OpenUIKitJSONValue,
         indexRoot: String
     ) -> _AssetCatalogIndex? {
         guard let object = value.objectValue,
@@ -498,7 +498,7 @@ private enum _AssetCatalogStore {
         )
     }
 
-    private static func parseRecord(_ value: JSONValue) -> _AssetCatalogRecord? {
+    private static func parseRecord(_ value: _OpenUIKitJSONValue) -> _AssetCatalogRecord? {
         guard let object = value.objectValue,
               let type = object["type"]?.stringValue,
               knownTypes.contains(type),
@@ -561,7 +561,7 @@ private enum _AssetCatalogStore {
         )
     }
 
-    private static func parsePayload(_ value: JSONValue) -> _AssetCatalogPayload? {
+    private static func parsePayload(_ value: _OpenUIKitJSONValue) -> _AssetCatalogPayload? {
         guard let object = value.objectValue,
               let sha = object["sha256"]?.stringValue,
               sha.count == 64,
@@ -593,13 +593,13 @@ private enum _AssetCatalogStore {
         }
     }
 
-    private static func isValidScale(_ value: JSONValue) -> Bool {
+    private static func isValidScale(_ value: _OpenUIKitJSONValue) -> Bool {
         if case .null = value { return true }
         guard let number = value.doubleValue else { return false }
         return number == number.rounded() && number >= 1 && number <= 3
     }
 
-    private static func components(_ value: JSONValue?, count: Int) -> [Double]? {
+    private static func components(_ value: _OpenUIKitJSONValue?, count: Int) -> [Double]? {
         guard let values = value?.arrayValue, values.count == count else {
             return nil
         }
@@ -614,7 +614,7 @@ private enum _AssetCatalogStore {
         return result
     }
 
-    private static func isNull(_ value: JSONValue) -> Bool {
+    private static func isNull(_ value: _OpenUIKitJSONValue) -> Bool {
         if case .null = value { return true }
         return false
     }

@@ -550,12 +550,21 @@ private enum _UISystemImageRenderer {
         }
     }
 
+    nonisolated(unsafe) private static var _reportedUnmappedSymbols: Set<String> = []
+    /// A system symbol the open set has no glyph for draws nothing; the first use of each name says
+    /// so in the run log, so a blank region is never silent.
+    static func _reportUnmappedSymbol(_ name: String) {
+        guard _reportedUnmappedSymbols.insert(name).inserted else { return }
+        print("stupid-uikit: SF Symbol \"\(name)\" has no open-set glyph; it is drawn blank")
+    }
+
     static func renderOpenSymbol(name: String,
                                  configuration: UIImage.SymbolConfiguration?,
                                  scale: CGFloat) -> UIImage? {
         let pointSize = (configuration?._pointSize ?? 17)
             * symbolScaleFactor(configuration?._scale ?? .unspecified)
         guard let layout = OpenSymbols.layout(name: name, pointSize: pointSize) else {
+            _reportUnmappedSymbol(name)
             return nil
         }
         // UIImage sizes are whole device pixels (pixels / scale), as the

@@ -1,0 +1,190 @@
+# objc-block-trampolines.mm: block IMPs from generated trampolines, not from
+# libobjc-trampolines.dylib.
+#
+# Apple's imp_implementationWithBlock dlopens libobjc-trampolines.dylib and copies its
+# trampoline text with vm_remap. machorun builds no such dylib, refuses the dlopen, and
+# vm_remap bails (it has no single-call Linux equivalent), so the first block IMP aborted:
+# stupid authenticator installs its Home Screen quick-action handler with
+# class_addMethod(cls, sel, imp_implementationWithBlock(block), ...) at launch, and
+# measured on aarch64 it died with "couldn't dlopen libobjc-trampolines.dylib".
+#
+# Under OBJC_MACHORUN the file keeps Apple's code out and generates each trampoline into
+# an anonymous executable page instead: the same three-instruction shape (self into
+# _cmd, the slot's block into the first argument, jump to the block's invoke), one
+# 32-byte slot per IMP, freed slots reused, imp_getBlock / imp_removeBlock by address.
+# x86_64 struct-returning blocks (the stret variant) fail by name.
+--- a/runtime/objc-block-trampolines.mm
++++ b/runtime/objc-block-trampolines.mm
+@@ -38,6 +38,8 @@
+ #include <inttypes.h>
+ #include <mach/mach.h>
+ #include <objc/objc-block-trampolines.h>
++
++#if !OBJC_MACHORUN
+ 
+ // fixme C++ compilers don't implemement memory_order_consume efficiently.
+ // Use memory_order_relaxed and cross our fingers.
+@@ -607,7 +609,163 @@
+     }
+ 
+     // do this AFTER dropping the lock
++    Block_release(block);
++    return YES;
++}
++
++#else  // OBJC_MACHORUN
++
++// machorun: block IMPs without libobjc-trampolines.dylib.
++//
++// Apple's allocator maps trampoline pages out of libobjc-trampolines.dylib with
++// vm_remap, a Mach primitive machorun does not provide (and the dylib is not
++// built). Here each trampoline is generated into an anonymous executable page:
++// a 32-byte slot whose code moves `self` into the `_cmd` argument, loads the
++// slot's block into the first argument and jumps to the block's invoke function
++// (offset 16 of Block_layout), as Apple's trampolines do. Freed slots are reused.
++// A struct-returning block on x86_64 would need the stret variant; it fails by
++// name instead.
++
++#include <pthread.h>
++#include <stdlib.h>
++#include <sys/mman.h>
++
++namespace {
++constexpr size_t kMRPageSize = 16384;
++constexpr size_t kMRSlotSize = 32;
++constexpr size_t kMRSlotsPerPage = kMRPageSize / kMRSlotSize;
++#if __arm64__
++constexpr size_t kMRBlockOffset = 16;
++#elif __x86_64__
++constexpr size_t kMRBlockOffset = 24;
++#else
++#error machorun block trampolines: neither arm64 nor x86_64
++#endif
++
++struct MRPage { MRPage *next; uint8_t *code; };
++pthread_mutex_t mrLock = PTHREAD_MUTEX_INITIALIZER;
++MRPage *mrPages;
++uint8_t **mrFree;
++size_t mrFreeCount, mrFreeCapacity;
++uint8_t *mrWilderness;
++size_t mrWildernessLeft;
++
++void mrWriteSlotCode(uint8_t *slot) {
++#if __arm64__
++    static const uint32_t code[4] = {
++        0xAA0003E1,  // mov x1, x0            self -> _cmd
++        0x58000060,  // ldr x0, #12           block (slot + 16)
++        0xF9400810,  // ldr x16, [x0, #16]    block->invoke
++        0xD61F0200,  // br  x16
++    };
++    memcpy(slot, code, sizeof code);
++#else
++    static const uint8_t code[13] = {
++        0x48, 0x89, 0xFE,                          // mov %rdi, %rsi   self -> _cmd
++        0x48, 0x8B, 0x3D, 0x0E, 0x00, 0x00, 0x00,  // mov 14(%rip), %rdi  block (slot + 24)
++        0xFF, 0x67, 0x10,                          // jmp *16(%rdi)   block->invoke
++    };
++    memset(slot, 0xCC, kMRBlockOffset);
++    memcpy(slot, code, sizeof code);
++#endif
++}
++
++void mrFlushCode(uint8_t *start, size_t length) {
++#if __arm64__
++    uint64_t ctr;
++    __asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
++    uintptr_t dline = 4u << ((ctr >> 16) & 0xF), iline = 4u << (ctr & 0xF);
++    uintptr_t begin = (uintptr_t)start, end = begin + length;
++    for (uintptr_t p = begin & ~(dline - 1); p < end; p += dline)
++        __asm__ volatile("dc cvau, %0" :: "r"(p) : "memory");
++    __asm__ volatile("dsb ish" ::: "memory");
++    for (uintptr_t p = begin & ~(iline - 1); p < end; p += iline)
++        __asm__ volatile("ic ivau, %0" :: "r"(p) : "memory");
++    __asm__ volatile("dsb ish\n\tisb" ::: "memory");
++#else
++    (void)start; (void)length;
++#endif
++}
++
++uint8_t *mrAllocateSlot() {
++    if (mrFreeCount) return mrFree[--mrFreeCount];
++    if (!mrWildernessLeft) {
++        void *code = mmap(nullptr, kMRPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
++                          MAP_PRIVATE | MAP_ANON, -1, 0);
++        if (code == MAP_FAILED) _objc_fatal("imp_implementationWithBlock: no executable page for trampolines");
++        for (size_t i = 0; i < kMRSlotsPerPage; i++) mrWriteSlotCode((uint8_t *)code + i * kMRSlotSize);
++        mrFlushCode((uint8_t *)code, kMRPageSize);
++        MRPage *page = (MRPage *)malloc(sizeof(MRPage));
++        page->code = (uint8_t *)code;
++        page->next = mrPages;
++        mrPages = page;
++        mrWilderness = (uint8_t *)code;
++        mrWildernessLeft = kMRSlotsPerPage;
++    }
++    uint8_t *slot = mrWilderness;
++    mrWilderness += kMRSlotSize;
++    mrWildernessLeft--;
++    return slot;
++}
++
++uint8_t *mrSlotForIMP(IMP imp) {
++    uint8_t *p = (uint8_t *)imp;
++    for (MRPage *page = mrPages; page; page = page->next) {
++        if (p >= page->code && p < page->code + kMRPageSize && (p - page->code) % kMRSlotSize == 0)
++            return p;
++    }
++    return nullptr;
++}
++
++id *mrBlockField(uint8_t *slot) { return (id *)(slot + kMRBlockOffset); }
++}  // namespace
++
++void _imp_implementationWithBlock_init(void) {}
++
++IMP _imp_implementationWithBlockNoCopy(id block) {
++#if __x86_64__
++    if (_Block_has_signature(block) && _Block_use_stret(block))
++        _objc_fatal("imp_implementationWithBlock: a struct-returning block needs the x86_64 stret "
++                    "trampoline, which machorun does not generate");
++#endif
++    pthread_mutex_lock(&mrLock);
++    uint8_t *slot = mrAllocateSlot();
++    *mrBlockField(slot) = block;
++    pthread_mutex_unlock(&mrLock);
++    return (IMP)slot;
++}
++
++IMP imp_implementationWithBlock(id block) {
++    return _imp_implementationWithBlockNoCopy((id)Block_copy(block));
++}
++
++id imp_getBlock(IMP anImp) {
++    if (!anImp) return nil;
++    pthread_mutex_lock(&mrLock);
++    uint8_t *slot = mrSlotForIMP(anImp);
++    id block = slot ? *mrBlockField(slot) : nil;
++    pthread_mutex_unlock(&mrLock);
++    return block;
++}
++
++BOOL imp_removeBlock(IMP anImp) {
++    if (!anImp) return NO;
++    pthread_mutex_lock(&mrLock);
++    uint8_t *slot = mrSlotForIMP(anImp);
++    id block = slot ? *mrBlockField(slot) : nil;
++    if (!block) {
++        pthread_mutex_unlock(&mrLock);
++        return NO;
++    }
++    *mrBlockField(slot) = nil;
++    if (mrFreeCount == mrFreeCapacity) {
++        mrFreeCapacity = mrFreeCapacity ? mrFreeCapacity * 2 : 64;
++        mrFree = (uint8_t **)realloc(mrFree, mrFreeCapacity * sizeof(uint8_t *));
++    }
++    mrFree[mrFreeCount++] = slot;
++    pthread_mutex_unlock(&mrLock);
+     Block_release(block);
+     return YES;
+ }
+ 
++#endif  // OBJC_MACHORUN

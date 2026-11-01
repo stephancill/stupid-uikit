@@ -626,7 +626,7 @@ private struct _NamedColorAsset {
     }
 
     private static func parse(_ bytes: [UInt8]) -> _NamedColorAsset? {
-        guard let entries = JSONValue.parse(bytes)?["colors"]?.arrayValue else {
+        guard let entries = _OpenUIKitJSONValue.parse(bytes)?["colors"]?.arrayValue else {
             return nil
         }
 
@@ -654,7 +654,7 @@ private struct _NamedColorAsset {
         return _NamedColorAsset(base: fallback, light: light, dark: dark)
     }
 
-    private static func appearance(in entry: JSONValue) -> Appearance {
+    private static func appearance(in entry: _OpenUIKitJSONValue) -> Appearance {
         guard let appearances = entry["appearances"]?.arrayValue else {
             return .base
         }
@@ -669,7 +669,7 @@ private struct _NamedColorAsset {
         }
     }
 
-    private static func parseColor(_ value: JSONValue?) -> CanvasColor? {
+    private static func parseColor(_ value: _OpenUIKitJSONValue?) -> CanvasColor? {
         guard let value,
               value["color-space"]?.stringValue == "srgb",
               let components = value["components"],
@@ -689,7 +689,7 @@ private struct _NamedColorAsset {
                        blue: clamp(blue), alpha: clamp(alpha))
     }
 
-    private static func component(_ value: JSONValue?) -> CGFloat? {
+    private static func component(_ value: _OpenUIKitJSONValue?) -> CGFloat? {
         if let number = value?.doubleValue, number.isFinite {
             return CGFloat(number)
         }

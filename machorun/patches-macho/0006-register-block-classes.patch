@@ -1,0 +1,94 @@
+# runtime/objc-machorun-blocks.mm (new): register the block classes CoreFoundation
+# registers on Apple platforms (__NSStackBlock__, __NSMallocBlock__, __NSGlobalBlock__)
+# in the _NSConcrete*Block storage machorun's libSystem defines, so blocks answer
+# retain/release/copy. Without them the first message to a block crashed in
+# objc_msgSend (measured: stupid authenticator bridging a @convention(block) closure to
+# imp_implementationWithBlock at launch). The file's header comment has the details.
+--- /dev/null
++++ b/runtime/objc-machorun-blocks.mm
+@@ -0,0 +1,85 @@
++/*
++ * machorun: the block classes CoreFoundation registers on Apple platforms.
++ *
++ * A block's isa is _NSConcreteStackBlock, _NSConcreteMallocBlock or
++ * _NSConcreteGlobalBlock: 32-word storage that libclosure defines and
++ * CoreFoundation turns into the classes __NSStackBlock__, __NSMallocBlock__ and
++ * __NSGlobalBlock__ at load (objc_initializeClassPair in place: the class in the
++ * first 16 words, its metaclass in the next 16). machorun's libSystem defines the
++ * storage (darwin/src/objcsupport.c) but nothing registered the classes, so any
++ * message to a block -- Swift's retain/copy when it bridges a @convention(block)
++ * closure to an object -- read an empty class and crashed in objc_msgSend.
++ * Measured on aarch64: stupid authenticator's
++ * imp_implementationWithBlock(implementationBlock) at launch.
++ *
++ * The classes are registered from +load, once libobjc's own classes are realized.
++ * A heap block's retain/copy bump its reference count and release drops it
++ * (_Block_copy / _Block_release); a stack block's copy moves it to the heap and its
++ * retain/release do nothing; a global block answers itself.
++ */
++
++#include "objc-private.h"
++
++#if OBJC_MACHORUN
++
++#include <Block.h>
++#include <objc/NSObject.h>
++
++extern "C" {
++extern void *_NSConcreteStackBlock[32];
++extern void *_NSConcreteMallocBlock[32];
++extern void *_NSConcreteGlobalBlock[32];
++}
++
++static id mrBlockCopy(id self, SEL) { return (id)_Block_copy(self); }
++static id mrBlockCopyWithZone(id self, SEL, void *) { return (id)_Block_copy(self); }
++static id mrMallocRetain(id self, SEL) { return (id)_Block_copy(self); }
++static void mrMallocRelease(id self, SEL) { _Block_release(self); }
++static id mrMallocAutorelease(id self, SEL) { return _objc_rootAutorelease(self); }
++static id mrSelf(id self, SEL) { return self; }
++static id mrSelfWithZone(id self, SEL, void *) { return self; }
++static void mrNothing(id, SEL) {}
++static NSUInteger mrMallocRetainCount(id self, SEL) {
++    return (NSUInteger)((*(int *)((char *)self + 8) & 0xfffe) >> 1);
++}
++static NSUInteger mrOneRetainCount(id, SEL) { return 1; }
++static BOOL mrYes(id, SEL) { return YES; }
++static BOOL mrNo(id, SEL) { return NO; }
++
++static void mrRegisterBlockClass(void **storage, const char *name, bool heap, bool global) {
++    Class cls = objc_initializeClassPair(objc_getClass("NSObject"), name, (Class)storage,
++                                         (Class)(storage + 16));
++    if (!cls) _objc_fatal("machorun: could not initialize block class %s", name);
++    if (heap) {
++        class_addMethod(cls, @selector(retain), (IMP)mrMallocRetain, "@@:");
++        class_addMethod(cls, @selector(release), (IMP)mrMallocRelease, "v@:");
++        class_addMethod(cls, @selector(autorelease), (IMP)mrMallocAutorelease, "@@:");
++        class_addMethod(cls, @selector(retainCount), (IMP)mrMallocRetainCount, "Q@:");
++        class_addMethod(cls, @selector(copy), (IMP)mrBlockCopy, "@@:");
++        class_addMethod(cls, @selector(copyWithZone:), (IMP)mrBlockCopyWithZone, "@@:^v");
++    } else {
++        class_addMethod(cls, @selector(retain), (IMP)mrSelf, "@@:");
++        class_addMethod(cls, @selector(release), (IMP)mrNothing, "v@:");
++        class_addMethod(cls, @selector(autorelease), (IMP)mrSelf, "@@:");
++        class_addMethod(cls, @selector(retainCount), (IMP)mrOneRetainCount, "Q@:");
++        class_addMethod(cls, @selector(copy), global ? (IMP)mrSelf : (IMP)mrBlockCopy, "@@:");
++        class_addMethod(cls, @selector(copyWithZone:),
++                        global ? (IMP)mrSelfWithZone : (IMP)mrBlockCopyWithZone, "@@:^v");
++    }
++    class_addMethod(cls, @selector(_tryRetain), (IMP)mrYes, "c@:");
++    class_addMethod(cls, @selector(_isDeallocating), (IMP)mrNo, "c@:");
++    objc_registerClassPair(cls);
++}
++
++@interface __MRBlockClassRegistrar : NSObject
++@end
++
++@implementation __MRBlockClassRegistrar
+++ (void)load {
++    mrRegisterBlockClass(_NSConcreteStackBlock, "__NSStackBlock__", false, false);
++    mrRegisterBlockClass(_NSConcreteMallocBlock, "__NSMallocBlock__", true, false);
++    mrRegisterBlockClass(_NSConcreteGlobalBlock, "__NSGlobalBlock__", false, true);
++}
++@end
++
++#endif  // OBJC_MACHORUN

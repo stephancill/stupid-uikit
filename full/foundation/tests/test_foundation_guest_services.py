@@ -70,15 +70,15 @@ class FoundationGuestServicesTests(unittest.TestCase):
         source = ONBOARDING.read_text()
         self.assertIn("FOUNDATION_GUEST_MANIFEST=", source)
         self.assertIn("mapfile -t FOUNDATION_GUEST_RELATIVE_SOURCES", source)
-        # The Focus onboarding builder now consumes the 41-line production
+        # The Focus onboarding builder now consumes the 43-line production
         # manifest and excludes URLSession.swift (no host URL-transport helper
-        # in that historical harness), leaving 40 compiled sources.
+        # in that historical harness), leaving 42 compiled sources.
         self.assertIn(
-            '"${#FOUNDATION_GUEST_RELATIVE_SOURCES[@]}" -eq 41',
+            '"${#FOUNDATION_GUEST_RELATIVE_SOURCES[@]}" -eq 43',
             source,
         )
         self.assertIn(
-            '"${#FOUNDATION_GUEST_SOURCES[@]}" -eq 40', source
+            '"${#FOUNDATION_GUEST_SOURCES[@]}" -eq 42', source
         )
         self.assertIn("COpenFoundationCore/module.modulemap", source)
         self.assertIn('"${FOUNDATION_GUEST_SOURCES[@]}"', source)

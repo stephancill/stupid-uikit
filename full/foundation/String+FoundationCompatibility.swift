@@ -16,6 +16,11 @@ public extension String {
         self = aString
     }
 
+    /// NSString's `-stringByAppendingString:`.
+    func appending<T: StringProtocol>(_ aString: T) -> String {
+        self + aString
+    }
+
     /// Returns the Unicode NFC representation used by Foundation's legacy
     /// NSString overlay.  The Swift runtime already owns the normalization
     /// tables; using its NFC code-unit view keeps this implementation complete

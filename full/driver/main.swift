@@ -24,6 +24,9 @@
 import CPortableIO
 import OpenUIKit
 
+/// OpenUIKit's JSON value (public as `_OpenUIKitJSONValue`, see MiniJSON.swift).
+typealias JSONValue = _OpenUIKitJSONValue
+
 func warnToStderr(_ message: String) { cpio_log_stderr(message) }
 
 func loadSceneFile(_ path: String) -> JSONValue? {

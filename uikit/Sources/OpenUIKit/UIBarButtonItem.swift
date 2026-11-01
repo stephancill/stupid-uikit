@@ -150,6 +150,10 @@ public class UIBarButtonItem: UIBarItem {
     /// xmark) still sit in a 44×44 glass platter. Arbitrary UIKit
     /// `init(customView:)` stays platter-free.
     public var _showsPlatterWithCustomView = false
+    /// iOS 26: the item draws without the bar's glass background (SwiftUI's
+    /// `sharedBackgroundVisibility(.hidden)`): no platter of its own and no part
+    /// in a shared run.
+    public var hidesSharedBackground = false
     /// A SwiftUI toolbar symbol item in a run of adjacent ones (a
     /// ToolbarItemGroup or neighbouring ToolbarItems): iOS 26 draws the run
     /// on ONE shared platter. MEASURED iOS 27 simulator, iPhone 16e, a
@@ -667,6 +671,7 @@ final class _UIBarButtonItemView: UIControl {
         // Glass samples the backdrop. `.done` is a tint fill (measured
         // prominent style); grouped items yield to `_UIBarSharedPlatterView`.
         platter._usesIOSGlass = !_platterHiddenByGroup && item.style != .done && showsPlatter
+            && !item.hidesSharedBackground
         // Toolbar platters (no refractive band) use the dark bar mix;
         // nav-bar platters keep the measured dark flats. MEASURED
         // /tmp/glass-dark-out glass_toolbar_dark_black: 19 over black,
@@ -674,7 +679,7 @@ final class _UIBarButtonItemView: UIControl {
         // the previous shared platterFill 25).
         platter._usesIOSDarkBarGlass = platter._usesIOSGlass && !appliesRefraction
         platter.layer.shadowOpacity = _platterHiddenByGroup ? 0 : _UIBarMetrics.platterShadowOpacity
-        platter.isHidden = !showsPlatter
+        platter.isHidden = !showsPlatter || item.hidesSharedBackground
     }
 
     /// Only navigation-bar platters show the refractive band (measured —
@@ -768,7 +773,7 @@ final class _UIBarButtonItemView: UIControl {
         refractionBand.frame = CGRect(x: 0, y: 0, width: bounds.width, height: band)
         refractionBand.backgroundColor = backdropColor
         refractionHost.isHidden = backdropColor == nil || item.style == .done
-            || !showsPlatter || !appliesRefraction || _platterHiddenByGroup
+            || !showsPlatter || !appliesRefraction || _platterHiddenByGroup || item.hidesSharedBackground
         platter.sendSubviewToBack(refractionHost)   // under the content
         if rim.superview !== platter { platter.addSubview(rim) }
         rim.frame = _UIBarPlatterRimView.frame(around: platter.bounds)
@@ -782,6 +787,7 @@ final class _UIBarButtonItemView: UIControl {
             // UIKit `init(customView:)` has no platter. SwiftUI toolbar
             // image items keep the measured 44×44 glass (Hackers settings).
             platter.isHidden = !(showsPlatter && item._showsPlatterWithCustomView)
+                || item.hidesSharedBackground
             return
         }
         let s = contentSize

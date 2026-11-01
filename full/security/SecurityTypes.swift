@@ -231,7 +231,7 @@ public final class SecTrust: Hashable, @unchecked Sendable {
     var ocsp: CFTypeRef?
     var scts: CFArray?
     var lastResult: SecTrustResultType = .invalid
-    var lastError: NSError?
+    var lastError: CFError?
     var evaluated = false
     var builtChain: [SecCertificate] = []
     init(certificates: [SecCertificate], policies: [SecPolicy]) {

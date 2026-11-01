@@ -59,7 +59,7 @@ public enum SystemColors {
         return t
     }
 
-    private static func parseStyle(_ value: JSONValue?) -> [String: CanvasColor] {
+    private static func parseStyle(_ value: _OpenUIKitJSONValue?) -> [String: CanvasColor] {
         guard let obj = value?.objectValue else { return [:] }
         var out: [String: CanvasColor] = [:]
         out.reserveCapacity(obj.count)

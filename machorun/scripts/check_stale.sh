@@ -105,7 +105,8 @@ inputs_hash() {
         [ -e "$ROOT/$p" ] || continue
         find "$ROOT/$p" -type f \
             \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \
-               -o -name '*.mm' -o -name '*.m' -o -name '*.sh' \) 2>/dev/null
+               -o -name '*.mm' -o -name '*.m' -o -name '*.sh' \
+               -o -name '*.s' -o -name '*.patch' \) 2>/dev/null
     done | LC_ALL=C sort | while IFS= read -r f; do
         printf '%s  %s\n' "$(sha "$f" | cut -d' ' -f1)" "${f#$ROOT/}"
     done | sha | cut -d' ' -f1
@@ -148,7 +149,7 @@ TARGETS=(
     # not know about a new artefact reports "ok" about the four it does know,
     # which is the most reassuring possible way to be silent about the fifth.
     "darwin/usr/lib/libc++abi.dylib|vendor/libcxxabi darwin/src scripts/build_darwin.sh"
-    "darwin/usr/lib/libobjc.A.dylib|vendor/objc4 vendor/objc4-priv scripts/build_objc4.sh"
+    "darwin/usr/lib/libobjc.A.dylib|vendor/objc4 vendor/objc4-priv patches-macho scripts/build_objc4.sh"
     "darwin/usr/lib/libquartz.dylib|vendor/quartz scripts/build_quartz.sh"
     "build/machorun|src scripts/build.sh"
 )

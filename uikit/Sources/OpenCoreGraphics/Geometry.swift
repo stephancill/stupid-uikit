@@ -91,6 +91,9 @@ public struct CGRect: Equatable, Hashable, Sendable {
     public var origin: CGPoint
     public var size: CGSize
     public init(origin: CGPoint, size: CGSize) { self.origin = origin; self.size = size }
+    public init(x: Int, y: Int, width: Int, height: Int) {
+        self.init(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
+    }
     public init(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
         self.init(origin: CGPoint(x: x, y: y), size: CGSize(width: width, height: height))
     }

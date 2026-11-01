@@ -102,6 +102,12 @@ extension _OpenContentUnavailableView {
     static var iOSSymbolTitleGap: CGFloat { 21 + 1.0 / 6.0 }
     static var iOSTitleDescriptionGap: CGFloat { 3 }
     static var iOSBottomSpace: CGFloat { 27 + 5.0 / 6.0 }
+    /// The column the title and description wrap in. FITTED to two iOS 27 references on an iPhone
+    /// 16e (390 pt): stupid authenticator's empty state breaks "Scan a QR code or manually add a
+    /// code." after a 288.67 pt line (so the column is at least that) where "...add a" would be
+    /// about 304; stupid social's Search breaks "Enter a handle to search connected networks."
+    /// before "connected" (about 301). 294 = 390 - 2 x 48 lies in [288.67, 301).
+    static var iOSTextColumnWidth: CGFloat { 294 }
 
     func _iOSNode(icon: _OpenAnyView, title: _OpenAnyView, iconHeight: CGFloat?) -> _OpenViewNode {
         var children: [_OpenViewNode] = [_OpenViewNode(.spacer(minLength: 0))]
@@ -121,6 +127,7 @@ extension _OpenContentUnavailableView {
                         // 11.33 x 15 pt; title2 bold draws 154 / 12.5 x 16.5.
                         .font(.title3.weight(.bold))
                         .multilineTextAlignment(.center)
+                        .frame(maxWidth: Self.iOSTextColumnWidth)
                 }
                 .accessibilityElement(children: .combine)
                 ._makeOpenUIKitNode()
@@ -139,6 +146,7 @@ extension _OpenContentUnavailableView {
                         // ((121, 121, 124) there); the symbol above it is.
                         .foregroundStyle(_OpenColor(uiColor: .secondaryLabel))
                         .multilineTextAlignment(.center)
+                        .frame(maxWidth: Self.iOSTextColumnWidth)
                         .padding(.top, Self.iOSTitleDescriptionGap)
                         ._makeOpenUIKitNode()
                 }

@@ -1,31 +1,36 @@
 // Minimal JSON parser. Pure Swift, no Foundation. Owner: runtime-util.
+//
+// Public as `_OpenUIKitJSONValue` for stupid-uikit's own tools (openrender, openhost, the full
+// drivers), which alias it back to `JSONValue` internally. An app that imports UIKit and declares
+// its own `JSONValue` (stupid wallet) would otherwise see two (Apple's UIKit exports none).
 
-public enum JSONValue {
+
+public enum _OpenUIKitJSONValue {
     case null
     case bool(Bool)
     case number(Double)
     case string(String)
-    case array([JSONValue])
-    case object([String: JSONValue])
+    case array([_OpenUIKitJSONValue])
+    case object([String: _OpenUIKitJSONValue])
 
     public var doubleValue: Double? { if case .number(let d) = self { return d }; return nil }
     public var stringValue: String? { if case .string(let s) = self { return s }; return nil }
     public var boolValue: Bool? { if case .bool(let b) = self { return b }; return nil }
-    public var arrayValue: [JSONValue]? { if case .array(let a) = self { return a }; return nil }
-    public var objectValue: [String: JSONValue]? { if case .object(let o) = self { return o }; return nil }
-    public subscript(key: String) -> JSONValue? { objectValue?[key] }
-    public subscript(index: Int) -> JSONValue? {
+    public var arrayValue: [_OpenUIKitJSONValue]? { if case .array(let a) = self { return a }; return nil }
+    public var objectValue: [String: _OpenUIKitJSONValue]? { if case .object(let o) = self { return o }; return nil }
+    public subscript(key: String) -> _OpenUIKitJSONValue? { objectValue?[key] }
+    public subscript(index: Int) -> _OpenUIKitJSONValue? {
         guard let a = arrayValue, index >= 0, index < a.count else { return nil }
         return a[index]
     }
 
-    public static func parse(_ bytes: [UInt8]) -> JSONValue? {
+    public static func parse(_ bytes: [UInt8]) -> _OpenUIKitJSONValue? {
         var parser = _JSONParser(bytes: bytes)
         guard let v = parser.parseValue() else { return nil }
         parser.skipWhitespace()
         return parser.pos == bytes.count ? v : nil
     }
-    public static func parse(_ text: String) -> JSONValue? { parse(Array(text.utf8)) }
+    public static func parse(_ text: String) -> _OpenUIKitJSONValue? { parse(Array(text.utf8)) }
 }
 
 private struct _JSONParser {
@@ -38,7 +43,7 @@ private struct _JSONParser {
             if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D { pos += 1 } else { break }
         }
     }
-    mutating func parseValue() -> JSONValue? {
+    mutating func parseValue() -> _OpenUIKitJSONValue? {
         skipWhitespace()
         guard pos < bytes.count else { return nil }
         switch bytes[pos] {
@@ -50,7 +55,7 @@ private struct _JSONParser {
         case UInt8(ascii: "f"):
             return consume("false") ? .bool(false) : nil
         case UInt8(ascii: "n"):
-            return consume("null") ? JSONValue.null : nil
+            return consume("null") ? _OpenUIKitJSONValue.null : nil
         default: return parseNumber()
         }
     }
@@ -61,9 +66,9 @@ private struct _JSONParser {
         pos += u.count
         return true
     }
-    mutating func parseObject() -> JSONValue? {
+    mutating func parseObject() -> _OpenUIKitJSONValue? {
         pos += 1  // {
-        var dict: [String: JSONValue] = [:]
+        var dict: [String: _OpenUIKitJSONValue] = [:]
         skipWhitespace()
         if pos < bytes.count && bytes[pos] == UInt8(ascii: "}") { pos += 1; return .object(dict) }
         while true {
@@ -81,9 +86,9 @@ private struct _JSONParser {
             return nil
         }
     }
-    mutating func parseArray() -> JSONValue? {
+    mutating func parseArray() -> _OpenUIKitJSONValue? {
         pos += 1  // [
-        var arr: [JSONValue] = []
+        var arr: [_OpenUIKitJSONValue] = []
         skipWhitespace()
         if pos < bytes.count && bytes[pos] == UInt8(ascii: "]") { pos += 1; return .array(arr) }
         while true {
@@ -165,7 +170,7 @@ private struct _JSONParser {
         }
         return nil
     }
-    mutating func parseNumber() -> JSONValue? {
+    mutating func parseNumber() -> _OpenUIKitJSONValue? {
         let start = pos
         while pos < bytes.count {
             let b = bytes[pos]

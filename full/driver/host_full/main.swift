@@ -33,6 +33,9 @@ import CPortableIO
 import OpenUIKit
 import RealAppProbe
 
+/// OpenUIKit's JSON value (public as `_OpenUIKitJSONValue`, see MiniJSON.swift).
+typealias JSONValue = _OpenUIKitJSONValue
+
 // MARK: - IO (the CPortableIO subset render_full's driver uses)
 
 func hostWarn(_ message: String) { cpio_log_stderr(message) }

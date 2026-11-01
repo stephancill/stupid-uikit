@@ -420,7 +420,7 @@ public enum GlyphRasterizer {
         }
         let overrides = OpenUIKitRuntime.fontPaths
         var paths: [String] = []
-        switch font.design {
+        switch font._drawnDesign {
         case .monospaced:
             if let o = overrides["mono"] { paths.append(o) }
             paths.append("/System/Library/Fonts/SFNSMono.ttf")
@@ -428,7 +428,7 @@ public enum GlyphRasterizer {
             if let o = overrides["italic"] { paths.append(o) }
             paths.append("/System/Library/Fonts/SFNSItalic.ttf")
             paths.append("/System/Library/Fonts/SFNS.ttf")
-        case .default:
+        case .default, .rounded, .serif:  // _drawnDesign maps both to .default
             if let o = overrides[font.weight.name] { paths.append(o) }
             if let o = overrides["system"] { paths.append(o) }
             paths.append("/System/Library/Fonts/SFNS.ttf")
@@ -439,8 +439,8 @@ public enum GlyphRasterizer {
         var key = 0
         if let vars = gf.variations {
             var user: [UInt32: Double] = [:]
-            switch font.design {
-            case .default:
+            switch font._drawnDesign {
+            case .default, .rounded, .serif:  // _drawnDesign maps both to .default
                 user[tag("wght")] = systemWght(font.weight)
                 user[tag("opsz")] = Double(font.pointSize)
             case .italic:

@@ -10,6 +10,9 @@
 import Foundation
 import OpenUIKit
 
+/// OpenUIKit's JSON value (public as `_OpenUIKitJSONValue`, see MiniJSON.swift).
+typealias JSONValue = _OpenUIKitJSONValue
+
 enum SceneIOError: Error, CustomStringConvertible {
     case notJSONObject(String)
     var description: String {

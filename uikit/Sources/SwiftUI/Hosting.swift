@@ -1529,25 +1529,27 @@ private let _openIOSToolbarTitleViewHeight: CGFloat = 36
 @MainActor
 private func _openToolbarEntries(
     _ node: _OpenViewNode
-) -> [(ToolbarItemPlacement, _OpenViewNode)] {
-    var result: [(ToolbarItemPlacement, _OpenViewNode)] = []
-    func visit(_ node: _OpenViewNode) {
+) -> [(ToolbarItemPlacement, _OpenViewNode, hidesSharedBackground: Bool)] {
+    var result: [(ToolbarItemPlacement, _OpenViewNode, hidesSharedBackground: Bool)] = []
+    func visit(_ node: _OpenViewNode, hidden: Bool) {
         switch node.kind {
         case .empty:
             break
         case .group(let children):
-            children.forEach(visit)
+            children.forEach { visit($0, hidden: hidden) }
         case .modified(let content, let modification):
             if case .toolbarItem(let placement) = modification {
-                result.append((placement, content))
+                result.append((placement, content, hidden))
+            } else if case .sharedBackgroundVisibility(let visibility) = modification {
+                visit(content, hidden: visibility == .hidden)
             } else {
-                result.append((.automatic, node))
+                result.append((.automatic, node, hidden))
             }
         default:
-            result.append((.automatic, node))
+            result.append((.automatic, node, hidden))
         }
     }
-    visit(node)
+    visit(node, hidden: false)
     return result
 }
 
@@ -1679,7 +1681,7 @@ private func _openApplyNavigationChrome(
     var titleHost = existingTitleHost
 
     if let toolbar = configuration.toolbar {
-        for (placement, content) in _openToolbarEntries(toolbar) {
+        for (placement, content, hidesSharedBackground) in _openToolbarEntries(toolbar) {
             if placement == .bottomBar { continue }
             let isLeading = placement == .navigationBarLeading
                 || placement == .cancellationAction
@@ -1693,6 +1695,7 @@ private func _openApplyNavigationChrome(
             }
             let barItem = _openImageBarButtonItem(from: content, owner: owner)
                 ?? _openCustomBarButtonItem(from: content)
+            barItem.hidesSharedBackground = hidesSharedBackground
             if isLeading {
                 leading.append(barItem)
             } else {
@@ -1795,6 +1798,7 @@ private func _openReuseBarItems(_ current: [UIBarButtonItem], with fresh: [UIBar
               old._isolatesPlatter == new._isolatesPlatter,
               old._sharesSwiftUISymbolPlatter == new._sharesSwiftUISymbolPlatter,
               old._showsPlatterWithCustomView == new._showsPlatterWithCustomView,
+              old.hidesSharedBackground == new.hidesSharedBackground,
               old.isEnabled == new.isEnabled
         else { return false }
         if new.customView != nil, !(new.customView is _SwiftUIHostingView) { return false }
@@ -1826,7 +1830,7 @@ private func _openGroupAdjacentSymbolItems(_ items: [UIBarButtonItem?]) {
     var start = 0
     while start < items.count {
         var end = start
-        while end < items.count, let item = items[end],
+        while end < items.count, let item = items[end], !item.hidesSharedBackground,
               item._isolatesPlatter || item._showsPlatterWithCustomView {
             end += 1
         }
@@ -2605,6 +2609,24 @@ private func _openInstallGesture(_ gesture: _OpenGestureNode, on host: UIView) {
         }
         recognizer.minimumPressDuration = minimumDuration
         host.addGestureRecognizer(recognizer)
+    case .longPressExclusivelyBeforeTap(let minimumDuration, let longPress, let tap):
+        // UIKit would make the tap require the long press to fail; here the tap stands down for
+        // the touch whose long press began.
+        var longPressBegan = false
+        let press = UILongPressGestureRecognizer { recognizer in
+            if recognizer.state == .began {
+                longPressBegan = true
+                longPress(true)
+            }
+        }
+        press.minimumPressDuration = minimumDuration
+        host.addGestureRecognizer(press)
+        host.addGestureRecognizer(
+            UITapGestureRecognizer { recognizer in
+                guard recognizer.state == .ended else { return }
+                if longPressBegan { longPressBegan = false } else { tap() }
+            }
+        )
     case .drag(let minimumDistance, let coordinateSpace, let changed, let ended):
         var start = CGPoint.zero
         let recognizer = UIPanGestureRecognizer { recognizer in
@@ -3256,7 +3278,7 @@ private enum _ViewRenderer {
                 return measure(content, proposed: proposed, environment: next)
             case .accessibilityHidden:
                 return measure(content, proposed: proposed, environment: environment)
-            case .effect, .navigationTitle, .interactiveDismissDisabled, .navigationSubtitle, .navigationBarHidden,
+            case .effect, .navigationTitle, .interactiveDismissDisabled, .sharedBackgroundVisibility, .navigationSubtitle, .navigationBarHidden,
                  .navigationBackButtonHidden, .navigationTitleDisplayMode,
                  .navigationDestination, .toolbar, .toolbarItem, .tag,
                  .pageTabViewStyle:
@@ -4027,6 +4049,26 @@ private enum _ViewRenderer {
                     setSelection(next.tag)
                 }
             }
+        case .navigationLink(let label, let target)
+            where { if case .button = label.kind { return true }; return false }():
+            // A button-styled link (_openApplyingButtonStyle): the styled button, following the link.
+            guard case .button(let normal, let pressed, _, _) = label.kind else { break }
+            let control = _SwiftUIButtonControl(frame: rect)
+            control.isOpaque = false
+            control.backgroundColor = .clear
+            control.accessibilityIdentifier = "SwiftUI.NavigationLink"
+            control.accessibilityTraits = [.button]
+            control.isEnabled = environment.isEnabled
+            control.addTarget(for: .touchUpInside) { [weak control] _, _ in
+                guard let control else { return }
+                _openFollowNavigationLink(target, from: _enclosingViewController(for: control))
+            }
+            surface.addSubview(control)
+            place(normal, in: control.normalHost.bounds, on: control.normalHost, environment: environment)
+            if let pressed {
+                place(pressed, in: control.pressedHost.bounds, on: control.pressedHost, environment: environment)
+            }
+            control.refreshAppearance()
         case .navigationLink(let label, let target):
             let control = UIControl(frame: rect)
             control.isOpaque = false
@@ -5047,7 +5089,7 @@ private enum _ViewRenderer {
                 pan.delegate = gate
                 host.addGestureRecognizer(pan)
             case .effect, .toolbarVisibility, .toolbarBackgroundVisibility,
-                 .navigationTitle, .interactiveDismissDisabled, .navigationSubtitle, .navigationBarHidden,
+                 .navigationTitle, .interactiveDismissDisabled, .sharedBackgroundVisibility, .navigationSubtitle, .navigationBarHidden,
                  .navigationBackButtonHidden, .navigationTitleDisplayMode,
                  .navigationDestination, .toolbar, .toolbarItem, .tag,
                  .pageTabViewStyle:

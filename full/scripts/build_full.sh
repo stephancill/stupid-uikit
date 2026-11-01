@@ -583,9 +583,14 @@ if vendor_is_inrepo "$W" machorun "$MACHORUN"; then
         echo "== machorun: darwin userland sources changed (or unstamped); scripts/build.sh darwin + tbd"
         (cd "$MACHORUN" && bash scripts/build.sh darwin && bash scripts/build.sh tbd)
     fi
+    # libobjc: objc4 plus machorun's patches-macho (0005 generates block trampolines).
+    if ! _mr_current darwin/usr/lib/libobjc.A.dylib; then
+        echo "== machorun: objc4 sources or patches changed (or unstamped); scripts/build.sh objc4 + tbd"
+        (cd "$MACHORUN" && bash scripts/build.sh objc4 && bash scripts/build.sh tbd)
+    fi
     _mr_stale=$(bash "$MACHORUN/scripts/check_stale.sh" 2>&1 || true)
     for _mr_art in build/machorun darwin/usr/lib/libSystem.B.dylib darwin/usr/lib/libc++.1.dylib \
-        darwin/usr/lib/libc++abi.dylib; do
+        darwin/usr/lib/libc++abi.dylib darwin/usr/lib/libobjc.A.dylib; do
         _mr_current "$_mr_art" || {
             printf '%s\n' "$_mr_stale" >&2
             echo "build_full: machorun $_mr_art is still not current after rebuilding it" >&2
@@ -1884,8 +1889,8 @@ echo "== compile the ordered app-facing Foundation facade into APPINC"
 # Overwrites the DTS identity shim's swiftmodule. DTS.o is already compiled.
 # Library/UIKit invocations above never had APPINC, so they stay Foundation-hidden.
 mapfile -t FOUNDATION_GUEST_RELATIVE_SOURCES < "$FOUNDATION_GUEST_MANIFEST"
-[ "${#FOUNDATION_GUEST_RELATIVE_SOURCES[@]}" -eq 41 ] \
-    || die "Foundation guest source manifest must contain exactly 41 lines"
+[ "${#FOUNDATION_GUEST_RELATIVE_SOURCES[@]}" -eq 43 ] \
+    || die "Foundation guest source manifest must contain exactly 43 lines"
 FOUNDATION_GUEST_SOURCES=()
 for relative in "${FOUNDATION_GUEST_RELATIVE_SOURCES[@]}"; do
     FOUNDATION_GUEST_SOURCES+=("$W/$relative")

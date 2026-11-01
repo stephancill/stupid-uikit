@@ -648,7 +648,7 @@ public func SecTrustCreateWithCertificates(
     return errSecSuccess
 }
 
-func _secEvaluate(_ trust: SecTrust) -> (SecTrustResultType, NSError?) {
+func _secEvaluate(_ trust: SecTrust) -> (SecTrustResultType, CFError?) {
     let now = trust.verifyDate ?? Date()
     var remaining = trust.certificates
     var chain: [SecCertificate] = []

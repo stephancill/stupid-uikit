@@ -76,6 +76,7 @@ public struct CharacterSet: Hashable, Sendable {
         var alphanumerics = Set<UInt32>()
         var symbols = Set<UInt32>()
         var decimalDigits = Set<UInt32>()
+        var controls = Set<UInt32>()
     }
 
     private static let namedCategorySets: NamedCategorySets = {
@@ -106,6 +107,8 @@ public struct CharacterSet: Hashable, Sendable {
                 result.alphanumerics.insert(value)
             case .mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol:
                 result.symbols.insert(value)
+            case .control, .format:
+                result.controls.insert(value)
             default:
                 break
             }
@@ -135,6 +138,11 @@ public struct CharacterSet: Hashable, Sendable {
 
     public static var decimalDigits: CharacterSet {
         CharacterSet(scalarValues: namedCategorySets.decimalDigits)
+    }
+
+    /// Unicode general categories Cc (control) and Cf (format), as Foundation defines it.
+    public static var controlCharacters: CharacterSet {
+        CharacterSet(scalarValues: namedCategorySets.controls)
     }
 
     // These inventories are the RFC 3986 character groups used by Darwin

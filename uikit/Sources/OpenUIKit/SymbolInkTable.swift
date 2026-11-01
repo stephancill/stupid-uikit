@@ -48,7 +48,7 @@
 
 public enum SymbolInkTable {
     private struct Table {
-        var entries: [String: JSONValue]
+        var entries: [String: _OpenUIKitJSONValue]
         var names: Set<String>
         var configs: Set<String>
     }
@@ -119,7 +119,7 @@ public enum SymbolInkTable {
         return (base, "26")
     }
 
-    static func entries(scale: CGFloat) -> [String: JSONValue]? {
+    static func entries(scale: CGFloat) -> [String: _OpenUIKitJSONValue]? {
         table(scale: scale)?.entries
     }
 

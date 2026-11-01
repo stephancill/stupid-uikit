@@ -914,6 +914,35 @@ public let NSURLAuthenticationMethodNegotiate = "NSURLAuthenticationMethodNegoti
 public let NSURLAuthenticationMethodClientCertificate = "NSURLAuthenticationMethodClientCertificate"
 public let NSURLAuthenticationMethodServerTrust = "NSURLAuthenticationMethodServerTrust"
 
+/// Per-protection-space credentials, held in memory for the process.
+open class URLCredentialStorage: NSObject, @unchecked Sendable {
+    public static let shared = URLCredentialStorage()
+    private let lock = NSLock()
+    private var stored: [URLProtectionSpace: [String: URLCredential]] = [:]
+
+    public override init() { super.init() }
+
+    open var allCredentials: [URLProtectionSpace: [String: URLCredential]] {
+        lock.withLock { stored }
+    }
+
+    open func credentials(for space: URLProtectionSpace) -> [String: URLCredential]? {
+        lock.withLock { stored[space] }
+    }
+
+    open func set(_ credential: URLCredential, for space: URLProtectionSpace) {
+        lock.withLock { stored[space, default: [:]][credential.user ?? ""] = credential }
+    }
+
+    open func remove(_ credential: URLCredential, for space: URLProtectionSpace) {
+        lock.withLock { _ = stored[space]?.removeValue(forKey: credential.user ?? "") }
+    }
+
+    open func defaultCredential(for space: URLProtectionSpace) -> URLCredential? {
+        lock.withLock { stored[space]?.values.first }
+    }
+}
+
 open class URLCredential: NSObject, @unchecked Sendable {
     public enum Persistence: UInt, Sendable {
         case none = 0
@@ -964,6 +993,9 @@ open class URLSessionConfiguration: NSObject, @unchecked Sendable {
     open var timeoutIntervalForRequest: TimeInterval = 60
     open var timeoutIntervalForResource: TimeInterval = 7 * 24 * 60 * 60
     open var httpCookieStorage: HTTPCookieStorage? = .shared
+    /// Credentials the session could answer authentication challenges with. The guest's transport
+    /// raises no challenges, so the store is held, not consulted.
+    open var urlCredentialStorage: URLCredentialStorage? = .shared
     open var urlCache: URLCache? = .shared
     open var protocolClasses: [AnyClass]? = []
     open var httpShouldSetCookies: Bool = true
@@ -1556,6 +1588,44 @@ open class URLSession: NSObject, @unchecked Sendable {
         delegate: (any URLSessionTaskDelegate)? = nil
     ) async throws -> (Data, URLResponse) {
         try await data(for: URLRequest(url: url), delegate: delegate)
+    }
+
+    /// The response body as an async sequence of bytes. The host transport delivers a response
+    /// whole, so the sequence yields after the body has arrived rather than while it streams; the
+    /// bytes, the response and the errors are those of `data(for:delegate:)`.
+    public func bytes(
+        for request: URLRequest,
+        delegate: (any URLSessionTaskDelegate)? = nil
+    ) async throws -> (AsyncBytes, URLResponse) {
+        let (data, response) = try await data(for: request, delegate: delegate)
+        return (AsyncBytes(data: data), response)
+    }
+
+    public func bytes(
+        from url: URL,
+        delegate: (any URLSessionTaskDelegate)? = nil
+    ) async throws -> (AsyncBytes, URLResponse) {
+        try await bytes(for: URLRequest(url: url), delegate: delegate)
+    }
+
+    public struct AsyncBytes: AsyncSequence, Sendable {
+        public typealias Element = UInt8
+        let data: Data
+
+        public struct AsyncIterator: AsyncIteratorProtocol {
+            var index: Data.Index
+            let data: Data
+
+            public mutating func next() async throws -> UInt8? {
+                guard index < data.endIndex else { return nil }
+                defer { index = data.index(after: index) }
+                return data[index]
+            }
+        }
+
+        public func makeAsyncIterator() -> AsyncIterator {
+            AsyncIterator(index: data.startIndex, data: data)
+        }
     }
 
     public func upload(

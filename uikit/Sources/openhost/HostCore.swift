@@ -31,6 +31,9 @@
 import OpenUIKit
 import CSDL2
 
+/// OpenUIKit's JSON value (public as `_OpenUIKitJSONValue`, see MiniJSON.swift).
+typealias JSONValue = _OpenUIKitJSONValue
+
 // MARK: - Scene setup (host variant of openrender's runScene)
 
 /// Build the scene into a live UIWindow. Mirrors runScene's build path

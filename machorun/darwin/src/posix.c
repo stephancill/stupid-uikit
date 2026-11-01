@@ -1568,6 +1568,13 @@ EXPORT int     unlink(const char *p)                  { return MR_ERRNO_CALL(gli
 EXPORT int     rename(const char *a, const char *b)   { return MR_ERRNO_CALL(glibc_rename(a, b)); }
 EXPORT int     access(const char *p, int m)           { return MR_ERRNO_CALL(glibc_access(p, m)); }
 EXPORT int     chmod(const char *p, unsigned m)       { return MR_ERRNO_CALL(glibc_chmod(p, m)); }
+/* fchmod/fchown: the descriptor forms (SQLite's unix VFS sets a new database file's mode and
+ * owner through them). mode_t, uid_t and gid_t are 32-bit on both sides. */
+EXPORT int     fchmod(int fd, unsigned m)             { return MR_ERRNO_CALL(glibc_fchmod(fd, m)); }
+EXPORT int     fchown(int fd, unsigned u, unsigned g) { return MR_ERRNO_CALL(glibc_fchown(fd, u, g)); }
+/* flock(2): LOCK_SH 1, LOCK_EX 2, LOCK_NB 4, LOCK_UN 8 on both (stupid wallet locks its app-group
+ * claim files with it). */
+EXPORT int     flock(int fd, int op)                  { return MR_ERRNO_CALL(glibc_flock(fd, op)); }
 EXPORT int     symlink(const char *a, const char *b)  { return MR_ERRNO_CALL(glibc_symlink(a, b)); }
 EXPORT ssize_t readlink(const char *p, char *b, size_t n) { return MR_ERRNO_CALL(glibc_readlink(p, b, n)); }
 EXPORT int     ftruncate(int fd, off_t n)             { return MR_ERRNO_CALL(glibc_ftruncate(fd, n)); }

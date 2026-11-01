@@ -41,7 +41,7 @@ public struct GlyphInkMask {
 
 public enum GlyphInkTable {
     /// Raw JSON entries (hex-encoded masks); decoded lazily into `cache`.
-    private static var entries: [String: JSONValue]? = {
+    private static var entries: [String: _OpenUIKitJSONValue]? = {
         guard let json = ResourceIO.loadJSONResource("glyph_ink.json"),
               let e = json["entries"]?.objectValue else { return nil }
         return e
@@ -53,7 +53,7 @@ public enum GlyphInkTable {
     /// `UIWindow`, oracle2) than in offscreen `layer.render` captures.
     /// Harvested with the same probe methodology as `glyph_ink.json`, from
     /// the same scene files, rendered by oracle2 instead of oracle1.
-    private static var windowEntries: [String: JSONValue]? = {
+    private static var windowEntries: [String: _OpenUIKitJSONValue]? = {
         guard let json = ResourceIO.loadJSONResource("glyph_ink_window.json"),
               let e = json["entries"]?.objectValue else { return nil }
         return e
@@ -139,7 +139,7 @@ public enum GlyphInkTable {
     /// slightly differently, so new keys are iOS 27 data next to iOS 26.1
     /// data. Repeat harvests on iOS 27 are byte-identical. Table
     /// **9148 → 10891**.
-    private static var iosEntries: [String: JSONValue]? = {
+    private static var iosEntries: [String: _OpenUIKitJSONValue]? = {
         guard let json = ResourceIO.loadJSONResource("glyph_ink_ios.json"),
               let e = json["entries"]?.objectValue else { return nil }
         return e
@@ -156,12 +156,12 @@ public enum GlyphInkTable {
     /// phases below 17 pt. (Moving the LABEL's frame by fractions does show
     /// quarter-pixel phases, but Auto Layout pins label frames to the pixel
     /// grid under the iOS cut, so the pen rule is the one that renders.)
-    private static var iosEntries3x: [String: JSONValue]? = {
+    private static var iosEntries3x: [String: _OpenUIKitJSONValue]? = {
         guard let json = ResourceIO.loadJSONResource("glyph_ink_ios_3x.json"),
               let e = json["entries"]?.objectValue else { return nil }
         return e
     }()
-    static func iosEntries(scale: CGFloat) -> [String: JSONValue]? {
+    static func iosEntries(scale: CGFloat) -> [String: _OpenUIKitJSONValue]? {
         if scale == 3 { return iosEntries3x }
         if scale == 2 { return iosEntries }
         return nil
@@ -372,7 +372,7 @@ public enum GlyphInkTable {
         return m
     }
 
-    private static func decode(_ e: [String: JSONValue]?, cacheKey: String) -> GlyphInkMask? {
+    private static func decode(_ e: [String: _OpenUIKitJSONValue]?, cacheKey: String) -> GlyphInkMask? {
         if let hit = cache[cacheKey] { return hit }
         guard let e,
               let w = e["w"]?.doubleValue, let h = e["h"]?.doubleValue,

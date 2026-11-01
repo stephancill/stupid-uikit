@@ -19,3 +19,17 @@ extension CFError: Error, _FoundationGuestNSErrorIdentity, @unchecked Sendable {
     public func _getEmbeddedNSError() -> AnyObject? { self }
     internal var _foundationGuestNSErrorIdentity: NSError { _foundationNSError }
 }
+
+// CFErrorGetDomain / CFErrorGetCode / CFErrorCopyUserInfo read the error through the same NSError
+// identity, in Swift: the portable CoreFoundation image has no C entry points for them (above).
+public func CFErrorGetDomain(_ err: CFError) -> String {
+    err._domain
+}
+
+public func CFErrorGetCode(_ err: CFError) -> Int {
+    err._code
+}
+
+public func CFErrorCopyUserInfo(_ err: CFError) -> [String: Any]? {
+    unsafeBitCast(err, to: NSError.self).userInfo
+}

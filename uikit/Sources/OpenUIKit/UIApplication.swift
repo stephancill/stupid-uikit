@@ -126,6 +126,10 @@ extension UIApplication {
             LaunchOptionsKey(rawValue: "UIApplicationLaunchOptionsRemoteNotificationKey")
         public static let localNotification =
             LaunchOptionsKey(rawValue: "UIApplicationLaunchOptionsLocalNotificationKey")
+        /// A Home Screen quick action that launched the app. The preview launches from no
+        /// Home Screen, so the options never carry one.
+        public static let shortcutItem =
+            LaunchOptionsKey(rawValue: "UIApplicationLaunchOptionsShortcutItemKey")
     }
 
     /// Options for `open(_:options:completionHandler:)`.
@@ -717,10 +721,12 @@ open class UIApplication: UIResponder {
         for scene in _connectedScenes {
             if let windowScene = scene as? UIWindowScene,
                let sceneDelegate = windowScene.delegate as? UIWindowSceneDelegate {
-                sceneDelegate.windowScene(
-                    windowScene, performActionFor: item,
-                    completionHandler: completionHandler
-                )
+                // A delegate that does not implement it handles nothing.
+                if let perform = sceneDelegate.windowScene {
+                    perform(windowScene, item, completionHandler)
+                } else {
+                    completionHandler(false)
+                }
                 return
             }
         }
@@ -1191,17 +1197,33 @@ extension UISceneDelegate {
 #endif
 }
 
+/// `UIWindowSceneDelegate` is two protocols: this Swift one, whose `window`
+/// is an Objective-C optional property modelled as `UIWindow??`, and
+/// `_UIWindowSceneDelegateObjC`, whose Objective-C optional methods app code
+/// can name by selector. stupid authenticator installs its Home Screen quick
+/// action handler at run time with
+/// `#selector(UIWindowSceneDelegate.windowScene(_:performActionFor:completionHandler:))`
+/// and `class_addMethod`, which needs that method to be `@objc`.
 @preconcurrency @MainActor
-public protocol UIWindowSceneDelegate: UISceneDelegate {
+public protocol _UIWindowSceneDelegate: UISceneDelegate {
     /// ObjC-optional on UIKit: the outer optional represents whether the
     /// delegate implements the property and the inner optional its value.
     var window: UIWindow?? { get set }
-    func windowScene(_ windowScene: UIWindowScene,
-                     performActionFor shortcutItem: UIApplicationShortcutItem,
-                     completionHandler: @escaping (Bool) -> Void)
 }
 
-extension UIWindowSceneDelegate {
+/// The window-scene delegate's Objective-C optional methods, under UIKit's
+/// selectors.
+@preconcurrency @MainActor
+@objc public protocol _UIWindowSceneDelegateObjC {
+    @objc(windowScene:performActionForShortcutItem:completionHandler:)
+    optional func windowScene(_ windowScene: UIWindowScene,
+                              performActionFor shortcutItem: UIApplicationShortcutItem,
+                              completionHandler: @escaping (Bool) -> Void)
+}
+
+public typealias UIWindowSceneDelegate = _UIWindowSceneDelegate & _UIWindowSceneDelegateObjC
+
+extension _UIWindowSceneDelegate {
     public var window: UIWindow?? {
         get {
             var mirror: Mirror? = Mirror(reflecting: self)
@@ -1221,14 +1243,6 @@ extension UIWindowSceneDelegate {
             return nil
         }
         set { _ = newValue }
-    }
-
-    public func windowScene(_ windowScene: UIWindowScene,
-                            performActionFor shortcutItem: UIApplicationShortcutItem,
-                            completionHandler: @escaping (Bool) -> Void) {
-        _ = windowScene
-        _ = shortcutItem
-        completionHandler(false)
     }
 }
 

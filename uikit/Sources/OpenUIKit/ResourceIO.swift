@@ -11,9 +11,9 @@ public enum ResourceIO {
     }
 
     /// Load + parse a JSON resource from OpenUIKitRuntime.resourceRoot.
-    public static func loadJSONResource(_ name: String) -> JSONValue? {
+    public static func loadJSONResource(_ name: String) -> _OpenUIKitJSONValue? {
         guard let bytes = readFile(OpenUIKitRuntime.resourceRoot + "/" + name) else { return nil }
-        return JSONValue.parse(bytes)
+        return _OpenUIKitJSONValue.parse(bytes)
     }
 }
 

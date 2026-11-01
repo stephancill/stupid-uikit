@@ -320,6 +320,10 @@ struct _OpenGestureNode {
     enum Kind {
         case tap(@MainActor () -> Void)
         case longPress(minimumDuration: Double, @MainActor (Bool) -> Void)
+        /// `LongPressGesture.exclusively(before: TapGesture())`: the long press when it begins,
+        /// otherwise the tap.
+        case longPressExclusivelyBeforeTap(minimumDuration: Double, longPress: @MainActor (Bool) -> Void,
+                                           tap: @MainActor () -> Void)
         case drag(
             minimumDistance: CGFloat,
             coordinateSpace: CoordinateSpace,
@@ -437,6 +441,44 @@ public struct _OpenLongPressGesture: _OpenGesture {
         _ action: @escaping @MainActor (Bool) -> Void
     ) -> _OpenLongPressGesture {
         _OpenLongPressGesture(minimumDuration: minimumDuration, ended: action)
+    }
+}
+
+extension _OpenLongPressGesture {
+    /// `exclusively(before:)` with a tap: the long press wins when it begins; a touch that ends
+    /// before then is the tap. Other gesture pairs are not composed here.
+    public func exclusively(before other: _OpenTapGesture) -> _OpenLongPressExclusivelyBeforeTapGesture {
+        _OpenLongPressExclusivelyBeforeTapGesture(minimumDuration: minimumDuration)
+    }
+}
+
+/// SwiftUI's `ExclusiveGesture<LongPressGesture, TapGesture>`.
+public struct _OpenLongPressExclusivelyBeforeTapGesture: _OpenGesture {
+    public enum Value: Sendable {
+        case first(Bool)
+        case second(())
+    }
+
+    let minimumDuration: Double
+    private let ended: @MainActor (Value) -> Void
+
+    init(minimumDuration: Double, ended: @escaping @MainActor (Value) -> Void = { _ in }) {
+        self.minimumDuration = minimumDuration
+        self.ended = ended
+    }
+
+    public func onEnded(_ action: @escaping @MainActor (Value) -> Void) -> Self {
+        Self(minimumDuration: minimumDuration, ended: action)
+    }
+}
+
+extension _OpenLongPressExclusivelyBeforeTapGesture: _OpenGestureNodeProviding {
+    var _openGestureNode: _OpenGestureNode {
+        let ended = ended
+        return _OpenGestureNode(kind: .longPressExclusivelyBeforeTap(
+            minimumDuration: minimumDuration,
+            longPress: { ended(.first($0)) },
+            tap: { ended(.second(())) }))
     }
 }
 

@@ -69,6 +69,8 @@ public struct _OpenNavigationLink<Destination: _OpenView, Label: _OpenView>: _Op
     /// path when the link is followed.
     let value: AnyHashable?
     let isValueLink: Bool
+    /// `NavigationLink(destination:isActive:label:)`: the binding pushes and pops the destination.
+    var isActive: Binding<Bool>?
     public let label: Label
 
     public init(
@@ -91,9 +93,32 @@ public struct _OpenNavigationLink<Destination: _OpenView, Label: _OpenView>: _Op
         isValueLink = false
     }
 
+    /// iOS 16-deprecated `NavigationLink(destination:isActive:label:)`: the label is a link row whose
+    /// tap sets the binding, and the binding presents the destination as
+    /// `navigationDestination(isPresented:)` does, so setting it in code pushes too.
+    public init(
+        destination: Destination,
+        isActive: Binding<Bool>,
+        @_OpenViewBuilder label: () -> Label
+    ) {
+        self.destination = destination
+        self.label = label()
+        value = nil
+        isValueLink = false
+        self.isActive = isActive
+    }
+
     public func _makeOpenUIKitNode() -> _OpenViewNode {
         let labelNode = _OpenGraphContext.withStructuralScope(.navigationLinkLabel) {
             label._makeOpenUIKitNode()
+        }
+        if let isActive, let destination {
+            let row = _OpenViewNode(.modified(
+                _OpenViewNode(.navigationLink(label: labelNode, target: .inert)),
+                .gesture(_OpenGestureNode(kind: .tap({ isActive.wrappedValue = true })))))
+            return _OpenPrebuiltNodeView(node: row)
+                .navigationDestination(isPresented: isActive) { destination }
+                ._makeOpenUIKitNode()
         }
         if isValueLink {
             // A nil value makes an inert link, as in SwiftUI (the label
@@ -138,3 +163,10 @@ public typealias List<Content> = _OpenList<Content> where Content: _OpenView
 public typealias NavigationLink<Destination, Label> =
     _OpenNavigationLink<Destination, Label>
     where Destination: _OpenView, Label: _OpenView
+
+/// A view whose node is already built (a NavigationLink row composed with modifiers).
+struct _OpenPrebuiltNodeView: _OpenView {
+    typealias Body = Never
+    let node: _OpenViewNode
+    func _makeOpenUIKitNode() -> _OpenViewNode { node }
+}

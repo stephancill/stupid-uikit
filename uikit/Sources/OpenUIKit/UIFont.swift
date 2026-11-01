@@ -57,7 +57,27 @@ public final class UIFont: NSObject, @unchecked Sendable {
             }
         }
     }
-    public enum Design: Hashable, Sendable { case `default`, monospaced, italic }
+    /// `.rounded` and `.serif` are the SF Pro Rounded and New York designs. Neither face can ship
+    /// here, so text in them is drawn with the default system design (`_drawnDesign`), and the
+    /// first such font prints a line naming the substitution.
+    public enum Design: Hashable, Sendable { case `default`, monospaced, italic, rounded, serif }
+
+    /// The design whose face draws this font: `.rounded` and `.serif` substitute the default.
+    var _drawnDesign: Design {
+        switch design {
+        case .rounded, .serif:
+            UIFont._reportDesignSubstitution(design)
+            return .default
+        default:
+            return design
+        }
+    }
+
+    nonisolated(unsafe) private static var _reportedDesignSubstitutions: Set<Design> = []
+    private static func _reportDesignSubstitution(_ design: Design) {
+        guard _reportedDesignSubstitutions.insert(design).inserted else { return }
+        print("stupid-uikit: Font.Design.\(design) is drawn with the default system design (no \(design) system face in the preview)")
+    }
 
     public let pointSize: CGFloat
     public let weight: Weight

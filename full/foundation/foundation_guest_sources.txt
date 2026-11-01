@@ -39,3 +39,5 @@ full/foundation/UserDefaults.swift
 full/foundation/UbiquitousKeyValueStore.swift
 full/foundation/RelativeDateTimeFormatter.swift
 full/foundation/FileManager+Enumeration.swift
+full/foundation/FileManager+Replacement.swift
+full/foundation/NSFileCoordinator.swift

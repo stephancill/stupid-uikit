@@ -100,7 +100,7 @@ enum _UIDelegateWindowWriter {
     }
 }
 
-extension UIWindowSceneDelegate {
+extension _UIWindowSceneDelegate {
     /// Hands `window` to the delegate the way UIKit does (see
     /// `_UIDelegateWindowWriter`). Returns whether the delegate had one.
     @discardableResult

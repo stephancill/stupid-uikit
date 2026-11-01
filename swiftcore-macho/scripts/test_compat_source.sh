@@ -3,9 +3,11 @@
 # supposed to have built it. A swiftcompat.c edit that does not rebuild the
 # staged artifact is the stale-artefact class (084a028c).
 #
-# Also records the arch split that forbids deleting the nine x86-overlap
-# symbols from the shared source: x86 libSystem exports them, the staged
-# arm64 libSystem does not.
+# Also checks where the nine names in x86_unexported_symbols.txt resolve.
+# Since 9215e11d swiftcompat.c no longer defines them: machorun's libSystem
+# does, on both arches. The artifact must export none of them, so a definition
+# here can never beat libSystem's by link order, and every libSystem build
+# present must export all nine.
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
@@ -66,7 +68,7 @@ sys.exit(1 if bad else 0)
 PY
 
 echo
-echo "=== arm64 artifact still exports the nine x86-overlap names ==="
+echo "=== arm64 artifact exports none of the nine libSystem names ==="
 [ -f "$UNEXPORT" ] || { bad "missing $UNEXPORT"; UNEXPORT=/dev/null; }
 art_syms=$("$NM" --defined-only --extern-only "$ART" 2>/dev/null | awk '{print $NF}' | sort -u)
 nine=0
@@ -74,7 +76,7 @@ while IFS= read -r s; do
   [ -n "$s" ] || continue
   case "$s" in \#*) continue ;; esac
   nine=$((nine + 1))
-  echo "$art_syms" | grep -qx "$s" && ok "artifact exports $s" || bad "artifact missing $s"
+  grep -qx "$s" <<< "$art_syms" && bad "artifact still exports $s" || ok "artifact leaves $s to libSystem"
 done < "$UNEXPORT"
 [ "$nine" -eq 9 ] && ok "unexport list has 9 names" || bad "unexport list has $nine names, expected 9"
 
@@ -91,17 +93,19 @@ for cand in \
     break
   fi
 done
-nm_has() {
-  local f=$1 s=$2
-  "$NM" --defined-only --extern-only "$f" 2>/dev/null | awk '{print $NF}' | grep -qx "$s"
+# Each library's names are listed once and matched from a here-string: piping nm into `grep -q`
+# under pipefail fails whenever grep exits before nm/awk finish writing (SIGPIPE).
+nm_syms() {
+  "$NM" --defined-only --extern-only "$1" 2>/dev/null | awk '{print $NF}' | sort -u
 }
 
 if [ -f "$X86_SYS" ] && llvm-otool-18 -hv "$X86_SYS" 2>/dev/null | grep -Eq 'MH_MAGIC_64[[:space:]]+X86_64'; then
   x_hit=0
+  x_syms=$(nm_syms "$X86_SYS")
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     case "$s" in \#*) continue ;; esac
-    if nm_has "$X86_SYS" "$s"; then x_hit=$((x_hit + 1)); else bad "x86 libSystem missing $s"; fi
+    if grep -qx "$s" <<< "$x_syms"; then x_hit=$((x_hit + 1)); else bad "x86 libSystem missing $s"; fi
   done < "$UNEXPORT"
   [ "$x_hit" -eq 9 ] && ok "x86 libSystem exports all 9 ($X86_SYS)" \
     || bad "x86 libSystem hit $x_hit/9"
@@ -112,13 +116,14 @@ fi
 if [ -n "${ARM_SYS:-}" ] && [ -f "$ARM_SYS" ] \
     && llvm-otool-18 -hv "$ARM_SYS" 2>/dev/null | grep -Eq 'MH_MAGIC_64[[:space:]]+ARM64'; then
   a_hit=0
+  a_syms=$(nm_syms "$ARM_SYS")
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     case "$s" in \#*) continue ;; esac
-    nm_has "$ARM_SYS" "$s" && a_hit=$((a_hit + 1)) && bad "arm64 libSystem unexpectedly exports $s"
+    if grep -qx "$s" <<< "$a_syms"; then a_hit=$((a_hit + 1)); else bad "arm64 libSystem missing $s"; fi
   done < "$UNEXPORT"
-  [ "$a_hit" -eq 0 ] && ok "arm64 libSystem exports none of the 9 ($ARM_SYS)" \
-    || bad "arm64 libSystem hit $a_hit/9 (drop would be right only if this is 9)"
+  [ "$a_hit" -eq 9 ] && ok "arm64 libSystem exports all 9 ($ARM_SYS)" \
+    || bad "arm64 libSystem hit $a_hit/9"
 else
   echo "  skip arm64 libSystem (no ARM64 Mach-O libSystem.B.dylib in scratch/)"
 fi
