@@ -65,8 +65,9 @@ public enum UIAutomationCommand: Equatable {
     case snapshot(name: String)
     /// `screenshot <path>` (or `-o <path>`): a PNG at the session scale.
     case screenshot(path: String)
-    /// `ui-tree [--json] [--labelled] [-o <path>]`.
-    case uiTree(json: Bool, labelled: Bool, path: String?)
+    /// `ui-tree [--json] [--labelled] [--at <x>,<y>] [-o <path>]`. `--at` prints only the element
+    /// drawn on top at that normalized point, with its children, as `stupidsim ui-tree --at`.
+    case uiTree(json: Bool, labelled: Bool, path: String?, at: CGPoint? = nil)
     /// `quit`: end the session (and the app).
     case quit
 
@@ -196,8 +197,13 @@ public enum UIAutomationCommand: Equatable {
             let json = flag("--json")
             let labelled = flag("--labelled")
             let path = try option("-o", "--output")
+            let at = try option("--at").map { text -> CGPoint in
+                let parts = text.split(separator: ",").map { String($0) }
+                guard parts.count == 2 else { throw fail("--at takes x,y between 0 and 1, such as 0.5,0.9") }
+                return CGPoint(x: CGFloat(try coordinate(parts[0], "x")), y: CGFloat(try coordinate(parts[1], "y")))
+            }
             try noneLeft()
-            return .uiTree(json: json, labelled: labelled, path: path)
+            return .uiTree(json: json, labelled: labelled, path: path, at: at)
         case "quit":
             try noneLeft()
             return .quit
@@ -468,12 +474,38 @@ public final class UIAutomationSession {
             if after.width == before.width, after.height == before.height, after.pixels == before.pixels {
                 finishCommand(ExitCode.unchanged, "the screen did not change")
             } else {
-                finishCommand(ExitCode.ok, "")
+                finishCommand(ExitCode.ok, Self.verifiedLine(before: before, after: after))
             }
         }
     }
 
     private var verifyBefore: Bitmap?
+
+    /// `stupidsim`'s verdict line for a changed screen: how many pixels changed and their bounding
+    /// box, in the pixels of the `verifyScale` renders. A size change counts the whole frame.
+    static func verifiedLine(before: Bitmap, after: Bitmap) -> String {
+        guard after.width == before.width, after.height == before.height else {
+            return "verified: \(after.width * after.height) pixels changed in \(after.width)x\(after.height) at 0,0\n"
+        }
+        var count = 0
+        var minX = Int.max, minY = Int.max, maxX = -1, maxY = -1
+        before.pixels.withUnsafeBufferPointer { a in
+            after.pixels.withUnsafeBufferPointer { b in
+                for y in 0..<after.height {
+                    let row = y * after.width * 4
+                    for x in 0..<after.width {
+                        let i = row + x * 4
+                        guard a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2] || a[i + 3] != b[i + 3]
+                        else { continue }
+                        count += 1
+                        minX = min(minX, x); maxX = max(maxX, x)
+                        minY = min(minY, y); maxY = max(maxY, y)
+                    }
+                }
+            }
+        }
+        return "verified: \(count) pixels changed in \(maxX - minX + 1)x\(maxY - minY + 1) at \(minX),\(minY)\n"
+    }
 
     /// What the window shows, by value: geometry, visibility, colours, text,
     /// images and content versions of every visible view, but not object
@@ -670,10 +702,20 @@ public final class UIAutomationSession {
         case .screenshot(let path):
             write(render(window, scale: configuration.scale).pngData(), to: path)
             finishCommand(ExitCode.ok, path + "\n")
-        case .uiTree(let json, let labelled, let path):
+        case .uiTree(let json, let labelled, let path, let at):
             window.layoutIfNeeded()
-            let tree = UIAutomationTree.snapshot(of: window, applicationLabel: configuration.applicationLabel)
-            let text = json ? UIAutomationTree.json(tree) : UIAutomationTree.text(tree, labelled: labelled)
+            var tree = UIAutomationTree.snapshot(of: window, applicationLabel: configuration.applicationLabel)
+            let screen = tree.frame
+            if let at {
+                let hit = UIAutomationTree.element(at: point(Double(at.x), Double(at.y)), in: tree)
+                guard let hit else {
+                    finishCommand(ExitCode.failed, "no accessible element at \(at.x),\(at.y)")
+                    return
+                }
+                tree = hit
+            }
+            let text = json
+                ? UIAutomationTree.json(tree) : UIAutomationTree.text(tree, labelled: labelled, screen: screen)
             if let path {
                 write(Array(text.utf8), to: path)
                 finishCommand(ExitCode.ok, path + "\n")

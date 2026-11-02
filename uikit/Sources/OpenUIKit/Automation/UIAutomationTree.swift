@@ -156,14 +156,17 @@ public enum UIAutomationTree {
     /// `Role "label" title="…" value="…" id=… @ x,y` (centre in normalized
     /// coordinates, absent off screen). `labelled` keeps only elements with
     /// a label, title, identifier or value, unindented.
-    public static func text(_ root: UIAutomationElement, labelled: Bool = false) -> String {
+    /// `screen` is what centres are measured against: the window, which is `root`'s frame unless
+    /// `root` is a subtree (`ui-tree --at`).
+    public static func text(_ root: UIAutomationElement, labelled: Bool = false, screen: CGRect? = nil) -> String {
+        let screen = screen ?? root.frame
         var lines: [String] = []
         func visit(_ element: UIAutomationElement, depth: Int) {
             let isLabelled = element.label != nil || element.title != nil
                 || element.identifier != nil || element.value != nil
             if !labelled || isLabelled {
                 let indent = String(repeating: "  ", count: labelled ? 0 : depth)
-                lines.append(indent + describe(element, screen: root.frame))
+                lines.append(indent + describe(element, screen: screen))
             }
             for child in element.children { visit(child, depth: depth + 1) }
         }

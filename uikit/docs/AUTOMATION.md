@@ -25,7 +25,9 @@ after each step, with no window system. It is generic: any app hosted by the Swi
     `settleTimeoutTurns` (900, ~15 s) with the reason (`diagnoseSettling` logs which views keep
     changing; `diagnoseInput` logs each touch's hit view and recognizer states).
   - `--verify` (as `stupidsim`): settle first (else exit 3), render at `verifyScale` (1x) before
-    and after the input, exit 2 when the pixels are identical.
+    and after the input, exit 2 when the pixels are identical. A change answers with
+    `stupidsim`'s verdict line, `verified: <n> pixels changed in <w>x<h> at <x>,<y>`, in the
+    pixels of the `verifyScale` renders.
   - the caret is held solid (`UITextInputState.solidHold = .infinity`) so frames don't depend on
     the blink phase.
   - `type` and `key` need a focused input (exit 1 "nothing has keyboard focus" otherwise) and
@@ -118,7 +120,11 @@ normalized 0..1 as `stupidsim` takes them; `#` comments and blank lines are igno
     key <name>... [--repeat N] [--verify]                    backspace|delete, return|enter,
                                                              left, right, up, down, space, tab, a character
     snapshot <name>          <name>.png, <name>.tree.txt, <name>.tree.json (+ host extras)
-    screenshot <path> | ui-tree [--json] [--labelled] [-o <path>] | quit
+    screenshot <path> | ui-tree [--json] [--labelled] [--at <x>,<y>] [-o <path>] | quit
+
+`ui-tree --at x,y` prints only the deepest element whose frame contains that normalized point
+(drawn last wins), with its children, as `stupidsim ui-tree --at`; centres stay measured against
+the window. No element there exits 1.
 
 Unsupported keys (escape, home/end, modifier chords) are rejected, not ignored.
 
