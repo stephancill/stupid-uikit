@@ -83,9 +83,17 @@ private class _SwiftUIPassthroughView: UIView {
 private final class _SwiftUIButtonControl: UIControl {
     let normalHost = _SwiftUIPassthroughView()
     let pressedHost = _SwiftUIPassthroughView()
+    /// What a tap does, from the latest placement. Held here rather than as
+    /// control targets so a pressed control that survives a rebuild
+    /// (`_SwiftUIHostingView.keepPressedControls`) takes the new actions.
+    var tapActions: [@MainActor (UIControl) -> Void] = []
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        addTarget(for: .touchUpInside) { [weak self] _, _ in
+            guard let self else { return }
+            for action in self.tapActions { action(self) }
+        }
         addSubview(normalHost)
         addSubview(pressedHost)
         // MEASURED realapp_hackers_feed_light, iPhone 16 @3x / iOS 26.1:
@@ -2415,6 +2423,7 @@ private final class _SwiftUIHostingView: UIView {
             representedIdentities.insert(ObjectIdentifier(focusedEditor))
         }
         let placementMark = _SwiftUIEditorPlacement.count
+        let pressedControls = pressedButtonControls()
         for child in subviews
         where !representedIdentities.contains(ObjectIdentifier(child)) {
             child.removeFromSuperview()
@@ -2438,6 +2447,7 @@ private final class _SwiftUIHostingView: UIView {
                 safe, extendedTo: bounds, edges: _ViewRenderer.safeAreaEdgesExtended(by: node))
         }
         _ViewRenderer.place(node, in: rect, on: self, environment: environment)
+        keepPressedControls(pressedControls)
         if let focusedEditor, focusedEditor.lastPlacement <= placementMark {
             // The focused input is no longer in the view: it stops editing.
             _openResignFocus(in: focusedEditor)
@@ -2445,6 +2455,75 @@ private final class _SwiftUIHostingView: UIView {
         }
         _finishRebuildingSubviews()
         didCompleteLayout?()
+    }
+
+    /// Button controls this hosting view placed that a touch is on: tracking
+    /// it, or hit by it and still waiting for it behind a scroll view's
+    /// content-touch delay. Frames are in this view; nested hosting views
+    /// keep their own.
+    private func pressedButtonControls() -> [(control: _SwiftUIButtonControl, frame: CGRect)] {
+        let touched = window?._activeTouchViews ?? []
+        return placedButtonControls().filter { entry in
+            entry.control.isTracking || touched.contains { $0 === entry.control || $0.isDescendant(of: entry.control) }
+        }
+    }
+
+    private func placedButtonControls() -> [(control: _SwiftUIButtonControl, frame: CGRect)] {
+        var found: [(control: _SwiftUIButtonControl, frame: CGRect)] = []
+        func visit(_ view: UIView) {
+            for child in view.subviews where !(child is _SwiftUIHostingView) {
+                if let control = child as? _SwiftUIButtonControl {
+                    found.append((control, control.convert(control.bounds, to: self)))
+                }
+                visit(child)
+            }
+        }
+        visit(self)
+        return found
+    }
+
+    /// SwiftUI keeps one platform control per Button while the Button stays
+    /// in the view, so a press survives the view updating around it (an
+    /// image arriving while the finger is down). This renderer rebuilds every
+    /// UIView on layout, which left the touch on a detached control whose
+    /// lift landed outside it: the tap was lost. A pressed control goes back
+    /// in place of the control the rebuild made where it was (the same
+    /// identifier, under its centre), taking that control's frame, label and
+    /// actions, so the touch ends on a control in the window.
+    private func keepPressedControls(_ pressed: [(control: _SwiftUIButtonControl, frame: CGRect)]) {
+        guard !pressed.isEmpty else { return }
+        let placed = placedButtonControls()
+        func mismatch(_ a: CGRect, _ b: CGRect) -> CGFloat {
+            abs(a.width - b.width) + abs(a.height - b.height)
+        }
+        for (old, frame) in pressed {
+            let centre = CGPoint(x: frame.midX, y: frame.midY)
+            let replacement = placed
+                .filter {
+                    $0.control !== old && $0.frame.contains(centre)
+                        && $0.control.accessibilityIdentifier == old.accessibilityIdentifier
+                }
+                .min { mismatch($0.frame, frame) < mismatch($1.frame, frame) }?.control
+            guard let new = replacement, let parent = new.superview,
+                  let index = parent.subviews.firstIndex(where: { $0 === new }) else { continue }
+            old.frame = new.frame
+            old.isEnabled = new.isEnabled
+            old.accessibilityTraits = new.accessibilityTraits
+            old.accessibilityHint = new.accessibilityHint
+            old.accessibilityLabel = new.accessibilityLabel
+            old.accessibilityValue = new.accessibilityValue
+            old.isAccessibilityElement = new.isAccessibilityElement
+            old._automationAccessibility = new._automationAccessibility
+            old.tapActions = new.tapActions
+            for (from, to) in [(new.normalHost, old.normalHost), (new.pressedHost, old.pressedHost)] {
+                for stale in to.subviews { stale.removeFromSuperview() }
+                for view in from.subviews { to.addSubview(view) }
+            }
+            new.removeFromSuperview()
+            parent.insertSubview(old, at: index)
+            old.setNeedsLayout()
+            old.refreshAppearance()
+        }
     }
 
     /// The outermost retained editor this hosting view placed that holds
@@ -3636,9 +3715,9 @@ private enum _ViewRenderer {
                 control.accessibilityHint = "Destructive action"
             }
             control.isEnabled = environment.isEnabled
-            control.addTarget(for: .touchUpInside) { _, _ in action() }
+            control.tapActions.append { _ in action() }
             for simultaneousAction in environment.simultaneousTapActions {
-                control.addTarget(for: .touchUpInside) { _, _ in simultaneousAction() }
+                control.tapActions.append { _ in simultaneousAction() }
             }
             surface.addSubview(control)
             place(
@@ -4059,8 +4138,7 @@ private enum _ViewRenderer {
             control.accessibilityIdentifier = "SwiftUI.NavigationLink"
             control.accessibilityTraits = [.button]
             control.isEnabled = environment.isEnabled
-            control.addTarget(for: .touchUpInside) { [weak control] _, _ in
-                guard let control else { return }
+            control.tapActions.append { control in
                 _openFollowNavigationLink(target, from: _enclosingViewController(for: control))
             }
             surface.addSubview(control)

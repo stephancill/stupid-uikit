@@ -34,6 +34,13 @@ extension OpenUIKitRuntime {
     /// needs no `OPENUIKIT_HOST_TURNS` bound. Installed by
     /// `UIAutomationSession.install()`; nil (the default) changes nothing.
     public static var hostTurnHook: (@MainActor (Double) -> Bool)?
+
+    /// Called by an application host loop once per turn before the windows
+    /// tick, with the time they are about to tick to. Input due by then is
+    /// delivered first, as a device delivers a lift before anything that
+    /// happens after it: ticking first let a slow turn carry recognizer time
+    /// past a scheduled lift, so a 0.4 s tap fired a 0.5 s long press.
+    public static var hostInputHook: (@MainActor (Double) -> Void)?
 }
 
 /// One automation step. The text forms (`UIAutomationCommand.parse`) are
@@ -285,6 +292,25 @@ public final class UIAutomationSession {
         precondition(OpenUIKitRuntime.hostTurnHook == nil, "an automation session is already installed")
         UITextInputState.solidHold = .infinity
         OpenUIKitRuntime.hostTurnHook = { [self] time in turn(at: time) }
+        OpenUIKitRuntime.hostInputHook = { [self] time in deliverDueInput(at: time) }
+    }
+
+    /// Whether this turn's input events were delivered before the windows
+    /// ticked (`hostInputHook`); the turn then only checks for completion.
+    private var deliveredBeforeTick = false
+
+    /// Delivers the running input's events due by `time`, before the
+    /// windows tick to it. The input's first events stay with the turn that
+    /// starts it.
+    private func deliverDueInput(at time: Double) {
+        guard case .input(var input) = phase, input.start != nil, let window else { return }
+        window.layoutIfNeeded()
+        deliveredBeforeTick = true
+        if let lost = deliver(&input, window: window, time: time) {
+            finishCommand(ExitCode.failed, lost)
+        } else {
+            phase = .input(input)
+        }
     }
 
     // MARK: - State
@@ -346,6 +372,8 @@ public final class UIAutomationSession {
 
     private func turn(at time: Double) -> Bool {
         turns += 1
+        let preDelivered = deliveredBeforeTick
+        deliveredBeforeTick = false
         if window == nil {
             guard let window = UIApplication.shared.keyWindow ?? UIApplication.shared.windows.first else {
                 return true
@@ -407,7 +435,8 @@ public final class UIAutomationSession {
         case .input(var input):
             window.layoutIfNeeded()
             if input.start == nil { input.start = time }
-            if let lost = deliver(&input, window: window, time: time) {
+            let lost = preDelivered ? nil : deliver(&input, window: window, time: time)
+            if let lost {
                 finishCommand(ExitCode.failed, lost)
             } else if input.next >= input.events.count {
                 if !input.settle {
@@ -424,6 +453,7 @@ public final class UIAutomationSession {
         if finished {
             if case .controlDirectory(let directory) = source { _ = cpio_remove(directory + "/ready") }
             OpenUIKitRuntime.hostTurnHook = nil
+            OpenUIKitRuntime.hostInputHook = nil
             return false
         }
         return true

@@ -269,6 +269,11 @@ open class UIWindow: UIView {
 
     /// Active touches by host-provided touch identifier.
     var activeTouches: [Int: UITouch] = [:]
+
+    /// The views the window's active touches were hit-tested to (a touch
+    /// keeps its view until it ends). The SwiftUI layer keeps these views
+    /// across its rebuilds, as SwiftUI keeps a pressed control.
+    public var _activeTouchViews: [UIView] { activeTouches.values.compactMap(\.view) }
     /// Previous tap-sequence terminus (for tapCount).
     var lastTapEnd: (timestamp: TimeInterval, location: CGPoint, tapCount: Int)?
 

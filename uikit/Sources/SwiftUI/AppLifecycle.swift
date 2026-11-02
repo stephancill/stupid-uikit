@@ -492,6 +492,7 @@ enum _OpenSwiftUIApplicationLifecycle {
             // DispatchQueue.main block or MainActor job (every `.task`) ever runs.
             _applicationHostDrainMainQueue?()
             OpenUIKitRuntime.animationTime = elapsed
+            OpenUIKitRuntime.hostInputHook?(elapsed)
             for window in windows {
                 window.tick(timestamp: elapsed)
                 windowTicks += 1

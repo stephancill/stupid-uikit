@@ -12,7 +12,12 @@ after each step, with no window system. It is generic: any app hosted by the Swi
   after the main queue drained and the windows ticked, with the turn's host-clock time. Returning
   false ends the loop exactly as a bounded `OPENUIKIT_HOST_TURNS` count does
   (`_hostWillTerminate`, the app's entry point returns). Nil by default: nothing changes.
-- `UIAutomationSession` — installs itself as the hook and runs commands:
+- `OpenUIKitRuntime.hostInputHook: (@MainActor (Double) -> Void)?` — called by the same loop
+  once per turn *before* the windows tick, with the time they are about to tick to. The session
+  delivers input events due by then first, so a scheduled lift reaches the recognizers before a
+  slow turn's clock carries them past it (otherwise a 0.4 s tap after a long turn fired a 0.5 s
+  long press, and the context menu cancelled the tap).
+- `UIAutomationSession` — installs itself as the hooks and runs commands:
   - input goes through the ordinary event path: `UIWindow.sendTouch` (hit testing, gesture
     recognizers, scroll physics, delayed content touches, the software keyboard window),
     `sendText`, `sendKey`. Touch phases are stamped with their scheduled times on the host clock;
@@ -127,6 +132,17 @@ normalized 0..1 as `stupidsim` takes them; `#` comments and blank lines are igno
 the window. No element there exits 1.
 
 Unsupported keys (escape, home/end, modifier chords) are rejected, not ignored.
+
+## Presses across SwiftUI rebuilds
+
+The SwiftUI layer rebuilds its UIViews on layout, where SwiftUI keeps one platform control per
+Button. A rebuild while a finger was down (an image arriving under it) left the touch on a detached
+control, so the lift landed outside it and the tap was lost. The hosting view now keeps a pressed
+button control (tracking, or the view of an active touch still behind a scroll view's
+content-touch delay, `UIWindow._activeTouchViews`): it goes back in place of the control the
+rebuild made under its centre, taking that control's frame, label and actions.
+stupid-app-preview's `scripts/stupidsim/tap-race.sh` reproduces both this and the tick-order
+loss above with a proxy that releases the images mid-tap.
 
 ## Related fixes made with this module
 
