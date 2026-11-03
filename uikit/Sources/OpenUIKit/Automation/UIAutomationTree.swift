@@ -186,18 +186,31 @@ public enum UIAutomationTree {
         )
     }
 
-    /// iOS lists a navigation bar before the content it floats over. The
-    /// builder orders sibling views that way; a bar collected as one "Nav
-    /// bar" group from a different branch of views is moved ahead of its
-    /// siblings here, at every level.
+    /// iOS lists a navigation bar beside and before the content it floats
+    /// over (MEASURED iOS 27 simulator, stupid social's root: `Group
+    /// id=Social` "Nav bar", then the content's `Group`). The builder orders
+    /// sibling views that way; a bar collected as one "Nav bar" group inside
+    /// the content's group (its view sits in a scrolling container) is
+    /// lifted out of that group and put ahead of its siblings, at every
+    /// level.
     static func navigationBarsFirst(_ elements: [UIAutomationElement]) -> [UIAutomationElement] {
-        let ordered = elements.map { element -> UIAutomationElement in
+        let isBar = { (element: UIAutomationElement) in element.roleDescription == "Nav bar" }
+        var bars: [UIAutomationElement] = []
+        var rest: [UIAutomationElement] = []
+        for element in elements {
             var element = element
             element.children = navigationBarsFirst(element.children)
-            return element
+            if isBar(element) {
+                bars.append(element)
+                continue
+            }
+            if element.role == "AXGroup" {
+                bars.append(contentsOf: element.children.filter(isBar))
+                element.children.removeAll(where: isBar)
+            }
+            rest.append(element)
         }
-        let isBar = { (element: UIAutomationElement) in element.roleDescription == "Nav bar" }
-        return ordered.filter(isBar) + ordered.filter { !isBar($0) }
+        return bars + rest
     }
 
     /// The container of the topmost presentation that covers its presenter
