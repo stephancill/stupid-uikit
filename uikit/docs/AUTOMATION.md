@@ -69,6 +69,17 @@ properties but drives no assistive technology):
   Composed labels use symbol labels only when the content has no other label; a control labelled
   only by symbols, or by none, reports its symbol name as id.
 - the frameworks' own identifiers (`SwiftUI.…`, `OpenUIKit.…`) are never reported.
+- only what iOS has built: a List or Form keeps the cells and section headers that intersect its
+  bounds (a collection view's), and a cell whose content is one button is that button with the
+  cell's frame (row insets included); a lazy stack keeps the rows within one viewport of the
+  visible region (`UIView._automationLazyStackRows`, recorded by the SwiftUI layer), so a row the
+  preview built only for its own prefetch is left out.
+- once a presentation that covers its presenter (`shouldRemovePresentersView`: full screen) is in
+  the window, only its container and what is above it are read: UIKit takes the presenter's view
+  out of the window then, and OpenUIKit leaves it in place.
+- a navigation bar whose top item has trailing bar button items is one empty `Group id=<title>`
+  ("Nav bar") with no title, items or back button, as iOS 27 reports it; a bar with only a back
+  button (or nothing) lists its heading and back button.
 
 The SwiftUI layer states what its views mean through `UIView._automationAccessibility`
 (`_UIAutomationAccessibility`, stored in the accessibility side table): `Image` views are Image
@@ -81,9 +92,8 @@ one element whose label combines (or ignores) the content.
 
 Known differences from the iOS 27 simulator: SF Symbols outside OpenUIKit's label table (generated
 for stupid social's symbols) and languages other than English have no label (the id carries the
-name), the navigation bar's large title is a Heading where iOS 27 sometimes reports an empty
-`Group id=<title>` "Nav bar", and element order is view order (iOS sorts some containers
-geometrically).
+name; iOS also spells some per region, "Favourite" in en_ZA), and element order is view order
+(iOS sorts some containers geometrically).
 
 ## Text input
 

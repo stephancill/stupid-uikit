@@ -253,23 +253,28 @@ final class _OpenScrollProxyStorage {
 
     func scrollTo(_ id: AnyHashable, anchor: UnitPoint?) {
         guard let scrollView, let target = targetRects[id] else { return }
-        let point = anchor ?? .center
-        let x = target.minX - max(0, scrollView.bounds.width - target.width) * point.x
-        let y = target.minY - max(0, scrollView.bounds.height - target.height) * point.y
+        scrollView.setContentOffset(
+            Self.offset(showing: target, at: anchor ?? .center, in: scrollView),
+            animated: _OpenAnimationContext.current != nil
+        )
+        notifyAfterScroll?()
+    }
+
+    /// The content offset that puts `target` (content coordinates) at
+    /// `anchor` of the viewport, clamped to the scrollable range.
+    static func offset(showing target: CGRect, at anchor: UnitPoint, in scrollView: UIScrollView) -> CGPoint {
+        let x = target.minX - max(0, scrollView.bounds.width - target.width) * anchor.x
+        let y = target.minY - max(0, scrollView.bounds.height - target.height) * anchor.y
         let maxX = max(-scrollView.contentInset.left,
                        scrollView.contentSize.width - scrollView.bounds.width
                            + scrollView.contentInset.right)
         let maxY = max(-scrollView.contentInset.top,
                        scrollView.contentSize.height - scrollView.bounds.height
                            + scrollView.contentInset.bottom)
-        scrollView.setContentOffset(
-            CGPoint(
-                x: min(max(x, -scrollView.contentInset.left), maxX),
-                y: min(max(y, -scrollView.contentInset.top), maxY)
-            ),
-            animated: _OpenAnimationContext.current != nil
+        return CGPoint(
+            x: min(max(x, -scrollView.contentInset.left), maxX),
+            y: min(max(y, -scrollView.contentInset.top), maxY)
         )
-        notifyAfterScroll?()
     }
 }
 

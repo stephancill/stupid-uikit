@@ -376,6 +376,14 @@ private final class _SwiftUITextView: UITextView, UITextViewDelegate, _SwiftUIRe
     }
 }
 
+/// What a List cell means to the accessibility tree (`UIAutomationTree`).
+@MainActor
+private let _listCellAccessibility: _UIAutomationAccessibility = {
+    var note = _UIAutomationAccessibility()
+    note.isListCell = true
+    return note
+}()
+
 @MainActor
 private final class _SwiftUIScrollView: UIScrollView {
     var retainedCoordinator: _SwiftUIScrollCoordinator?
@@ -524,7 +532,66 @@ private final class _SwiftUIScrollCoordinator: _SwiftUIScrollCoordinatorBase, UI
         super.init()
     }
 
-    func scrollViewDidScroll(_ scrollView: UIScrollView) { notify(scrollView) }
+    /// `scrollPosition(id:anchor:)` on this scroll view.
+    var position: _OpenScrollPositionBinding?
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        notify(scrollView)
+        // As SwiftUI does, scrolling writes the target now at the anchor, so
+        // a later layout finds the binding and the offset in agreement.
+        if let position, let current = targetAtAnchor(of: scrollView, anchor: position.anchor),
+           current != position.get() {
+            position.set(current)
+        }
+    }
+
+    /// Scrolls the bound target to the anchor when another target is there
+    /// (the binding was set: initially, or by the app).
+    func applyPosition(to scrollView: UIScrollView) {
+        guard let position, let wanted = position.get(), let target = storage.targetRects[wanted],
+              targetAtAnchor(of: scrollView, anchor: position.anchor) != wanted else { return }
+        // This scroll view, not `storage.scrollView`: nested scroll views
+        // share the storage, which then names the last one placed.
+        scrollView.setContentOffset(
+            _OpenScrollProxyStorage.offset(showing: target, at: position.anchor ?? .top, in: scrollView),
+            animated: false
+        )
+    }
+
+    /// The target containing the anchor point of the viewport (content
+    /// coordinates), or the nearest one along the scroll axis.
+    func targetAtAnchor(of scrollView: UIScrollView, anchor: UnitPoint?) -> AnyHashable? {
+        guard let position else { return nil }
+        let anchor = anchor ?? .top
+        let viewport = CGRect(origin: scrollView.contentOffset, size: scrollView.bounds.size)
+        let point = CGPoint(
+            x: viewport.minX + viewport.width * anchor.x,
+            y: viewport.minY + viewport.height * anchor.y
+        )
+        let vertical = scrollView.contentSize.height > scrollView.bounds.height
+            || scrollView.contentSize.width <= scrollView.bounds.width
+        var best: (id: AnyHashable, distance: CGFloat, rect: CGRect)?
+        for (id, rect) in storage.targetRects
+        where rect.width > 0 && rect.height > 0 && position.matches(id) {
+            let distance: CGFloat
+            if vertical {
+                distance = point.y < rect.minY ? rect.minY - point.y
+                    : point.y >= rect.maxY ? point.y - rect.maxY + 0.0001 : 0
+            } else {
+                distance = point.x < rect.minX ? rect.minX - point.x
+                    : point.x >= rect.maxX ? point.x - rect.maxX + 0.0001 : 0
+            }
+            // Ties (nested targets) go to the first in reading order.
+            if let current = best,
+               distance > current.distance
+                   || distance == current.distance
+                       && (rect.minY, rect.minX) >= (current.rect.minY, current.rect.minX) {
+                continue
+            }
+            best = (id, distance, rect)
+        }
+        return best?.id
+    }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         transition(to: .interacting, scrollView: scrollView)
@@ -2604,6 +2671,8 @@ private struct _RenderEnvironment {
     /// lazy stacks track its viewport.
     var lazyScrollView: UIScrollView?
     var scrollVisibilityObservers: [_OpenScrollVisibilityObserver] = []
+    /// `scrollPosition(id:anchor:)` for the next scroll view placed.
+    var scrollPosition: _OpenScrollPositionBinding?
     var scrollGeometryObservers: [_OpenScrollGeometryObserver] = []
     var scrollPhaseObservers: [_OpenScrollPhaseObserver] = []
     var isScrollEnabled = true
@@ -3312,7 +3381,7 @@ private enum _ViewRenderer {
                  .accessibilityIdentifier, .alert, .presentation, .clipped, .hidden,
                  .submitLabel, .buttonBorderShape, .accessibilityAction,
                  .identifier, .preference, .preferenceListener,
-                 .scrollVisibility, .scrollGeometry, .geometryObserver,
+                 .scrollVisibility, .scrollPosition, .scrollGeometry, .geometryObserver,
                  .refreshable, .scrollIndicators, .toolbarVisibility,
                  .toolbarBackgroundVisibility, .swipeActions,
                  .listRowSeparator, .searchToolbarBehavior, .projection:
@@ -3838,6 +3907,14 @@ private enum _ViewRenderer {
             measurementEnvironment.measuresUnboundedVerticalScroll = true
             measurementEnvironment.scrollStorage = storage
             measurementEnvironment.lazyScrollView = scrollView
+            // The scroll modifiers bind this scroll view, not scroll views in
+            // its content: a carousel's `onScrollGeometryChange` also ran for
+            // every nested row's horizontal scroll view, so the value it
+            // wrote flipped between their offsets on each rebuild.
+            measurementEnvironment.scrollPosition = nil
+            measurementEnvironment.scrollGeometryObservers = []
+            measurementEnvironment.scrollVisibilityObservers = []
+            measurementEnvironment.scrollPhaseObservers = []
             let measured = measure(
                 content,
                 proposed: scrollView.bounds.size,
@@ -3872,6 +3949,7 @@ private enum _ViewRenderer {
                 visibilityObservers: environment.scrollVisibilityObservers,
                 phaseObservers: environment.scrollPhaseObservers
             )
+            coordinator.position = environment.scrollPosition
             scrollView.retainedCoordinator = coordinator
             scrollView.delegate = coordinator
             storage.coordinator = coordinator
@@ -3879,6 +3957,7 @@ private enum _ViewRenderer {
                 guard let scrollView, let coordinator else { return }
                 coordinator.notify(scrollView)
             }
+            coordinator.applyPosition(to: scrollView)
             coordinator.notify(scrollView)
         case .tabView(let pages, let selection, let setSelection, let indexDisplayMode):
             guard let selected = _openSelectedTabPage(
@@ -4937,6 +5016,10 @@ private enum _ViewRenderer {
                 var next = environment
                 next.scrollVisibilityObservers.append(observer)
                 place(content, in: rect, on: surface, environment: next)
+            case .scrollPosition(let binding):
+                var next = environment
+                next.scrollPosition = binding
+                place(content, in: rect, on: surface, environment: next)
             case .scrollGeometry(let observer):
                 var next = environment
                 next.scrollGeometryObservers.append(observer)
@@ -5313,6 +5396,20 @@ private enum _ViewRenderer {
             }
         }
         layout.state.hasMountedLazily = true
+        // The built rows, for the accessibility tree (UIAutomationTree keeps
+        // the ones iOS would have built).
+        if let scrollView {
+            var recorded = scrollView._automationLazyStackRows
+                ?? _UIAutomationLazyStackRows(rows: [], isVertical: true)
+            for offset in metrics.built.indices {
+                let index = layout.window.lowerBound + offset
+                guard index < metrics.tops.count else { continue }
+                let row = CGRect(x: rect.minX, y: rect.minY + metrics.tops[index],
+                                 width: rect.width, height: metrics.heights[index])
+                recorded.rows.append(surface.convert(row, to: scrollView))
+            }
+            scrollView._automationLazyStackRows = recorded
+        }
         // Every element is a scroll target by its ForEach ID, built or not,
         // so ScrollViewReader can reach rows that are not materialised. An
         // explicit `.id` placed above keeps its exact frame.
@@ -5442,6 +5539,7 @@ private enum _ViewRenderer {
             )
             rowView.backgroundColor = plain ? .clear : .secondarySystemBackground
             rowView.accessibilityIdentifier = "SwiftUI.Section.row.\(index)"
+            rowView._automationAccessibility = _listCellAccessibility
             section.addSubview(rowView)
             place(
                 row,
@@ -5722,6 +5820,10 @@ private enum _ViewRenderer {
                 host.backgroundColor = list.backgroundColor
                 host.clipsToBounds = true
                 host.accessibilityIdentifier = "SwiftUI.List.row.\(index)"
+                // A plain Section row is not a cell: its rows are (placeSection).
+                var isPlainSection = false
+                if plainSections, case .section = layout.node.kind { isPlainSection = true }
+                if !isPlainSection { host._automationAccessibility = _listCellAccessibility }
                 list.addSubview(host)
                 rowHost = host
                 contentRect = CGRect(
@@ -5944,8 +6046,11 @@ private enum _ViewRenderer {
                 block.accessibilityIdentifier = "\(identifier).header.\(sectionIndex)"
                 // A header is a heading; a control in the header stays a button.
                 let headerIsControl = _listRowAccessibility(header)?.addedTraits.contains(.button) == true
-                block._automationAccessibility = _UIAutomationAccessibility(
+                var headerNote = _UIAutomationAccessibility(
                     addedTraits: headerIsControl ? .button : .header, children: .combine)
+                // A collection view keeps only the supplementary views on screen too.
+                headerNote.isListCell = true
+                block._automationAccessibility = headerNote
                 list.addSubview(block)
                 place(header, in: CGRect(
                         x: 16,
@@ -5983,13 +6088,15 @@ private enum _ViewRenderer {
                     let height = rowFrames[index]
                     let rowView = UIView(frame: CGRect(x: 0, y: rowY, width: cardWidth, height: height))
                     rowView.accessibilityIdentifier = "\(identifier).row.\(sectionIndex).\(index)"
+                    rowView._automationAccessibility = _listCellAccessibility
                     if let background = _listRowBackground(row) {
                         rowView.backgroundColor = .clear
                         place(background, in: rowView.bounds, on: rowView, environment: environment)
                     } else {
                         rowView.backgroundColor = .secondarySystemGroupedBackground
                     }
-                    if let note = _listRowAccessibility(row) {
+                    if var note = _listRowAccessibility(row) {
+                        note.isListCell = true
                         rowView._automationAccessibility = note
                     }
                     card.addSubview(rowView)

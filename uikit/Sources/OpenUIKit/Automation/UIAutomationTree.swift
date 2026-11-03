@@ -50,6 +50,12 @@ public struct _UIAutomationAccessibility {
     /// a label of its own it takes iOS's label for the symbol
     /// (`_UISymbolAccessibility`).
     public var symbolName: String?
+    /// A list cell. iOS's list is a collection view, which keeps only the
+    /// cells that intersect its bounds, and a cell whose content is one
+    /// button is that button with the cell's frame (MEASURED iOS 27
+    /// simulator, stupid social's feed: rows reported 0..390 wide with
+    /// their insets, the last one partly on screen).
+    public var isListCell = false
 
     public init(
         role: Role? = nil,
@@ -72,11 +78,33 @@ public struct _UIAutomationAccessibility {
     }
 }
 
+/// The rows a SwiftUI lazy stack built in a scroll view, in the scroll
+/// view's content coordinates. A SwiftUI lazy stack keeps the rows within
+/// about one viewport of the visible region (MEASURED iOS 27 simulator,
+/// stupid social's 112 pt story pager: the page above, the page shown and
+/// the page below, not the next), so the tree leaves out a row further out
+/// even when the preview built it for its own prefetch.
+public struct _UIAutomationLazyStackRows {
+    public var rows: [CGRect]
+    public var isVertical: Bool
+
+    public init(rows: [CGRect], isVertical: Bool) {
+        self.rows = rows
+        self.isVertical = isVertical
+    }
+}
+
 extension UIView {
     /// See `_UIAutomationAccessibility`. Nil for ordinary UIKit views.
     public var _automationAccessibility: _UIAutomationAccessibility? {
         get { _accessibility.automation }
         set { _accessibility.automation = newValue }
+    }
+
+    /// See `_UIAutomationLazyStackRows`; set on a scroll view.
+    public var _automationLazyStackRows: _UIAutomationLazyStackRows? {
+        get { _accessibility.automationLazyStackRows }
+        set { _accessibility.automationLazyStackRows = newValue }
     }
 }
 
@@ -140,9 +168,15 @@ public enum UIAutomationTree {
         window.layoutIfNeeded()
         var builder = Builder(window: window)
         var children: [UIAutomationElement] = []
-        for child in window.subviews {
+        var roots = window.subviews
+        if let cover = coveringContainer(in: window),
+           let index = roots.firstIndex(where: { $0 === cover || cover.isDescendant(of: $0) }) {
+            roots = Array(roots[index...])
+        }
+        for child in roots {
             builder.collect(child, Inherited(), into: &children, inGroup: false)
         }
+        children = navigationBarsFirst(children)
         return UIAutomationElement(
             role: "AXApplication",
             roleDescription: "application",
@@ -150,6 +184,34 @@ public enum UIAutomationTree {
             frame: window.bounds,
             children: children
         )
+    }
+
+    /// iOS lists a navigation bar before the content it floats over. The
+    /// builder orders sibling views that way; a bar collected as one "Nav
+    /// bar" group from a different branch of views is moved ahead of its
+    /// siblings here, at every level.
+    static func navigationBarsFirst(_ elements: [UIAutomationElement]) -> [UIAutomationElement] {
+        let ordered = elements.map { element -> UIAutomationElement in
+            var element = element
+            element.children = navigationBarsFirst(element.children)
+            return element
+        }
+        let isBar = { (element: UIAutomationElement) in element.roleDescription == "Nav bar" }
+        return ordered.filter(isBar) + ordered.filter { !isBar($0) }
+    }
+
+    /// The container of the topmost presentation that covers its presenter
+    /// (`shouldRemovePresentersView`: a full-screen presentation). UIKit
+    /// takes the presenter's view out of the window once such a
+    /// presentation is shown, so iOS reads only what is presented (MEASURED
+    /// iOS 27 simulator, stupid social's story viewer, a fullScreenCover:
+    /// none of the feed under it). OpenUIKit leaves the presenter's view in
+    /// place, so the tree reads from this container up.
+    static func coveringContainer(in window: UIWindow) -> UIView? {
+        window.subviews.last { view in
+            guard let container = view as? UIPresentationContainerView, !container.isHidden else { return false }
+            return container.presentation?.shouldRemovePresentersView == true
+        }
     }
 
     /// `stupidsim ui-tree` text: one element per line, indented by depth,
@@ -224,6 +286,9 @@ public enum UIAutomationTree {
     struct Builder {
         let window: UIWindow
         let screen: CGRect
+        /// Lazy stacks being collected: their built rows and the region in
+        /// which iOS would have rows, both in window coordinates.
+        var lazyRegions: [(rows: [CGRect], keep: CGRect)] = []
 
         init(window: UIWindow) {
             self.window = window
@@ -246,9 +311,52 @@ public enum UIAutomationTree {
             // elements without a centre).
             if view.bounds.width > 0,
                frame.maxX <= screen.minX + 0.5 || frame.minX >= screen.maxX - 0.5 { return }
+            // A view inside one lazy-stack row that iOS would not have built.
+            for region in lazyRegions {
+                if let row = region.rows.first(where: { $0.insetBy(dx: -0.5, dy: -0.5).contains(frame) }),
+                   !Self.overlaps(row, region.keep) { return }
+            }
+
+            // iOS 27 reads a navigation bar that carries trailing bar button
+            // items as one empty group named by its title, without the
+            // title, the items or even the back button (MEASURED iOS 27
+            // simulator, stupid social: Social with Search and Settings, and
+            // Search with Filter, are `Group id=<title>` "Nav bar"; Reply,
+            // Settings and Chats, with a back button or nothing, list their
+            // heading and back button as usual).
+            if let bar = view as? UINavigationBar, let item = bar.topItem,
+               !(item.rightBarButtonItems ?? []).isEmpty {
+                out.append(UIAutomationElement(
+                    role: "AXGroup", roleDescription: "Nav bar", identifier: item.title, frame: frame))
+                return
+            }
 
             var inherited = inherited
             let note = view._automationAccessibility
+            if let note, note.isListCell {
+                guard let list = Self.enclosingScrollView(of: view),
+                      Self.overlaps(frame, list.convert(list.bounds, to: window)) else { return }
+                // A plain cell: its one button takes the cell's frame. A cell
+                // that says more (a header, a row's own accessibility) is read
+                // by that note below.
+                if note.role == nil, note.children == nil, note.label == nil, note.value == nil,
+                   note.identifier == nil, note.addedTraits.isEmpty {
+                    var cell: [UIAutomationElement] = []
+                    for child in view.subviews { collect(child, inherited, into: &cell, inGroup: inGroup) }
+                    if cell.count == 1, cell[0].role == "AXButton" { cell[0].frame = frame }
+                    out.append(contentsOf: cell)
+                    return
+                }
+            }
+            let lazyRows = (view as? UIScrollView)?._automationLazyStackRows
+            if let lazyRows, let scrollView = view as? UIScrollView {
+                let visible = scrollView.convert(scrollView.bounds, to: window)
+                let keep = lazyRows.isVertical
+                    ? visible.insetBy(dx: 0, dy: -visible.height)
+                    : visible.insetBy(dx: -visible.width, dy: 0)
+                lazyRegions.append((lazyRows.rows.map { scrollView.convert($0, to: window) }, keep))
+            }
+            defer { if lazyRows != nil { lazyRegions.removeLast() } }
             if let note {
                 inherited.label = inherited.label ?? note.label
                 inherited.hint = inherited.hint ?? note.hint
@@ -287,6 +395,21 @@ public enum UIAutomationTree {
             func first(_ view: UIView) -> Bool { view is UINavigationBar || view is _UINavigationBarBackButton }
             let children = view.subviews.filter(first) + view.subviews.filter { !first($0) }
             for child in children { collect(child, inherited, into: &out, inGroup: inGroup) }
+        }
+
+        /// Whether two rects share more than a hairline.
+        static func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+            let shared = a.intersection(b)
+            return !shared.isNull && shared.width > 0.5 && shared.height > 0.5
+        }
+
+        static func enclosingScrollView(of view: UIView) -> UIScrollView? {
+            var current = view.superview
+            while let candidate = current {
+                if let scrollView = candidate as? UIScrollView { return scrollView }
+                current = candidate.superview
+            }
+            return nil
         }
 
         /// iOS reads a UIKit collection view's elements top to bottom by

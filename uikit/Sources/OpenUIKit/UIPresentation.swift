@@ -119,7 +119,11 @@ public enum UIModalPresentationStyle {
 /// presentation root. Class name is private to compare.py (never part of
 /// scene dumps anyway — layout dumps run before presentation).
 @preconcurrency @MainActor
-final class UIPresentationContainerView: UIView {}
+final class UIPresentationContainerView: UIView {
+    /// The presentation this container holds (the accessibility tree asks
+    /// whether it covers its presenter).
+    weak var presentation: UIPresentationController?
+}
 
 /// The dim behind a sheet: swallows every touch (tap-to-dismiss is NOT the
 /// default; minimal isModalInPresentation semantics).
@@ -1244,6 +1248,7 @@ extension UIViewController {
             ?? vc._makeDefaultPresentationController(presenting: self)
         pc.presentingViewController = self
         pc.containerView = container
+        container.presentation = pc
         root.addSubview(container)
         // The sheet's detent frame reads the container's safe area (a
         // custom detent is `value + bottom safe area`, measured), and the

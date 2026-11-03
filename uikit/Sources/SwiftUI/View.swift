@@ -357,6 +357,16 @@ struct _OpenScrollVisibilityObserver {
     let deliver: @MainActor ([AnyHashable]) -> Void
 }
 
+/// `scrollPosition(id:anchor:)`: the scroll target ID at `anchor` of the
+/// viewport, read and written through the binding.
+struct _OpenScrollPositionBinding {
+    let get: @MainActor () -> AnyHashable?
+    let set: @MainActor (AnyHashable?) -> Void
+    let anchor: UnitPoint?
+    /// Whether a scroll target's ID is of the binding's type.
+    let matches: (AnyHashable) -> Bool
+}
+
 struct _OpenScrollGeometryObserver {
     let read: @MainActor (ScrollGeometry) -> Any
     let equals: (Any, Any) -> Bool
@@ -484,6 +494,7 @@ enum _OpenViewModification {
     case preference(_OpenPreferenceRecord)
     case preferenceListener(_OpenPreferenceListener)
     case scrollVisibility(_OpenScrollVisibilityObserver)
+    case scrollPosition(_OpenScrollPositionBinding)
     case scrollGeometry(_OpenScrollGeometryObserver)
     case geometryObserver(_OpenGeometryObserver)
     case refreshable(@MainActor () async -> Void)
@@ -631,6 +642,7 @@ fileprivate enum _OpenViewModifier {
     case preference(_OpenPreferenceRecord)
     case preferenceListener(_OpenPreferenceListener)
     case scrollVisibility(_OpenScrollVisibilityObserver)
+    case scrollPosition(_OpenScrollPositionBinding)
     case scrollGeometry(_OpenScrollGeometryObserver)
     case geometryObserver(_OpenGeometryObserver)
     case refreshable(@MainActor () async -> Void)
@@ -822,6 +834,7 @@ fileprivate enum _OpenViewModifier {
         case .preference(let record): return .preference(record)
         case .preferenceListener(let listener): return .preferenceListener(listener)
         case .scrollVisibility(let observer): return .scrollVisibility(observer)
+        case .scrollPosition(let binding): return .scrollPosition(binding)
         case .scrollGeometry(let observer): return .scrollGeometry(observer)
         case .geometryObserver(let observer): return .geometryObserver(observer)
         case .refreshable(let action): return .refreshable(action)
@@ -4642,6 +4655,26 @@ public extension _OpenView {
 
     func scrollTargetLayout() -> some _OpenView {
         _OpenModifiedContent(content: self, modification: .effect)
+    }
+
+    /// The ID of the scroll target at `anchor` (default `.top`) of the
+    /// enclosing scroll view's viewport. Setting the binding scrolls that
+    /// target to the anchor; scrolling writes the target now at the anchor.
+    func scrollPosition<ID: Hashable>(id: Binding<ID?>, anchor: UnitPoint? = nil) -> some _OpenView {
+        _OpenModifiedContent(
+            content: self,
+            modification: .scrollPosition(
+                _OpenScrollPositionBinding(
+                    get: { id.wrappedValue.map(AnyHashable.init) },
+                    set: { value in
+                        let typed = value.flatMap { $0.base as? ID }
+                        if typed != id.wrappedValue { id.wrappedValue = typed }
+                    },
+                    anchor: anchor,
+                    matches: { $0.base is ID }
+                )
+            )
+        )
     }
 
     func onScrollTargetVisibilityChange<ID: Hashable>(
